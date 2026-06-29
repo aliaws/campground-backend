@@ -4,8 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Category extends Model
 {
@@ -13,22 +12,26 @@ class Category extends Model
 
     protected $fillable = [
         'name',
-        'parent_id',
+        'slug',
+        'image',
+        'sort_order',
+        'is_active',
         'tenant_id',
+        'engage_collection_id',
+        'engage_sync_status',
+        'engage_last_synced_at',
     ];
 
-    public function parent(): BelongsTo
+    protected function casts(): array
     {
-        return $this->belongsTo(Category::class, 'parent_id');
+        return [
+            'is_active' => 'boolean',
+            'engage_last_synced_at' => 'datetime',
+        ];
     }
 
-    public function children(): HasMany
+    public function products(): BelongsToMany
     {
-        return $this->hasMany(Category::class, 'parent_id');
-    }
-
-    public function products(): HasMany
-    {
-        return $this->hasMany(Product::class);
+        return $this->belongsToMany(Product::class, 'product_categories');
     }
 }

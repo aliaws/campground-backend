@@ -43,6 +43,16 @@ class GhlClient
         return $this->request('get', $endpoint, $query);
     }
 
+    public function delete(string $endpoint): array
+    {
+        return $this->request('delete', $endpoint);
+    }
+
+    public function getLocationId(): ?string
+    {
+        return $this->setting?->location_id;
+    }
+
     private function request(string $method, string $endpoint, array $data = []): array
     {
         if (!$this->accessToken) {

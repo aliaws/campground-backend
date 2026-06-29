@@ -12,20 +12,20 @@ class ProductVariation extends Model
 
     protected $fillable = [
         'product_id',
-        'name',
-        'sku',
-        'price_modifier',
+        'option_name',
+        'option_value',
+        'price_id',
+        'ghl_price_id',
+        'ghl_variation_option_id',
     ];
-
-    protected function casts(): array
-    {
-        return [
-            'price_modifier' => 'decimal:2',
-        ];
-    }
 
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function price(): BelongsTo
+    {
+        return $this->belongsTo(ProductPrice::class, 'price_id');
     }
 }

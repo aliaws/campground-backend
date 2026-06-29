@@ -13,6 +13,7 @@ class AmenityResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'icon' => $this->icon,
+            'is_active' => $this->is_active,
             'created_at' => $this->created_at,
         ];
     }

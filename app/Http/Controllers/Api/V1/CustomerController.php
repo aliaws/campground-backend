@@ -10,6 +10,7 @@ use App\Models\Customer;
 use App\Services\GhlService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
@@ -29,6 +30,10 @@ class CustomerController extends Controller
             });
         }
 
+        if ($request->ghl_sync_status) {
+            $query->where('ghl_sync_status', $request->ghl_sync_status);
+        }
+
         $customers = $query->orderBy('created_at', 'desc')->paginate($request->per_page ?? 15);
 
         return response()->json([
@@ -40,12 +45,14 @@ class CustomerController extends Controller
 
     public function store(StoreCustomerRequest $request): JsonResponse
     {
-        $customer = Customer::create($request->validated());
+        $customer = Customer::create(
+            $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+        );
 
         try {
             $this->ghlService->syncContactToGhl($customer);
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('GHL sync failed for new customer', [
+            Log::error('GHL sync failed for new customer', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -72,9 +79,9 @@ class CustomerController extends Controller
         $customer->update($request->validated());
 
         try {
-            $this->ghlService->updateContactInGhl($customer);
+            $this->ghlService->syncContactToGhl($customer->fresh());
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('GHL sync failed for customer update', [
+            Log::error('GHL sync failed for customer update', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -91,9 +98,35 @@ class CustomerController extends Controller
     {
         $customer->delete();
 
+        return response()->json(['success' => true, 'message' => 'Customer deleted.']);
+    }
+
+    public function syncToGhl(Customer $customer): JsonResponse
+    {
+        try {
+            $this->ghlService->syncContactToGhl($customer);
+
+            return response()->json([
+                'success' => true,
+                'data' => new CustomerResource($customer->fresh()),
+                'message' => 'Customer synced to GHL.',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sync failed: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function bulkSync(Request $request): JsonResponse
+    {
+        $results = $this->ghlService->bulkSyncContacts($request->user()->tenant_id);
+
         return response()->json([
             'success' => true,
-            'message' => 'Customer deleted.',
+            'data' => $results,
+            'message' => "Synced {$results['synced']} contacts, {$results['errors']} errors.",
         ]);
     }
 }

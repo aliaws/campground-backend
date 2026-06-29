@@ -17,8 +17,7 @@ class StoreCustomerRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
-            'address' => ['nullable', 'json'],
-            'tenant_id' => ['required', 'string', 'max:26'],
+            'address' => ['nullable'],
         ];
     }
 }

@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -15,51 +14,48 @@ class Product extends Model
 
     protected $fillable = [
         'name',
-        'type',
-        'sub_type',
-        'category_id',
-        'base_price',
-        'stock_qty',
-        'capacity',
-        'location',
-        'rental_duration_unit',
-        'min_rental_duration',
-        'max_rental_duration',
+        'product_type',
+        'description',
+        'sku',
         'status',
-        'image_url',
+        'is_variable',
+        'available_in_store',
+        'image',
+        'thumbnail',
+        'medias',
+        'display_priority',
+        'tax_inclusive',
+        'is_taxes_enabled',
+        'site_type',
+        'capacity',
+        'available_quantity',
+        'hookups',
+        'map_position',
+        'map_polygon',
+        'pet_friendly',
+        'ada_accessible',
+        'campsite_status',
         'tenant_id',
+        'engage_product_id',
+        'engage_sync_status',
+        'engage_last_synced_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'base_price' => 'decimal:2',
+            'medias' => 'json',
+            'hookups' => 'json',
+            'map_position' => 'json',
+            'map_polygon' => 'json',
+            'is_variable' => 'boolean',
+            'available_in_store' => 'boolean',
+            'tax_inclusive' => 'boolean',
+            'is_taxes_enabled' => 'boolean',
+            'pet_friendly' => 'boolean',
+            'ada_accessible' => 'boolean',
+            'engage_last_synced_at' => 'datetime',
         ];
-    }
-
-    public function scopeCampsites($query)
-    {
-        return $query->where('type', 'rental')->where('sub_type', 'campsite');
-    }
-
-    public function scopeRentals($query)
-    {
-        return $query->where('type', 'rental');
-    }
-
-    public function scopePhysical($query)
-    {
-        return $query->where('type', 'physical');
-    }
-
-    public function scopeService($query)
-    {
-        return $query->where('type', 'service');
-    }
-
-    public function scopeAddon($query)
-    {
-        return $query->where('type', 'addon');
     }
 
     public function scopeByTenant($query, string $tenantId)
@@ -67,9 +63,24 @@ class Product extends Model
         return $query->where('tenant_id', $tenantId);
     }
 
-    public function category(): BelongsTo
+    public function scopeService($query)
     {
-        return $this->belongsTo(Category::class);
+        return $query->where('product_type', 'SERVICE');
+    }
+
+    public function scopePhysical($query)
+    {
+        return $query->where('product_type', 'PHYSICAL');
+    }
+
+    public function scopeDigital($query)
+    {
+        return $query->where('product_type', 'DIGITAL');
+    }
+
+    public function categories(): BelongsToMany
+    {
+        return $this->belongsToMany(Category::class, 'product_categories');
     }
 
     public function prices(): HasMany
@@ -102,18 +113,18 @@ class Product extends Model
         return $this->hasMany(TransactionItem::class);
     }
 
-    public function isCampsite(): bool
+    public function isService(): bool
     {
-        return $this->type === 'rental' && $this->sub_type === 'campsite';
-    }
-
-    public function isRental(): bool
-    {
-        return $this->type === 'rental';
+        return $this->product_type === 'SERVICE';
     }
 
     public function isPhysical(): bool
     {
-        return $this->type === 'physical';
+        return $this->product_type === 'PHYSICAL';
+    }
+
+    public function isDigital(): bool
+    {
+        return $this->product_type === 'DIGITAL';
     }
 }

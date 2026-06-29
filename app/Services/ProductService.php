@@ -20,43 +20,76 @@ class ProductService
             $query->byTenant($filters['tenant_id']);
         }
 
-        if (!empty($filters['type'])) {
-            $query->where('type', $filters['type']);
-        }
-
-        if (!empty($filters['sub_type'])) {
-            $query->where('sub_type', $filters['sub_type']);
+        if (!empty($filters['product_type'])) {
+            $query->where('product_type', $filters['product_type']);
         }
 
         if (!empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
 
-        if (!empty($filters['category_id'])) {
-            $query->where('category_id', $filters['category_id']);
+        if (!empty($filters['engage_sync_status'])) {
+            $query->where('engage_sync_status', $filters['engage_sync_status']);
         }
 
         if (!empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {
                 $q->where('name', 'like', "%{$filters['search']}%")
-                  ->orWhere('location', 'like', "%{$filters['search']}%");
+                  ->orWhere('sku', 'like', "%{$filters['search']}%")
+                  ->orWhere('description', 'like', "%{$filters['search']}%");
             });
         }
 
-        return $query->with(['category', 'prices', 'variations'])
+        return $query->with(['categories', 'prices', 'variations', 'amenities', 'features'])
+            ->orderBy('display_priority', 'asc')
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
 
     public function create(array $data): Product
     {
-        return Product::create($data);
+        $categoryIds = $data['category_ids'] ?? [];
+        $amenityIds = $data['amenity_ids'] ?? [];
+        $featureIds = $data['feature_ids'] ?? [];
+
+        unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids']);
+
+        $product = Product::create($data);
+
+        if (!empty($categoryIds)) {
+            $product->categories()->sync($categoryIds);
+        }
+        if (!empty($amenityIds)) {
+            $product->amenities()->sync($amenityIds);
+        }
+        if (!empty($featureIds)) {
+            $product->features()->sync($featureIds);
+        }
+
+        return $product->load(['categories', 'prices', 'variations', 'amenities', 'features']);
     }
 
     public function update(Product $product, array $data): Product
     {
+        $categoryIds = $data['category_ids'] ?? null;
+        $amenityIds = $data['amenity_ids'] ?? null;
+        $featureIds = $data['feature_ids'] ?? null;
+
+        unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids']);
+
         $product->update($data);
-        return $product->fresh();
+
+        if ($categoryIds !== null) {
+            $product->categories()->sync($categoryIds);
+        }
+        if ($amenityIds !== null) {
+            $product->amenities()->sync($amenityIds);
+        }
+        if ($featureIds !== null) {
+            $product->features()->sync($featureIds);
+        }
+
+        return $product->fresh()->load(['categories', 'prices', 'variations', 'amenities', 'features']);
     }
 
     public function delete(Product $product): bool
@@ -67,7 +100,7 @@ class ProductService
     public function uploadImage(Product $product, UploadedFile $image): Product
     {
         $path = $image->store('products', 'public');
-        $product->update(['image_url' => Storage::url($path)]);
+        $product->update(['image' => Storage::url($path)]);
         return $product->fresh();
     }
 
@@ -76,14 +109,36 @@ class ProductService
         return $product->prices()->create($data);
     }
 
+    public function updatePrice(ProductPrice $price, array $data): ProductPrice
+    {
+        $price->update($data);
+        return $price->fresh();
+    }
+
+    public function deletePrice(ProductPrice $price): bool
+    {
+        return $price->delete();
+    }
+
     public function addVariation(Product $product, array $data): ProductVariation
     {
         return $product->variations()->create($data);
     }
 
+    public function updateVariation(ProductVariation $variation, array $data): ProductVariation
+    {
+        $variation->update($data);
+        return $variation->fresh();
+    }
+
+    public function deleteVariation(ProductVariation $variation): bool
+    {
+        return $variation->delete();
+    }
+
     public function getAvailableCampsites(string $tenantId, ?string $checkIn = null, ?string $checkOut = null): LengthAwarePaginator
     {
-        $query = Product::campsites()->byTenant($tenantId)->where('status', 'available');
+        $query = Product::service()->byTenant($tenantId)->where('campsite_status', 'available');
 
         if ($checkIn && $checkOut) {
             $bookedIds = \App\Models\Reservation::where('status', '!=', 'cancelled')
@@ -100,7 +155,7 @@ class ProductService
             $query->whereNotIn('id', $bookedIds);
         }
 
-        return $query->with(['category', 'amenities', 'features', 'prices'])
+        return $query->with(['categories', 'amenities', 'features', 'prices'])
             ->paginate(50);
     }
 }
