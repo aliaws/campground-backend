@@ -50,6 +50,15 @@ class StoreProductRequest extends FormRequest
             'amenity_ids.*' => ['string', 'exists:amenities,id'],
             'feature_ids' => ['nullable', 'array'],
             'feature_ids.*' => ['string', 'exists:features,id'],
+            // Variants
+            'variants' => ['nullable', 'array'],
+            'variants.*.id' => ['nullable', 'string'],
+            'variants.*.name' => ['required_with:variants', 'string', 'max:100'],
+            'variants.*.position' => ['nullable', 'integer', 'min:0'],
+            'variants.*.options' => ['nullable', 'array'],
+            'variants.*.options.*.id' => ['nullable', 'string'],
+            'variants.*.options.*.name' => ['required_with:variants.*.options', 'string', 'max:100'],
+            'variants.*.options.*.position' => ['nullable', 'integer', 'min:0'],
         ];
     }
 }

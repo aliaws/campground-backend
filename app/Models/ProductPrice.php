@@ -15,8 +15,9 @@ class ProductPrice extends Model
         'name',
         'type',
         'amount',
+        'compare_at_price',
         'currency',
-        'variation_id',
+        'variant_option_ids',
         'track_inventory',
         'available_quantity',
         'recurring_interval',
@@ -32,6 +33,8 @@ class ProductPrice extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'compare_at_price' => 'decimal:2',
+            'variant_option_ids' => 'json',
             'track_inventory' => 'boolean',
             'deleted' => 'boolean',
         ];
@@ -40,10 +43,5 @@ class ProductPrice extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
-    }
-
-    public function variation(): BelongsTo
-    {
-        return $this->belongsTo(ProductVariation::class, 'variation_id');
     }
 }

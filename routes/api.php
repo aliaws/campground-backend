@@ -42,20 +42,15 @@ Route::prefix('v1')->group(function () {
         Route::get('/products/{product}/prices', [ProductController::class, 'prices']);
         Route::post('/products/{product}/prices', [ProductController::class, 'storePrice']);
         Route::put('/products/{product}/prices/{price}', [ProductController::class, 'updatePrice']);
-        Route::delete('/products/{product}/prices/{price}', [ProductController::class, 'destroyPrice']);
-
-        // Product variations
-        Route::get('/products/{product}/variations', [ProductController::class, 'variations']);
-        Route::post('/products/{product}/variations', [ProductController::class, 'storeVariation']);
-        Route::put('/products/{product}/variations/{variation}', [ProductController::class, 'updateVariation']);
-        Route::delete('/products/{product}/variations/{variation}', [ProductController::class, 'destroyVariation']);
 
         // Product categories
         Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
 
         // Product GHL sync
         Route::post('/products/{product}/sync-ghl', [ProductController::class, 'syncToGhl']);
+        Route::post('/products/{product}/pull-ghl', [ProductController::class, 'pullFromGhl']);
         Route::post('/products/bulk-sync-ghl', [ProductController::class, 'bulkSync']);
+        Route::post('/products/bulk-pull-ghl', [ProductController::class, 'bulkPull']);
 
         // Customers
         Route::get('/customers', [CustomerController::class, 'index']);

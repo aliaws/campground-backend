@@ -24,8 +24,7 @@ class GhlService
         $firstName = $nameParts[0] ?? '';
         $lastName = $nameParts[1] ?? '';
 
-        $payload = [
-            'locationId' => $locationId,
+        $sharedFields = [
             'firstName' => $firstName,
             'lastName' => $lastName,
             'name' => $customer->name,
@@ -35,18 +34,19 @@ class GhlService
 
         if ($customer->address && is_array($customer->address)) {
             $addr = $customer->address;
-            if (!empty($addr['line1'])) $payload['address1'] = $addr['line1'];
-            if (!empty($addr['city'])) $payload['city'] = $addr['city'];
-            if (!empty($addr['state'])) $payload['state'] = $addr['state'];
-            if (!empty($addr['postal_code'])) $payload['postalCode'] = $addr['postal_code'];
-            if (!empty($addr['country'])) $payload['country'] = $addr['country'];
+            if (!empty($addr['line1'])) $sharedFields['address1'] = $addr['line1'];
+            if (!empty($addr['city'])) $sharedFields['city'] = $addr['city'];
+            if (!empty($addr['state'])) $sharedFields['state'] = $addr['state'];
+            if (!empty($addr['postal_code'])) $sharedFields['postalCode'] = $addr['postal_code'];
+            if (!empty($addr['country'])) $sharedFields['country'] = $addr['country'];
         }
 
         try {
             if ($customer->ghl_contact_id) {
-                $response = $this->client->put("contacts/{$customer->ghl_contact_id}", $payload);
+                // PUT does not accept locationId
+                $response = $this->client->put("contacts/{$customer->ghl_contact_id}", $sharedFields);
 
-                $this->logOutbound('contact.updated', $payload, $response);
+                $this->logOutbound('contact.updated', $sharedFields, $response);
 
                 $customer->update([
                     'ghl_sync_status' => 'synced',
@@ -56,9 +56,11 @@ class GhlService
                 return $customer->ghl_contact_id;
             }
 
-            $response = $this->client->post('contacts/', $payload);
+            // POST requires locationId to identify the sub-account
+            $createPayload = array_merge(['locationId' => $locationId], $sharedFields);
+            $response = $this->client->post('contacts/', $createPayload);
 
-            $this->logOutbound('contact.created', $payload, $response);
+            $this->logOutbound('contact.created', $createPayload, $response);
 
             $ghlId = $response['contact']['id']
                 ?? $response['id']
@@ -77,14 +79,37 @@ class GhlService
 
             return $ghlId;
         } catch (\Exception $e) {
+            // GHL returns 400 when a contact with the same phone/email already exists.
+            // Extract the existing contact's ID from the error response and link it.
+            $message = $e->getMessage();
+            if (str_contains($message, 'duplicated contacts') || str_contains($message, '400')) {
+                preg_match('/"contactId"\s*:\s*"([^"]+)"/', $message, $matches);
+                $existingId = $matches[1] ?? null;
+
+                if ($existingId) {
+                    Log::info('GHL contact already exists, linking', [
+                        'customer_id' => $customer->id,
+                        'ghl_contact_id' => $existingId,
+                    ]);
+
+                    $customer->update([
+                        'ghl_contact_id' => $existingId,
+                        'ghl_sync_status' => 'synced',
+                        'ghl_last_synced_at' => now(),
+                    ]);
+
+                    return $existingId;
+                }
+            }
+
             Log::error('GHL contact sync failed', [
                 'customer_id' => $customer->id,
-                'error' => $e->getMessage(),
+                'error' => $message,
             ]);
 
             $customer->update(['ghl_sync_status' => 'error']);
 
-            $this->logOutbound('contact.sync_failed', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('contact.sync_failed', $sharedFields, ['error' => $message]);
             throw $e;
         }
     }

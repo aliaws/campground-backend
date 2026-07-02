@@ -86,6 +86,57 @@ class GhlClient
         return $response->json();
     }
 
+    /**
+     * Upload a file to GHL's media library.
+     * Uses multipart/form-data — NOT JSON.
+     *
+     * Required headers: Authorization: Bearer {token}, Version: 2021-07-28
+     * Required form fields: file (binary), hosted="true", locationId
+     *
+     * GHL response shape:
+     *   { "uploadedFiles": { "filename.jpg": "https://assets.cdn.filesafe.space/..." } }
+     */
+    public function uploadFile(string $filePath, string $filename, string $mimeType = 'application/octet-stream'): array
+    {
+        if (! $this->accessToken) {
+            throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
+        }
+
+        $locationId = $this->getLocationId();
+
+        $headers = [
+            'Authorization' => "Bearer {$this->accessToken}",
+            'Version'       => $this->setting?->api_version ?: '2021-07-28',
+            'Accept'        => 'application/json',
+        ];
+
+        $fileContents = file_get_contents($filePath);
+        $formFields   = [
+            'hosted'     => 'true',
+            'locationId' => $locationId,
+        ];
+
+        $response = Http::withHeaders($headers)
+            ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
+            ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
+
+        if ($response->status() === 401 && $this->setting?->refresh_token) {
+            $this->refreshToken();
+            $headers['Authorization'] = "Bearer {$this->accessToken}";
+            $response = Http::withHeaders($headers)
+                ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
+                ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
+        }
+
+        if ($response->failed()) {
+            throw new \RuntimeException(
+                "GHL media upload error: {$response->status()} - {$response->body()}"
+            );
+        }
+
+        return $response->json() ?? [];
+    }
+
     private function refreshToken(): void
     {
         try {

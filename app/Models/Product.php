@@ -36,6 +36,9 @@ class Product extends Model
         'ada_accessible',
         'campsite_status',
         'tenant_id',
+        'slug',
+        'track_product_inventory',
+        'ghl_image_url',
         'engage_product_id',
         'engage_sync_status',
         'engage_last_synced_at',
@@ -54,9 +57,12 @@ class Product extends Model
             'is_taxes_enabled' => 'boolean',
             'pet_friendly' => 'boolean',
             'ada_accessible' => 'boolean',
+            'track_product_inventory' => 'boolean',
             'engage_last_synced_at' => 'datetime',
         ];
     }
+
+    // ── Scopes ────────────────────────────────────────────────────────────────
 
     public function scopeByTenant($query, string $tenantId)
     {
@@ -78,6 +84,8 @@ class Product extends Model
         return $query->where('product_type', 'DIGITAL');
     }
 
+    // ── Relations ─────────────────────────────────────────────────────────────
+
     public function categories(): BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'product_categories');
@@ -88,9 +96,16 @@ class Product extends Model
         return $this->hasMany(ProductPrice::class);
     }
 
-    public function variations(): HasMany
+    /** Variant groups (e.g. "Size", "Color") */
+    public function variants(): HasMany
     {
-        return $this->hasMany(ProductVariation::class);
+        return $this->hasMany(ProductVariant::class)->orderBy('position');
+    }
+
+    /** All variant options across all variant groups — convenience shortcut */
+    public function variantOptions(): HasMany
+    {
+        return $this->hasMany(ProductVariantOption::class);
     }
 
     public function amenities(): BelongsToMany
@@ -112,6 +127,8 @@ class Product extends Model
     {
         return $this->hasMany(TransactionItem::class);
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     public function isService(): bool
     {
