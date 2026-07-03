@@ -16,9 +16,18 @@ class Reservation extends Model
         'product_id',
         'check_in_date',
         'check_out_date',
+        'quantity',
+        'base_amount',
+        'discount_amount',
         'total_amount',
+        'security_deposit_amount',
+        'price_breakdown',
         'status',
         'ghl_opportunity_id',
+        'ghl_booking_id',
+        'ghl_invoice_id',
+        'ghl_invoice_number',
+        'ghl_invoice_status',
         'tenant_id',
     ];
 
@@ -27,7 +36,12 @@ class Reservation extends Model
         return [
             'check_in_date' => 'date',
             'check_out_date' => 'date',
+            'quantity' => 'integer',
+            'base_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
+            'security_deposit_amount' => 'decimal:2',
+            'price_breakdown' => 'json',
         ];
     }
 

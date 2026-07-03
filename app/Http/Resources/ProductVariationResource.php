@@ -12,10 +12,14 @@ class ProductVariationResource extends JsonResource
         return [
             'id' => $this->id,
             'product_id' => $this->product_id,
-            'name' => $this->name,
-            'sku' => $this->sku,
-            'price_modifier' => (float) $this->price_modifier,
+            'option_name' => $this->option_name,
+            'option_value' => $this->option_value,
+            'price_id' => $this->price_id,
+            'price' => new ProductPriceResource($this->whenLoaded('price')),
+            'ghl_price_id' => $this->ghl_price_id,
+            'ghl_variation_option_id' => $this->ghl_variation_option_id,
             'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
         ];
     }
 }

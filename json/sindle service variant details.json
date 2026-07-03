@@ -1,0 +1,198 @@
+{
+    "service": {
+        "isActive": true,
+        "deleted": false,
+        "isPrivate": false,
+        "_id": "6a4642b21a2c4582d7da99e0",
+        "serviceDuration": 0,
+        "serviceDurationUnit": "day",
+        "industryType": "rental",
+        "name": "Pine Ridge Family Campsite",
+        "slug": "300---forest-edge-tent-copy",
+        "description": "<p style=\"margin:0px;color:#10182899; margin: 0px;color: #10182899;\">Enjoy a peaceful camping experience at Pine Ridge Family Campsite. This spacious campsite accommodates up to 6 guests and includes a fire pit, picnic table, nearby restrooms, potable water, and access to hiking trails. Perfect for families, couples, and outdoor enthusiasts.</p>",
+        "coverImage": "https://msgsndr-private.storage.googleapis.com/services-logo/120e1357-7ad7-4bb8-a6e8-44f86cbe8d9f.jpg",
+        "eventColor": "#66C61C",
+        "locationId": "Ot9iyC7HpdN291xRtr6m",
+        "bookingUnit": "day",
+        "quantity": 2,
+        "maxQuantity": 1,
+        "images": [
+            {
+                "_id": "6a465e3d75f3781a779df040",
+                "url": "https://msgsndr-private.storage.googleapis.com/services-logo/120e1357-7ad7-4bb8-a6e8-44f86cbe8d9f.jpg",
+                "name": "Image 1",
+                "position": 0
+            }
+        ],
+        "serviceCategoryId": "6952b37f7931bd505749c9ed",
+        "payment": {
+            "amount": 23
+        },
+        "variantName": "Exclusive",
+        "isVariantsEnabled": false,
+        "serviceDurations": [],
+        "customAttributes": [],
+        "createdAt": "2026-01-14T00:14:36.769Z",
+        "updatedAt": "2026-07-02T12:49:01.404Z",
+        "__v": 0,
+        "allowBookingAfter": 3,
+        "allowBookingAfterUnit": "day",
+        "allowBookingFor": 3,
+        "allowBookingForUnit": "month",
+        "bookingPeriodType": "date-selection",
+        "formId": "",
+        "hasQuantityEnabled": true,
+        "maxDuration": 30,
+        "maxDurationUnit": "day",
+        "minDuration": 1,
+        "minDurationUnit": "day",
+        "postBuffer": 2,
+        "postBufferUnit": "hour",
+        "preBuffer": 2,
+        "preBufferUnit": "hour",
+        "useCustomForm": true,
+        "variantId": "6966e6a92c860677c2fab136",
+        "productId": "6a4642b3c8e4bb0514c75f5d",
+        "bookingEndTime": "17:00",
+        "bookingStartTime": "09:00",
+        "hasTimeSelection": false,
+        "isVariant": true,
+        "intermission": [],
+        "position": 1,
+        "variants": [
+            {
+                "serviceDuration": 0,
+                "serviceDurationUnit": "day",
+                "name": "Pine Ridge Family Campsite",
+                "variantName": "Exclusive",
+                "payment": {
+                    "amount": 23
+                },
+                "id": "6a4642b21a2c4582d7da99e0",
+                "position": 1,
+                "variantId": "6a4642b21a2c4582d7da99e0",
+                "preBuffer": 2,
+                "postBuffer": 2,
+                "preBufferUnit": "hour",
+                "postBufferUnit": "hour",
+                "productId": "6a4642b3c8e4bb0514c75f5d"
+            }
+        ],
+        "teamMembers": [],
+        "resources": [],
+        "addOns": [],
+        "locations": [],
+        "pricingRule": {
+            "id": "d8OEstI6m1mZtk0JOsfJ",
+            "name": "Exclusive Pricing",
+            "targetId": "6a4642b21a2c4582d7da99e0",
+            "appliesTo": "rental",
+            "basePrice": {
+                "value": 23,
+                "strategy": "per_day"
+            },
+            "rules": [
+                {
+                    "type": "date_range",
+                    "match": {
+                        "from": "2026-07-09",
+                        "to": "2026-07-16"
+                    },
+                    "value": 25,
+                    "valueType": "flat",
+                    "sequence": 1
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 1
+                    },
+                    "value": 2,
+                    "valueType": "percentage",
+                    "sequence": 2
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 2
+                    },
+                    "value": 2,
+                    "valueType": "percentage",
+                    "sequence": 3
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 3
+                    },
+                    "value": 3,
+                    "valueType": "percentage",
+                    "sequence": 4
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 4
+                    },
+                    "value": 4,
+                    "valueType": "percentage",
+                    "sequence": 5
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 5
+                    },
+                    "value": 9,
+                    "valueType": "percentage",
+                    "sequence": 6
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 6
+                    },
+                    "value": 2,
+                    "valueType": "percentage",
+                    "sequence": 7
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 0
+                    },
+                    "value": 20,
+                    "valueType": "percentage",
+                    "sequence": 8
+                },
+                {
+                    "type": "duration_discount",
+                    "match": {
+                        "duration": 5,
+                        "durationUnit": "day"
+                    },
+                    "value": 20,
+                    "valueType": "percentage",
+                    "sequence": 9
+                },
+                {
+                    "type": "quantity_discount",
+                    "match": {
+                        "min": 10
+                    },
+                    "value": 20,
+                    "valueType": "percentage",
+                    "sequence": 10
+                }
+            ],
+            "priority": 1,
+            "dateAdded": "2026-07-02T10:51:30.966Z",
+            "dateUpdated": "2026-07-02T12:49:01.568Z",
+            "locationId": "Ot9iyC7HpdN291xRtr6m",
+            "securityDeposit": {
+                "amount": 25
+            }
+        }
+    },
+    "traceId": "ec0bf0b9-715e-4c80-8e76-b10537663b82"
+}

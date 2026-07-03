@@ -39,6 +39,7 @@ yarn-error.log*
 .phpunit.result.cache
 .phpunit.cache/
 
+json/
 # Misc
 Homestead.json
 Homestead.yaml

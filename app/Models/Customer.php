@@ -17,6 +17,8 @@ class Customer extends Model
         'phone',
         'address',
         'ghl_contact_id',
+        'ghl_sync_status',
+        'ghl_last_synced_at',
         'tenant_id',
     ];
 
@@ -24,6 +26,7 @@ class Customer extends Model
     {
         return [
             'address' => 'json',
+            'ghl_last_synced_at' => 'datetime',
         ];
     }
 

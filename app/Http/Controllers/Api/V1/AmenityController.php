@@ -7,6 +7,7 @@ use App\Http\Requests\StoreAmenityRequest;
 use App\Http\Resources\AmenityResource;
 use App\Models\Amenity;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AmenityController extends Controller
 {
@@ -28,5 +29,30 @@ class AmenityController extends Controller
             'data' => new AmenityResource($amenity),
             'message' => 'Amenity created.',
         ], 201);
+    }
+
+    public function update(Request $request, Amenity $amenity): JsonResponse
+    {
+        $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'icon' => ['nullable', 'string', 'max:255'],
+            'is_active' => ['nullable', 'boolean'],
+        ]);
+
+        $amenity->update($request->only(['name', 'icon', 'is_active']));
+
+        return response()->json([
+            'success' => true,
+            'data' => new AmenityResource($amenity->fresh()),
+            'message' => 'Amenity updated.',
+        ]);
+    }
+
+    public function destroy(Amenity $amenity): JsonResponse
+    {
+        $amenity->products()->detach();
+        $amenity->delete();
+
+        return response()->json(['success' => true, 'message' => 'Amenity deleted.']);
     }
 }

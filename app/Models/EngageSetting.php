@@ -16,6 +16,7 @@ class EngageSetting extends Model
         'client_secret',
         'api_version',
         'api_base_url',
+        'timezone',
         'user_id',
         'company_id',
         'api_key',
@@ -42,7 +43,7 @@ class EngageSetting extends Model
 
     public function isTokenExpired(): bool
     {
-        if (!$this->token_expiry) {
+        if (! $this->token_expiry) {
             return true;
         }
 
