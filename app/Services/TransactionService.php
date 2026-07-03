@@ -4,41 +4,44 @@ namespace App\Services;
 
 use App\Models\Reservation;
 use App\Models\Transaction;
-use App\Models\TransactionItem;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class TransactionService
 {
+    public function __construct(
+        private GhlBookingService $ghlBookingService,
+    ) {}
     public function list(array $filters = []): LengthAwarePaginator
     {
         $query = Transaction::query();
 
-        if (!empty($filters['tenant_id'])) {
+        if (! empty($filters['tenant_id'])) {
             $query->where('tenant_id', $filters['tenant_id']);
         }
 
-        if (!empty($filters['payment_status'])) {
+        if (! empty($filters['payment_status'])) {
             $query->where('payment_status', $filters['payment_status']);
         }
 
-        if (!empty($filters['payment_method'])) {
+        if (! empty($filters['payment_method'])) {
             $query->where('payment_method', $filters['payment_method']);
         }
 
-        if (!empty($filters['invoice_status'])) {
+        if (! empty($filters['invoice_status'])) {
             $query->where('invoice_status', $filters['invoice_status']);
         }
 
-        if (!empty($filters['customer_id'])) {
+        if (! empty($filters['customer_id'])) {
             $query->where('customer_id', $filters['customer_id']);
         }
 
-        if (!empty($filters['date_from'])) {
+        if (! empty($filters['date_from'])) {
             $query->where('transaction_date', '>=', $filters['date_from']);
         }
 
-        if (!empty($filters['date_to'])) {
+        if (! empty($filters['date_to'])) {
             $query->where('transaction_date', '<=', $filters['date_to']);
         }
 
@@ -96,11 +99,13 @@ class TransactionService
                 'tenant_id' => $reservation->tenant_id,
             ]);
 
+            $quantity = max((int) ($reservation->quantity ?? 1), 1);
+
             $transaction->items()->create([
                 'product_id' => $reservation->product_id,
                 'product_type' => 'rental',
-                'quantity' => 1,
-                'unit_price' => $reservation->total_amount,
+                'quantity' => $quantity,
+                'unit_price' => round($reservation->total_amount / $quantity, 2),
                 'rental_start' => $reservation->check_in_date,
                 'rental_end' => $reservation->check_out_date,
             ]);
@@ -115,8 +120,36 @@ class TransactionService
 
         if ($status === 'paid') {
             $transaction->update(['invoice_status' => 'completed']);
+            $this->syncGhlInvoicePayment($transaction);
         }
 
         return $transaction->fresh()->load(['customer', 'items.product', 'reservation']);
+    }
+
+    private function syncGhlInvoicePayment(Transaction $transaction): void
+    {
+        $transaction->loadMissing('reservation');
+
+        $reservation = $transaction->reservation;
+        if (! $reservation?->ghl_invoice_id) {
+            return;
+        }
+
+        try {
+            $amount = (float) $transaction->total_amount + (float) ($reservation->security_deposit_amount ?? 0);
+
+            $this->ghlBookingService->recordInvoicePayment(
+                $reservation,
+                $amount,
+                $transaction->payment_method,
+            );
+        } catch (\Exception $e) {
+            Log::error('GHL invoice payment recording failed', [
+                'transaction_id' => $transaction->id,
+                'reservation_id' => $reservation->id,
+                'ghl_invoice_id' => $reservation->ghl_invoice_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

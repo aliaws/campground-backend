@@ -30,7 +30,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => ProductResource::collection($products),
+            'data' => ProductResource::collection($products),
             'message' => 'Products retrieved.',
         ]);
     }
@@ -43,7 +43,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductResource($product),
+            'data' => new ProductResource($product),
             'message' => 'Product created.',
         ], 201);
     }
@@ -54,7 +54,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductResource($product),
+            'data' => new ProductResource($product),
             'message' => 'Product retrieved.',
         ]);
     }
@@ -65,7 +65,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductResource($product),
+            'data' => new ProductResource($product),
             'message' => 'Product updated.',
         ]);
     }
@@ -84,7 +84,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductResource($product),
+            'data' => new ProductResource($product),
             'message' => 'Product image updated.',
         ]);
     }
@@ -101,7 +101,7 @@ class ProductController extends Controller
             $search = $request->input('search');
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhereHas('product', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
+                    ->orWhereHas('product', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
             });
         }
 
@@ -109,28 +109,28 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $prices->map(fn ($p) => [
-                'id'                       => $p->id,
-                'name'                     => $p->name,
-                'type'                     => $p->type,
-                'amount'                   => (float) $p->amount,
-                'compare_at_price'         => $p->compare_at_price !== null ? (float) $p->compare_at_price : null,
-                'currency'                 => $p->currency,
-                'variant_option_ids'       => $p->variant_option_ids,
-                'track_inventory'          => $p->track_inventory,
-                'available_quantity'       => $p->available_quantity,
-                'recurring_interval'       => $p->recurring_interval,
+            'data' => $prices->map(fn ($p) => [
+                'id' => $p->id,
+                'name' => $p->name,
+                'type' => $p->type,
+                'amount' => (float) $p->amount,
+                'compare_at_price' => $p->compare_at_price !== null ? (float) $p->compare_at_price : null,
+                'currency' => $p->currency,
+                'variant_option_ids' => $p->variant_option_ids,
+                'track_inventory' => $p->track_inventory,
+                'available_quantity' => $p->available_quantity,
+                'recurring_interval' => $p->recurring_interval,
                 'recurring_interval_count' => $p->recurring_interval_count,
-                'sku'                      => $p->sku,
-                'deleted'                  => $p->deleted,
-                'engage_price_id'          => $p->engage_price_id,
-                'engage_sync_status'       => $p->engage_sync_status,
-                'sync_error_message'       => $p->sync_error_message,
-                'product_id'               => $p->product_id,
-                'product_name'             => $p->product?->name,
-                'product_engage_id'        => $p->product?->engage_product_id,
-                'created_at'               => $p->created_at,
-                'updated_at'               => $p->updated_at,
+                'sku' => $p->sku,
+                'deleted' => $p->deleted,
+                'engage_price_id' => $p->engage_price_id,
+                'engage_sync_status' => $p->engage_sync_status,
+                'sync_error_message' => $p->sync_error_message,
+                'product_id' => $p->product_id,
+                'product_name' => $p->product?->name,
+                'product_engage_id' => $p->product?->engage_product_id,
+                'created_at' => $p->created_at,
+                'updated_at' => $p->updated_at,
             ]),
             'message' => 'All prices retrieved.',
         ]);
@@ -140,7 +140,7 @@ class ProductController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data'    => ProductPriceResource::collection(
+            'data' => ProductPriceResource::collection(
                 $product->prices()->where('deleted', false)->get()
             ),
             'message' => 'Prices retrieved.',
@@ -153,7 +153,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductPriceResource($price),
+            'data' => new ProductPriceResource($price),
             'message' => 'Price created.',
         ], 201);
     }
@@ -164,7 +164,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductPriceResource($price),
+            'data' => new ProductPriceResource($price),
             'message' => 'Price updated.',
         ]);
     }
@@ -174,7 +174,7 @@ class ProductController extends Controller
     public function attachCategories(Request $request, Product $product): JsonResponse
     {
         $request->validate([
-            'category_ids'   => ['required', 'array'],
+            'category_ids' => ['required', 'array'],
             'category_ids.*' => ['string', 'exists:categories,id'],
         ]);
 
@@ -182,7 +182,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => new ProductResource($product->fresh()->load('categories')),
+            'data' => new ProductResource($product->fresh()->load('categories')),
             'message' => 'Product categories updated.',
         ]);
     }
@@ -196,7 +196,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data'    => new ProductResource(
+                'data' => new ProductResource(
                     $product->load(['categories', 'prices', 'variants.options'])
                 ),
                 'message' => 'Product synced to GHL.',
@@ -204,7 +204,7 @@ class ProductController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Sync failed: ' . $e->getMessage(),
+                'message' => 'Sync failed: '.$e->getMessage(),
             ], 422);
         }
     }
@@ -216,13 +216,13 @@ class ProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data'    => new ProductResource($product),
+                'data' => new ProductResource($product),
                 'message' => 'Product pulled from GHL successfully.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Pull failed: ' . $e->getMessage(),
+                'message' => 'Pull failed: '.$e->getMessage(),
             ], 422);
         }
     }
@@ -233,7 +233,7 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $results,
+            'data' => $results,
             'message' => "Synced {$results['synced']} products, {$results['errors']} errors.",
         ]);
     }
@@ -244,8 +244,8 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $results,
-            'message' => "Pulled {$results['pulled']} products from GHL, {$results['errors']} errors.",
+            'data' => $results,
+            'message' => "Pulled {$results['pulled']} products from GHL ({$results['created']} new), {$results['errors']} errors.",
         ]);
     }
 }

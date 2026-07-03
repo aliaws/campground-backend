@@ -74,10 +74,24 @@ class TransactionController extends Controller
     {
         $transaction->load(['customer', 'items.product', 'reservation']);
 
+        $reservation = $transaction->reservation;
+        $ghlInvoice = null;
+
+        if ($reservation?->ghl_invoice_id) {
+            $ghlInvoice = [
+                'id' => $reservation->ghl_invoice_id,
+                'number' => $reservation->ghl_invoice_number,
+                'status' => $reservation->ghl_invoice_status,
+                'booking_id' => $reservation->ghl_booking_id,
+            ];
+        }
+
         $invoice = [
             'transaction' => new TransactionResource($transaction),
-            'invoice_number' => "INV-{$transaction->created_at->format('Ymd')}-{$transaction->id}",
-            'items' => $transaction->items->map(fn($item) => [
+            'invoice_number' => $reservation?->ghl_invoice_number
+                ?? "INV-{$transaction->created_at->format('Ymd')}-{$transaction->id}",
+            'ghl_invoice' => $ghlInvoice,
+            'items' => $transaction->items->map(fn ($item) => [
                 'product_name' => $item->product?->name ?? 'Unknown',
                 'product_type' => $item->product_type,
                 'quantity' => $item->quantity,

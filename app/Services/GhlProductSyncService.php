@@ -596,7 +596,21 @@ class GhlProductSyncService
 
     public function bulkPullFromGhl(string $tenantId): array
     {
-        $results = ['pulled' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
+
+        // Discover the full GHL catalog first, so brand-new GHL products get a
+        // local row too — not just ones we already know about.
+        try {
+            foreach ($this->fetchAllGhlProducts() as $ghlProduct) {
+                if ($this->createLocalStubIfMissing($ghlProduct, $tenantId)) {
+                    $results['created']++;
+                }
+            }
+        } catch (\Exception $e) {
+            $results['errors']++;
+            $results['error_details'][] = ['error' => 'GHL product list fetch failed: '.$e->getMessage()];
+            Log::error('GHL product list fetch failed', ['error' => $e->getMessage()]);
+        }
 
         $products = Product::byTenant($tenantId)
             ->whereNotNull('engage_product_id')
@@ -619,6 +633,68 @@ class GhlProductSyncService
         }
 
         return $results;
+    }
+
+    /** Fetch every product from GHL's catalog, paging until exhausted. */
+    private function fetchAllGhlProducts(): array
+    {
+        $locationId = $this->client->getLocationId();
+        $all = [];
+        $offset = 0;
+        $limit = 100;
+
+        do {
+            $response = $this->client->get('products/', [
+                'locationId' => $locationId,
+                'limit' => $limit,
+                'offset' => $offset,
+            ]);
+
+            $batch = $response['products'] ?? $response['data'] ?? [];
+            $all = array_merge($all, $batch);
+            $offset += $limit;
+        } while (count($batch) === $limit);
+
+        return $all;
+    }
+
+    /**
+     * Create a local row for a GHL product we don't know yet; the follow-up
+     * pullFromGhl pass fills in variants and prices. Returns true if created.
+     */
+    private function createLocalStubIfMissing(array $ghlProduct, string $tenantId): bool
+    {
+        $ghlId = $ghlProduct['_id'] ?? $ghlProduct['id'] ?? null;
+
+        if (! $ghlId) {
+            return false;
+        }
+
+        // withTrashed: don't resurrect products deleted locally on purpose
+        $exists = Product::withTrashed()
+            ->byTenant($tenantId)
+            ->where('engage_product_id', $ghlId)
+            ->exists();
+
+        if ($exists) {
+            return false;
+        }
+
+        $type = strtoupper($ghlProduct['productType'] ?? '');
+
+        Product::create([
+            'name' => $ghlProduct['name'] ?? 'Untitled',
+            'product_type' => in_array($type, ['PHYSICAL', 'DIGITAL', 'SERVICE']) ? $type : 'PHYSICAL',
+            'description' => $ghlProduct['description'] ?? null,
+            'status' => 'active',
+            'image' => $ghlProduct['image'] ?? null,
+            'available_in_store' => $ghlProduct['availableInStore'] ?? true,
+            'engage_product_id' => $ghlId,
+            'engage_sync_status' => 'pending',
+            'tenant_id' => $tenantId,
+        ]);
+
+        return true;
     }
 
     public function bulkSyncCategories(string $tenantId): array
@@ -802,7 +878,7 @@ class GhlProductSyncService
 
                     Log::info('GHL image upload response', [
                         'product_id' => $product->id,
-                        'response'   => $uploadResponse,
+                        'response' => $uploadResponse,
                     ]);
 
                     // GHL returns: { "uploadedFiles": { "filename.jpg": "https://cdn..." } }
@@ -820,7 +896,7 @@ class GhlProductSyncService
                 } catch (\Exception $e) {
                     Log::warning('GHL image upload failed — using fallback', [
                         'product_id' => $product->id,
-                        'error'      => $e->getMessage(),
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }

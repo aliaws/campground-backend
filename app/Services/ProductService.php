@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Storage;
 
 class ProductService
 {
-    private const EAGER = ['categories', 'prices', 'variants.options', 'amenities', 'features'];
+    private const EAGER = ['categories', 'prices', 'variants.options', 'amenities', 'features', 'serviceVariants'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -196,6 +196,88 @@ class ProductService
                 }
             }
         }
+    }
+
+    // ── Services storefront ───────────────────────────────────────────────────
+
+    /**
+     * Bookable services for the storefront: base SERVICE products (variants come
+     * nested), filtered by search/category/availability/price and sorted by the
+     * computed "from" price. Small per-tenant counts, so price filtering/sorting
+     * happens on the collection.
+     */
+    public function listServices(array $filters = []): LengthAwarePaginator
+    {
+        $query = Product::service()
+            ->byTenant($filters['tenant_id'])
+            ->whereNull('parent_product_id')
+            ->whereNotNull('ghl_service_id')
+            ->where('status', 'active')
+            ->with(['serviceVariants', 'categories', 'amenities', 'features', 'prices']);
+
+        if (! empty($filters['search'])) {
+            $query->where(function (Builder $q) use ($filters) {
+                $q->where('name', 'like', "%{$filters['search']}%")
+                    ->orWhere('description', 'like', "%{$filters['search']}%");
+            });
+        }
+
+        if (! empty($filters['category_id'])) {
+            $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
+        }
+
+        $services = $query->get();
+
+        if (! empty($filters['date_from']) && ! empty($filters['date_to'])) {
+            $services = $services->filter(
+                fn (Product $p) => $this->hasStockInWindow($p, $filters['date_from'], $filters['date_to'])
+            );
+        }
+
+        if (isset($filters['min_price']) && $filters['min_price'] !== '') {
+            $services = $services->filter(fn (Product $p) => ($p->fromPrice() ?? 0) >= (float) $filters['min_price']);
+        }
+
+        if (isset($filters['max_price']) && $filters['max_price'] !== '') {
+            $services = $services->filter(fn (Product $p) => ($p->fromPrice() ?? 0) <= (float) $filters['max_price']);
+        }
+
+        $services = match ($filters['sort'] ?? null) {
+            'price_asc' => $services->sortBy(fn (Product $p) => $p->fromPrice() ?? INF),
+            'price_desc' => $services->sortByDesc(fn (Product $p) => $p->fromPrice() ?? -INF),
+            default => $services->sortBy([['display_priority', 'asc'], ['created_at', 'desc']]),
+        };
+
+        $perPage = (int) ($filters['per_page'] ?? 15);
+        $page = max((int) ($filters['page'] ?? 1), 1);
+
+        return new LengthAwarePaginator(
+            $services->forPage($page, $perPage)->values(),
+            $services->count(),
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
+    /** True when the product (or any of its variants) still has stock in the window. */
+    private function hasStockInWindow(Product $product, string $from, string $to): bool
+    {
+        $candidates = collect([$product])->concat($product->serviceVariants);
+
+        return $candidates->contains(function (Product $p) use ($from, $to) {
+            if ($p->available_quantity === null) {
+                return true;
+            }
+
+            $booked = (int) Reservation::where('product_id', $p->id)
+                ->where('status', '!=', 'cancelled')
+                ->where('check_in_date', '<', $to)
+                ->where('check_out_date', '>', $from)
+                ->sum('quantity');
+
+            return $booked < $p->available_quantity;
+        });
     }
 
     // ── Available campsites ───────────────────────────────────────────────────

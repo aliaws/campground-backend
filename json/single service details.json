@@ -1,0 +1,200 @@
+{
+    "service": {
+        "isActive": true,
+        "deleted": false,
+        "isPrivate": false,
+        "_id": "6966e6a92c860677c2fab136",
+        "serviceDuration": 30,
+        "serviceDurationUnit": "day",
+        "industryType": "rental",
+        "name": "Pine Ridge Family Campsite",
+        "slug": "300---forest-edge-tent-copy",
+        "description": "<p style=\"margin:0px;color:#10182899; margin: 0px;color: #10182899;\">Enjoy a peaceful camping experience at Pine Ridge Family Campsite. This spacious campsite accommodates up to 6 guests and includes a fire pit, picnic table, nearby restrooms, potable water, and access to hiking trails. Perfect for families, couples, and outdoor enthusiasts.</p>",
+        "coverImage": "https://msgsndr-private.storage.googleapis.com/services-logo/120e1357-7ad7-4bb8-a6e8-44f86cbe8d9f.jpg",
+        "eventColor": "#66C61C",
+        "locationId": "Ot9iyC7HpdN291xRtr6m",
+        "bookingUnit": "day",
+        "quantity": 1,
+        "maxQuantity": 1,
+        "images": [
+            {
+                "_id": "6a465e3d75f3781a779df040",
+                "url": "https://msgsndr-private.storage.googleapis.com/services-logo/120e1357-7ad7-4bb8-a6e8-44f86cbe8d9f.jpg",
+                "name": "Image 1",
+                "position": 0
+            }
+        ],
+        "serviceCategoryId": "6952b37f7931bd505749c9ed",
+        "payment": {
+            "amount": 35,
+            "description": "<p style=\"margin:0px;color:#10182899; margin: 0px;color: #10182899;\">Enjoy a peaceful camping experience at Pine Ridge Family Campsite. This spacious campsite accommodates up to 6 guests and includes a fire pit, picnic table, nearby restrooms, potable water, and access to hiking trails. Perfect for families, couples, and outdoor enthusiasts.</p>"
+        },
+        "intermission": [],
+        "variantName": "Regular",
+        "isVariantsEnabled": true,
+        "serviceDurations": [],
+        "customAttributes": [],
+        "createdAt": "2026-01-14T00:14:36.769Z",
+        "updatedAt": "2026-07-02T12:49:01.422Z",
+        "__v": 0,
+        "allowBookingAfter": 3,
+        "allowBookingAfterUnit": "day",
+        "allowBookingFor": 3,
+        "allowBookingForUnit": "month",
+        "bookingPeriodType": "date-selection",
+        "formId": "",
+        "hasQuantityEnabled": true,
+        "maxDuration": 30,
+        "maxDurationUnit": "day",
+        "minDuration": 1,
+        "minDurationUnit": "day",
+        "postBuffer": 2,
+        "postBufferUnit": "hour",
+        "preBuffer": 2,
+        "preBufferUnit": "hour",
+        "useCustomForm": true,
+        "variantId": null,
+        "productId": "6966e6a94798be5a73a44f5d",
+        "bookingEndTime": "17:00",
+        "bookingStartTime": "09:00",
+        "hasTimeSelection": false,
+        "variants": [
+            {
+                "serviceDuration": 30,
+                "serviceDurationUnit": "day",
+                "name": "Pine Ridge Family Campsite",
+                "variantName": "Regular",
+                "payment": {
+                    "amount": 35,
+                    "description": "<p style=\"margin:0px;color:#10182899; margin: 0px;color: #10182899;\">Enjoy a peaceful camping experience at Pine Ridge Family Campsite. This spacious campsite accommodates up to 6 guests and includes a fire pit, picnic table, nearby restrooms, potable water, and access to hiking trails. Perfect for families, couples, and outdoor enthusiasts.</p>"
+                },
+                "id": "6966e6a92c860677c2fab136",
+                "variantId": null,
+                "preBuffer": 2,
+                "postBuffer": 2,
+                "preBufferUnit": "hour",
+                "postBufferUnit": "hour",
+                "productId": "6966e6a94798be5a73a44f5d"
+            },
+            {
+                "serviceDuration": 0,
+                "serviceDurationUnit": "day",
+                "name": "Pine Ridge Family Campsite",
+                "variantName": "Exclusive",
+                "payment": {
+                    "amount": 23
+                },
+                "id": "6a4642b21a2c4582d7da99e0",
+                "position": 1,
+                "variantId": "6966e6a92c860677c2fab136",
+                "preBuffer": 2,
+                "postBuffer": 2,
+                "preBufferUnit": "hour",
+                "postBufferUnit": "hour",
+                "productId": "6a4642b3c8e4bb0514c75f5d"
+            }
+        ],
+        "teamMembers": [],
+        "resources": [],
+        "addOns": [],
+        "locations": [],
+        "pricingRule": {
+            "id": "RTpiqNwSmCBR0aGwN14l",
+            "name": "Pine Ridge Family Campsite Pricing",
+            "targetId": "6966e6a92c860677c2fab136",
+            "appliesTo": "rental",
+            "basePrice": {
+                "value": 35,
+                "strategy": "per_day"
+            },
+            "rules": [
+                {
+                    "type": "date_range",
+                    "match": {
+                        "from": "2026-07-09",
+                        "to": "2026-07-22"
+                    },
+                    "value": 23,
+                    "valueType": "flat",
+                    "sequence": 1
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 1
+                    },
+                    "value": 7.3,
+                    "valueType": "percentage",
+                    "sequence": 2
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 2
+                    },
+                    "value": 8.2,
+                    "valueType": "percentage",
+                    "sequence": 3
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 3
+                    },
+                    "value": 8.3,
+                    "valueType": "percentage",
+                    "sequence": 4
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 4
+                    },
+                    "value": 9.3,
+                    "valueType": "percentage",
+                    "sequence": 5
+                },
+                {
+                    "type": "day_of_week",
+                    "match": {
+                        "dayOfWeek": 5
+                    },
+                    "value": 2.3,
+                    "valueType": "percentage",
+                    "sequence": 6
+                },
+                {
+                    "type": "duration_discount",
+                    "match": {
+                        "duration": 23,
+                        "durationUnit": "day"
+                    },
+                    "value": 20,
+                    "valueType": "percentage",
+                    "sequence": 7
+                },
+                {
+                    "type": "quantity_discount",
+                    "match": {
+                        "min": 23
+                    },
+                    "value": 20,
+                    "valueType": "percentage",
+                    "sequence": 8
+                }
+            ],
+            "priority": 1,
+            "dateAdded": "2026-07-02T10:43:08.523Z",
+            "dateUpdated": "2026-07-02T12:49:01.547Z",
+            "locationId": "Ot9iyC7HpdN291xRtr6m",
+            "securityDeposit": {
+                "amount": 0,
+                "refundable": true
+            },
+            "paymentTerms": {
+                "type": "full"
+            }
+        }
+    },
+    "traceId": "173739e4-9e25-4f39-8732-2f9b1da496c4"
+}

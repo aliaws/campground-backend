@@ -21,6 +21,15 @@ class TransactionResource extends JsonResource
             'invoice_status' => $this->invoice_status,
             'transaction_date' => $this->transaction_date,
             'items' => TransactionItemResource::collection($this->whenLoaded('items')),
+            'ghl_invoice' => $this->when(
+                $this->relationLoaded('reservation') && $this->reservation?->ghl_invoice_id,
+                fn () => [
+                    'id' => $this->reservation->ghl_invoice_id,
+                    'number' => $this->reservation->ghl_invoice_number,
+                    'status' => $this->reservation->ghl_invoice_status,
+                    'booking_id' => $this->reservation->ghl_booking_id,
+                ],
+            ),
             'tenant_id' => $this->tenant_id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

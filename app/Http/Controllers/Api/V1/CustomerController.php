@@ -25,8 +25,8 @@ class CustomerController extends Controller
         if ($request->search) {
             $query->where(function ($q) use ($request) {
                 $q->where('name', 'like', "%{$request->search}%")
-                  ->orWhere('email', 'like', "%{$request->search}%")
-                  ->orWhere('phone', 'like', "%{$request->search}%");
+                    ->orWhere('email', 'like', "%{$request->search}%")
+                    ->orWhere('phone', 'like', "%{$request->search}%");
             });
         }
 
@@ -114,7 +114,7 @@ class CustomerController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Sync failed: ' . $e->getMessage(),
+                'message' => 'Sync failed: '.$e->getMessage(),
             ], 422);
         }
     }
@@ -128,5 +128,23 @@ class CustomerController extends Controller
             'data' => $results,
             'message' => "Synced {$results['synced']} contacts, {$results['errors']} errors.",
         ]);
+    }
+
+    public function bulkPull(Request $request): JsonResponse
+    {
+        try {
+            $results = $this->ghlService->bulkPullContacts($request->user()->tenant_id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $results,
+                'message' => "Pulled {$results['pulled']} contacts from GHL ({$results['created']} new, {$results['updated']} updated), {$results['errors']} errors.",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pull failed: '.$e->getMessage(),
+            ], 422);
+        }
     }
 }

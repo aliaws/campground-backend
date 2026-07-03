@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -12,9 +13,15 @@ class Product extends Model
 {
     use HasUlids, SoftDeletes;
 
+    public const RULE_TYPES = ['date_range', 'day_of_week', 'duration_discount', 'quantity_discount'];
+
+    public const VALUE_TYPES = ['flat', 'percentage'];
+
     protected $fillable = [
         'name',
         'product_type',
+        'parent_product_id',
+        'variant_name',
         'description',
         'sku',
         'status',
@@ -35,10 +42,22 @@ class Product extends Model
         'pet_friendly',
         'ada_accessible',
         'campsite_status',
+        'booking_unit',
+        'min_duration',
+        'max_duration',
+        'duration_unit',
+        'booking_start_time',
+        'booking_end_time',
+        'max_quantity',
+        'pricing_rule',
         'tenant_id',
         'slug',
         'track_product_inventory',
         'ghl_image_url',
+        'ghl_service_id',
+        'ghl_service_category_id',
+        'ghl_service_location_id',
+        'ghl_metadata',
         'engage_product_id',
         'engage_sync_status',
         'engage_last_synced_at',
@@ -51,6 +70,8 @@ class Product extends Model
             'hookups' => 'json',
             'map_position' => 'json',
             'map_polygon' => 'json',
+            'pricing_rule' => 'json',
+            'ghl_metadata' => 'json',
             'is_variable' => 'boolean',
             'available_in_store' => 'boolean',
             'tax_inclusive' => 'boolean',
@@ -89,6 +110,54 @@ class Product extends Model
     public function categories(): BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'product_categories');
+    }
+
+    /** Base product this service variant belongs to (GHL: service.variantId) */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(Product::class, 'parent_product_id');
+    }
+
+    /** Service variants stored as their own product rows (GHL Services model) */
+    public function serviceVariants(): HasMany
+    {
+        return $this->hasMany(Product::class, 'parent_product_id');
+    }
+
+    /**
+     * Storefront "From $/day" price: cheapest base price across this service
+     * and its variants; falls back to the first product price.
+     */
+    public function fromPrice(): ?float
+    {
+        $candidates = collect([$this->pricing_rule['base_price'] ?? null])
+            ->concat(
+                $this->relationLoaded('serviceVariants')
+                    ? $this->serviceVariants->map(fn (Product $v) => $v->pricing_rule['base_price'] ?? null)
+                    : []
+            )
+            ->filter(fn ($price) => $price !== null)
+            ->map(fn ($price) => (float) $price);
+
+        if ($candidates->isNotEmpty()) {
+            return $candidates->min();
+        }
+
+        $fallback = $this->relationLoaded('prices')
+            ? $this->prices->min('amount')
+            : $this->prices()->min('amount');
+
+        return $fallback !== null ? (float) $fallback : null;
+    }
+
+    /** The pricing_rule JSON's rule list, ordered by sequence and ready to apply. */
+    public function orderedPricingRules(): array
+    {
+        $rules = $this->pricing_rule['rules'] ?? [];
+
+        usort($rules, fn ($a, $b) => ($a['sequence'] ?? 0) <=> ($b['sequence'] ?? 0));
+
+        return $rules;
     }
 
     public function prices(): HasMany
@@ -133,6 +202,39 @@ class Product extends Model
     public function isService(): bool
     {
         return $this->product_type === 'SERVICE';
+    }
+
+    /** Bookable campsite/rental — SERVICE products are the bookable type */
+    public function isCampsite(): bool
+    {
+        return $this->isService();
+    }
+
+    public function isServiceVariant(): bool
+    {
+        return $this->parent_product_id !== null;
+    }
+
+    /** Scheduling-layer rental service ID used for GHL calendar bookings. */
+    public function ghlBookingServiceId(): ?string
+    {
+        return $this->ghl_service_id;
+    }
+
+    /** Payments-layer product ID (auto-created by GHL per service/variant). */
+    public function ghlPaymentsProductId(): ?string
+    {
+        return $this->engage_product_id;
+    }
+
+    /** Base listing's scheduling service ID (self when base, parent's when variant). */
+    public function ghlBaseServiceId(): ?string
+    {
+        if ($this->isServiceVariant()) {
+            return $this->parent?->ghl_service_id;
+        }
+
+        return $this->ghl_service_id;
     }
 
     public function isPhysical(): bool

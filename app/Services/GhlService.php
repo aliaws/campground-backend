@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Models\Customer;
+use App\Models\EngageSetting;
 use App\Models\Reservation;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
@@ -34,11 +35,21 @@ class GhlService
 
         if ($customer->address && is_array($customer->address)) {
             $addr = $customer->address;
-            if (!empty($addr['line1'])) $sharedFields['address1'] = $addr['line1'];
-            if (!empty($addr['city'])) $sharedFields['city'] = $addr['city'];
-            if (!empty($addr['state'])) $sharedFields['state'] = $addr['state'];
-            if (!empty($addr['postal_code'])) $sharedFields['postalCode'] = $addr['postal_code'];
-            if (!empty($addr['country'])) $sharedFields['country'] = $addr['country'];
+            if (! empty($addr['line1'])) {
+                $sharedFields['address1'] = $addr['line1'];
+            }
+            if (! empty($addr['city'])) {
+                $sharedFields['city'] = $addr['city'];
+            }
+            if (! empty($addr['state'])) {
+                $sharedFields['state'] = $addr['state'];
+            }
+            if (! empty($addr['postal_code'])) {
+                $sharedFields['postalCode'] = $addr['postal_code'];
+            }
+            if (! empty($addr['country'])) {
+                $sharedFields['country'] = $addr['country'];
+            }
         }
 
         try {
@@ -119,6 +130,84 @@ class GhlService
         $this->syncContactToGhl($customer);
     }
 
+    /**
+     * Fetch all contacts from GHL and upsert them into the local customers table.
+     * GHL paginates contacts; we loop until all pages are consumed.
+     *
+     * @return array{pulled: int, created: int, updated: int, errors: int, error_details: array}
+     */
+    public function bulkPullContacts(string $tenantId): array
+    {
+        $locationId = $this->client->getLocationId();
+
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        $results = ['pulled' => 0, 'created' => 0, 'updated' => 0, 'errors' => 0, 'error_details' => []];
+        $page = 0;
+        $limit = 100;
+        $total = null;
+
+        do {
+            try {
+                $response = $this->client->get('contacts/', [
+                    'locationId' => $locationId,
+                    'limit' => $limit,
+                    'page' => $page,
+                ]);
+            } catch (\Exception $e) {
+                $results['errors']++;
+                $results['error_details'][] = ['page' => $page, 'error' => $e->getMessage()];
+                break;
+            }
+
+            $contacts = $response['contacts'] ?? [];
+
+            foreach ($contacts as $contact) {
+                try {
+                    $name = trim(
+                        ($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')
+                    ) ?: ($contact['name'] ?? 'Unknown');
+
+                    $customer = Customer::updateOrCreate(
+                        ['ghl_contact_id' => $contact['id']],
+                        [
+                            'name' => $name,
+                            'email' => $contact['email'] ?? null,
+                            'phone' => $contact['phone'] ?? null,
+                            'ghl_sync_status' => 'synced',
+                            'ghl_last_synced_at' => now(),
+                            'tenant_id' => $tenantId,
+                        ]
+                    );
+
+                    if ($customer->wasRecentlyCreated) {
+                        $results['created']++;
+                    } else {
+                        $results['updated']++;
+                    }
+
+                    $results['pulled']++;
+                } catch (\Exception $e) {
+                    $results['errors']++;
+                    $results['error_details'][] = [
+                        'contact_id' => $contact['id'] ?? null,
+                        'name' => $contact['firstName'] ?? 'Unknown',
+                        'error' => $e->getMessage(),
+                    ];
+                }
+            }
+
+            $page++;
+            $total = $response['total'] ?? $response['meta']['total'] ?? count($contacts);
+
+            usleep(100000);
+        } while ($page * $limit < $total && ! empty($contacts));
+
+        return $results;
+    }
+
     public function bulkSyncContacts(string $tenantId): array
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
@@ -148,12 +237,12 @@ class GhlService
     {
         $customer = $reservation->customer;
 
-        if (!$customer->ghl_contact_id) {
+        if (! $customer->ghl_contact_id) {
             $this->syncContactToGhl($customer);
             $customer = $customer->fresh();
         }
 
-        if (!$customer->ghl_contact_id) {
+        if (! $customer->ghl_contact_id) {
             return null;
         }
 
@@ -181,7 +270,7 @@ class GhlService
 
     public function updateOpportunityStage(Reservation $reservation, string $stage): void
     {
-        if (!$reservation->ghl_opportunity_id) {
+        if (! $reservation->ghl_opportunity_id) {
             return;
         }
 
@@ -247,7 +336,7 @@ class GhlService
         Customer::updateOrCreate(
             ['ghl_contact_id' => $contact['id']],
             [
-                'name' => trim(($contact['firstName'] ?? '') . ' ' . ($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
+                'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
                 'email' => $contact['email'] ?? null,
                 'phone' => $contact['phone'] ?? null,
                 'ghl_sync_status' => 'synced',
@@ -263,7 +352,7 @@ class GhlService
 
         Customer::where('ghl_contact_id', $contact['id'])
             ->update([
-                'name' => trim(($contact['firstName'] ?? '') . ' ' . ($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
+                'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
                 'email' => $contact['email'] ?? null,
                 'phone' => $contact['phone'] ?? null,
                 'ghl_sync_status' => 'synced',
@@ -309,6 +398,6 @@ class GhlService
 
     private function resolveTenantId(): string
     {
-        return \App\Models\EngageSetting::first()?->tenant_id ?? 'default';
+        return EngageSetting::first()?->tenant_id ?? 'default';
     }
 }

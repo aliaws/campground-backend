@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ReservationController;
+use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -59,10 +60,17 @@ Route::prefix('v1')->group(function () {
         Route::put('/customers/{customer}', [CustomerController::class, 'update']);
         Route::post('/customers/{customer}/sync-ghl', [CustomerController::class, 'syncToGhl']);
         Route::post('/customers/bulk-sync-ghl', [CustomerController::class, 'bulkSync']);
+        Route::post('/customers/bulk-pull-ghl', [CustomerController::class, 'bulkPull']);
         Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
 
-        // Reservations
+        // Services storefront (bookable SERVICE products, GHL Rentals style)
+        Route::get('/services', [ServiceController::class, 'index']);
+        Route::post('/services/pull-ghl', [ServiceController::class, 'pullFromGhl']);
+        Route::get('/services/{product}', [ServiceController::class, 'show']);
+
+        // Reservations (bookings)
         Route::get('/reservations', [ReservationController::class, 'index']);
+        Route::post('/reservations/quote', [ReservationController::class, 'quote']);
         Route::post('/reservations', [ReservationController::class, 'store']);
         Route::get('/reservations/{reservation}', [ReservationController::class, 'show']);
         Route::patch('/reservations/{reservation}/status', [ReservationController::class, 'updateStatus']);

@@ -8,6 +8,12 @@ use Illuminate\Support\Facades\Http;
 
 class GhlClient
 {
+    public const BOOKING_API_VERSION = '2021-04-15';
+
+    public const SERVICES_BASE_URL = 'https://services.leadconnectorhq.com/';
+
+    public const BACKEND_BASE_URL = 'https://backend.leadconnectorhq.com/';
+
     private ?string $baseUrl = null;
 
     private ?string $accessToken = null;
@@ -19,7 +25,7 @@ class GhlClient
         $this->setting = EngageSetting::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->first();
 
         if ($this->setting) {
-            $this->baseUrl = $this->setting->api_base_url ?: 'https://services.leadconnectorhq.com/';
+            $this->baseUrl = $this->setting->api_base_url ?: self::SERVICES_BASE_URL;
             $this->accessToken = $this->setting->access_token;
 
             if ($this->setting->isTokenExpired() && $this->setting->refresh_token) {
@@ -28,24 +34,34 @@ class GhlClient
         }
     }
 
-    public function post(string $endpoint, array $data): array
+    public function post(string $endpoint, array $data, array $query = [], ?string $version = null): array
     {
-        return $this->request('post', $endpoint, $data);
+        return $this->request('post', $endpoint, $data, $query, $version);
     }
 
-    public function put(string $endpoint, array $data): array
+    public function postToBackend(string $endpoint, array $data, array $query = [], ?string $version = null): array
     {
-        return $this->request('put', $endpoint, $data);
+        return $this->request('post', $endpoint, $data, $query, $version, self::BACKEND_BASE_URL);
     }
 
-    public function get(string $endpoint, array $query = []): array
+    public function put(string $endpoint, array $data, array $query = [], ?string $version = null): array
     {
-        return $this->request('get', $endpoint, $query);
+        return $this->request('put', $endpoint, $data, $query, $version);
     }
 
-    public function delete(string $endpoint): array
+    public function putToBackend(string $endpoint, array $data, array $query = [], ?string $version = null): array
     {
-        return $this->request('delete', $endpoint);
+        return $this->request('put', $endpoint, $data, $query, $version, self::BACKEND_BASE_URL);
+    }
+
+    public function get(string $endpoint, array $query = [], ?string $version = null): array
+    {
+        return $this->request('get', $endpoint, $query, [], $version);
+    }
+
+    public function delete(string $endpoint, array $query = [], ?string $version = null): array
+    {
+        return $this->request('delete', $endpoint, [], $query, $version);
     }
 
     public function getLocationId(): ?string
@@ -53,9 +69,25 @@ class GhlClient
         return $this->setting?->location_id;
     }
 
-    private function request(string $method, string $endpoint, array $data = []): array
+    public function getTimezone(): string
     {
-        if (!$this->accessToken) {
+        return $this->setting?->timezone ?: 'America/New_York';
+    }
+
+    public function getSetting(): ?EngageSetting
+    {
+        return $this->setting;
+    }
+
+    private function request(
+        string $method,
+        string $endpoint,
+        array $data = [],
+        array $query = [],
+        ?string $version = null,
+        ?string $baseUrl = null,
+    ): array {
+        if (! $this->accessToken) {
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
 
@@ -65,16 +97,32 @@ class GhlClient
             'Accept' => 'application/json',
         ];
 
-        if ($this->setting?->api_version) {
-            $headers['Version'] = $this->setting->api_version;
+        $apiVersion = $version ?? $this->setting?->api_version;
+        if ($apiVersion) {
+            $headers['Version'] = $apiVersion;
         }
 
-        $response = Http::withHeaders($headers)->{$method}("{$this->baseUrl}{$endpoint}", $data);
+        $url = rtrim($baseUrl ?? $this->baseUrl, '/').'/'.ltrim($endpoint, '/');
+        if (! empty($query)) {
+            $url .= '?'.http_build_query($query);
+        }
+
+        $http = Http::withHeaders($headers);
+        $response = match ($method) {
+            'get' => $http->get($url, $data),
+            'delete' => $http->delete($url),
+            default => $http->{$method}($url, $data),
+        };
 
         if ($response->status() === 401 && $this->setting?->refresh_token) {
             $this->refreshToken();
             $headers['Authorization'] = "Bearer {$this->accessToken}";
-            $response = Http::withHeaders($headers)->{$method}("{$this->baseUrl}{$endpoint}", $data);
+            $http = Http::withHeaders($headers);
+            $response = match ($method) {
+                'get' => $http->get($url, $data),
+                'delete' => $http->delete($url),
+                default => $http->{$method}($url, $data),
+            };
         }
 
         if ($response->failed()) {
@@ -83,18 +131,12 @@ class GhlClient
             );
         }
 
-        return $response->json();
+        return $response->json() ?? [];
     }
 
     /**
      * Upload a file to GHL's media library.
      * Uses multipart/form-data — NOT JSON.
-     *
-     * Required headers: Authorization: Bearer {token}, Version: 2021-07-28
-     * Required form fields: file (binary), hosted="true", locationId
-     *
-     * GHL response shape:
-     *   { "uploadedFiles": { "filename.jpg": "https://assets.cdn.filesafe.space/..." } }
      */
     public function uploadFile(string $filePath, string $filename, string $mimeType = 'application/octet-stream'): array
     {
@@ -106,13 +148,13 @@ class GhlClient
 
         $headers = [
             'Authorization' => "Bearer {$this->accessToken}",
-            'Version'       => $this->setting?->api_version ?: '2021-07-28',
-            'Accept'        => 'application/json',
+            'Version' => $this->setting?->api_version ?: '2021-07-28',
+            'Accept' => 'application/json',
         ];
 
         $fileContents = file_get_contents($filePath);
-        $formFields   = [
-            'hosted'     => 'true',
+        $formFields = [
+            'hosted' => 'true',
             'locationId' => $locationId,
         ];
 
@@ -144,7 +186,7 @@ class GhlClient
             $this->setting = $authService->refreshAccessToken($this->setting);
             $this->accessToken = $this->setting->access_token;
         } catch (\Exception $e) {
-            throw new \RuntimeException('GHL token refresh failed: ' . $e->getMessage());
+            throw new \RuntimeException('GHL token refresh failed: '.$e->getMessage());
         }
     }
 }
