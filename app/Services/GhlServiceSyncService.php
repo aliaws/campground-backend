@@ -149,6 +149,7 @@ class GhlServiceSyncService
             'pricing_rule' => $this->mapPricingRule($detail),
             // Payments-layer product (auto-created by GHL per service/variant).
             'engage_product_id' => $detail['productId'] ?? null,
+            'industry_type' => $detail['industryType'] ?? self::RENTAL_INDUSTRY,
             'ghl_service_category_id' => $detail['serviceCategoryId'] ?? null,
             'ghl_service_location_id' => $this->resolveServiceLocationId($detail),
             'ghl_metadata' => $this->mapMetadata($detail),
@@ -217,7 +218,6 @@ class GhlServiceSyncService
     private function mapMetadata(array $detail): ?array
     {
         $metadata = array_filter([
-            'industryType' => $detail['industryType'] ?? self::RENTAL_INDUSTRY,
             'ghl_variant_id' => $detail['variantId'] ?? null,
             'ghl_payments_product_id' => $detail['productId'] ?? null,
             'bookingPeriodType' => $detail['bookingPeriodType'] ?? null,

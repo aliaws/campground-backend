@@ -27,10 +27,6 @@ class GhlClient
         if ($this->setting) {
             $this->baseUrl = $this->setting->api_base_url ?: self::SERVICES_BASE_URL;
             $this->accessToken = $this->setting->access_token;
-
-            if ($this->setting->isTokenExpired() && $this->setting->refresh_token) {
-                $this->refreshToken();
-            }
         }
     }
 
@@ -91,6 +87,10 @@ class GhlClient
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
 
+        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+            $this->refreshToken();
+        }
+
         $headers = [
             'Authorization' => "Bearer {$this->accessToken}",
             'Content-Type' => 'application/json',
@@ -142,6 +142,10 @@ class GhlClient
     {
         if (! $this->accessToken) {
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
+        }
+
+        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+            $this->refreshToken();
         }
 
         $locationId = $this->getLocationId();
