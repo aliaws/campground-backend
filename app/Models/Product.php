@@ -55,6 +55,7 @@ class Product extends Model
         'track_product_inventory',
         'ghl_image_url',
         'ghl_service_id',
+        'industry_type',
         'ghl_service_category_id',
         'ghl_service_location_id',
         'ghl_metadata',
@@ -93,6 +94,11 @@ class Product extends Model
     public function scopeService($query)
     {
         return $query->where('product_type', 'SERVICE');
+    }
+
+    public function scopeIndustryType($query, string $industryType)
+    {
+        return $query->where('industry_type', $industryType);
     }
 
     public function scopePhysical($query)

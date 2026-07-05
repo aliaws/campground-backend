@@ -276,7 +276,7 @@ class GhlBookingService
                 'subAccountId' => $locationId,
                 'timezone' => $timezone,
             ],
-            'industryType' => 'rental',
+            'industryType' => $product->industry_type ?? 'rental',
             'securityDeposit' => $securityDeposit,
             'securityDepositCharged' => 0,
         ];
