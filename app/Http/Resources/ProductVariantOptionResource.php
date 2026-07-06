@@ -15,6 +15,8 @@ class ProductVariantOptionResource extends JsonResource
             'product_id' => $this->product_id,
             'name' => $this->name,
             'ghl_option_id' => $this->ghl_option_id,
+            'engage_price_id' => $this->engage_price_id,
+            'engage_sync_status' => $this->engage_sync_status,
             'position' => $this->position,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

@@ -212,7 +212,7 @@ class SettingsController extends Controller
 
     private function callbackRedirect(string $query): \Illuminate\Http\RedirectResponse
     {
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+        $frontendUrl = config('app.frontend_url');
 
         return redirect("{$frontendUrl}/settings/engage/tokens?{$query}");
     }
