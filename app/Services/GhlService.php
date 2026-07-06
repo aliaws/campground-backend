@@ -6,6 +6,7 @@ use App\Integrations\GHL\GhlClient;
 use App\Models\Customer;
 use App\Models\EngageSetting;
 use App\Models\Reservation;
+use App\Models\Transaction;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
 
@@ -316,6 +317,8 @@ class GhlService
                 'contact.updated' => $this->handleContactUpdated($payload),
                 'opportunity.created' => $this->handleOpportunityCreated($payload),
                 'opportunity.stage_changed' => $this->handleOpportunityStageChanged($payload),
+                'InvoicePaid' => $this->handleInvoicePaid($payload),
+                'InvoicePartiallyPaid' => $this->handleInvoicePartiallyPaid($payload),
                 default => Log::info("Unhandled GHL event: {$eventType}"),
             };
 
@@ -393,6 +396,44 @@ class GhlService
             if ($reservation && $status && isset($stageMap[$status])) {
                 $reservation->update(['status' => $stageMap[$status]]);
             }
+        }
+    }
+
+    /** Invoice paid in full via GHL (e.g. customer paid a GHL-hosted invoice link directly). */
+    private function handleInvoicePaid(array $payload): void
+    {
+        $this->applyInvoiceStatus($payload, 'paid');
+    }
+
+    /** Partial payment recorded against a GHL invoice — not yet fully paid. */
+    private function handleInvoicePartiallyPaid(array $payload): void
+    {
+        $this->applyInvoiceStatus($payload, 'partially_paid');
+    }
+
+    private function applyInvoiceStatus(array $payload, string $status): void
+    {
+        $ghlInvoiceId = $payload['_id'] ?? null;
+
+        if (! $ghlInvoiceId) {
+            return;
+        }
+
+        $reservation = Reservation::where('ghl_invoice_id', $ghlInvoiceId)->first();
+
+        if (! $reservation) {
+            return;
+        }
+
+        $reservation->update(['ghl_invoice_status' => $status]);
+
+        if ($status === 'paid') {
+            $reservation->transactions()->whereNotIn('payment_status', ['paid'])->get()->each(
+                fn (Transaction $transaction) => $transaction->update([
+                    'payment_status' => 'paid',
+                    'invoice_status' => 'completed',
+                ])
+            );
         }
     }
 
