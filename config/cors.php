@@ -8,6 +8,7 @@ return [
 
     'allowed_origins' => array_filter([
         env('FRONTEND_URL', 'http://localhost:3000'),
+        env('CUSTOMER_FRONTEND_URL'),
     ]),
 
     'allowed_origins_patterns' => [

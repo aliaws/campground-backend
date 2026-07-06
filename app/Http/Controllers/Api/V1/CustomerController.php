@@ -7,6 +7,7 @@ use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
+use App\Services\CustomerService;
 use App\Services\GhlService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,7 @@ class CustomerController extends Controller
 {
     public function __construct(
         private GhlService $ghlService,
+        private CustomerService $customerService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -45,8 +47,9 @@ class CustomerController extends Controller
 
     public function store(StoreCustomerRequest $request): JsonResponse
     {
-        $customer = Customer::create(
-            $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+        $customer = $this->customerService->findOrCreate(
+            $request->validated(),
+            $request->user()->tenant_id
         );
 
         try {
@@ -61,8 +64,8 @@ class CustomerController extends Controller
         return response()->json([
             'success' => true,
             'data' => new CustomerResource($customer->fresh()),
-            'message' => 'Customer created.',
-        ], 201);
+            'message' => $customer->wasRecentlyCreated ? 'Customer created.' : 'Existing customer matched.',
+        ], $customer->wasRecentlyCreated ? 201 : 200);
     }
 
     public function show(Customer $customer): JsonResponse

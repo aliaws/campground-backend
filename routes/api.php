@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\Public\PublicReservationController;
+use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\ReservationController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
@@ -25,6 +27,19 @@ Route::prefix('v1')->group(function () {
 
     // GHL OAuth callback (no auth - browser redirect from GHL)
     Route::get('/settings/engage/callback', [SettingsController::class, 'handleCallback']);
+
+    // Public guest booking (no auth) — customer-facing booking site
+    Route::prefix('public')->group(function () {
+        Route::middleware('throttle:guest-browse')->group(function () {
+            Route::get('/services', [PublicServiceController::class, 'index']);
+            Route::get('/services/{product}', [PublicServiceController::class, 'show']);
+            Route::post('/reservations/quote', [PublicReservationController::class, 'quote']);
+            Route::get('/reservations/{reservation}', [PublicReservationController::class, 'show']);
+        });
+        Route::middleware('throttle:guest-booking')->group(function () {
+            Route::post('/reservations', [PublicReservationController::class, 'store']);
+        });
+    });
 
     // Protected routes
     Route::middleware(['auth:sanctum'])->group(function () {
