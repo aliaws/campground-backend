@@ -30,7 +30,15 @@ class ProductController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => ProductResource::collection($products),
+            'data' => [
+                'data' => ProductResource::collection($products),
+                'current_page' => $products->currentPage(),
+                'last_page' => $products->lastPage(),
+                'per_page' => $products->perPage(),
+                'total' => $products->total(),
+                'next_page_url' => $products->nextPageUrl(),
+                'prev_page_url' => $products->previousPageUrl(),
+            ],
             'message' => 'Products retrieved.',
         ]);
     }
