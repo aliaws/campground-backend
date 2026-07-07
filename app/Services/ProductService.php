@@ -76,6 +76,10 @@ class ProductService
             $query->where('product_type', $filters['product_type']);
         }
 
+        if (! empty($filters['exclude_type'])) {
+            $query->where('product_type', '!=', $filters['exclude_type']);
+        }
+
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
