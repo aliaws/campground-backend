@@ -13,6 +13,7 @@ class GhlProductSyncService
 {
     public function __construct(
         private GhlClient $client,
+        private GhlServiceSyncService $serviceSync,
     ) {}
 
     // ── Product ───────────────────────────────────────────────────────────────
@@ -596,10 +597,21 @@ class GhlProductSyncService
     {
         $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
 
+        // Rental services auto-create their own payments-layer product in GHL,
+        // tagged with an arbitrary/inconsistent productType — exclude those so
+        // they aren't stubbed in here as regular products. They're pulled (as
+        // SERVICE + a Rental row) exclusively via the Services "Pull from GHL".
+        $rentalProductIds = array_flip($this->serviceSync->fetchRentalProductIds());
+
         // Discover the full GHL catalog first, so brand-new GHL products get a
         // local row too — not just ones we already know about.
         try {
             foreach ($this->fetchAllGhlProducts() as $ghlProduct) {
+                $ghlId = $ghlProduct['_id'] ?? $ghlProduct['id'] ?? null;
+                if ($ghlId !== null && isset($rentalProductIds[$ghlId])) {
+                    continue;
+                }
+
                 if ($this->createLocalStubIfMissing($ghlProduct, $tenantId)) {
                     $results['created']++;
                 }

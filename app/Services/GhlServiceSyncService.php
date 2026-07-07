@@ -33,6 +33,40 @@ class GhlServiceSyncService
     ) {}
 
     /**
+     * The payments-layer productId of every rental service (base listings AND
+     * variants — the list endpoint returns both as flat entries, each with its
+     * own productId). Used by GhlProductSyncService to keep rental-backing
+     * payment products out of the general product catalog pull — GHL assigns
+     * those an arbitrary/inconsistent productType (PHYSICAL/DIGITAL/SERVICE)
+     * that must not be trusted to decide whether something is a rental.
+     */
+    public function fetchRentalProductIds(): array
+    {
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            return [];
+        }
+
+        try {
+            $list = $this->client->get('calendars/services', [
+                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch rental services for product-id exclusion', ['error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        return collect($list['services'] ?? [])
+            ->pluck('productId')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return array{pulled: int, errors: int, error_details: array}
      *
      * Base-listing details and their embedded variants' details are each

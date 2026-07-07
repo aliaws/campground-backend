@@ -80,6 +80,16 @@ class ProductService
             $query->where('product_type', '!=', $filters['exclude_type']);
         }
 
+        if (! empty($filters['base_listings_only'])) {
+            // Hide rental service variants (their own Product+Rental row via
+            // rentals.parent_product_id) from the top-level list — they're
+            // shown nested under their base listing instead.
+            $query->where(function (Builder $q) {
+                $q->whereDoesntHave('rental')
+                    ->orWhereHas('rental', fn (Builder $r) => $r->whereNull('parent_product_id'));
+            });
+        }
+
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }
