@@ -99,15 +99,49 @@ class ReservationController extends Controller
 
     public function updateStatus(UpdateReservationStatusRequest $request, Reservation $reservation): JsonResponse
     {
-        $reservation = $this->reservationService->updateStatus(
-            $reservation,
-            $request->validated('status')
-        );
+        try {
+            $reservation = $this->reservationService->updateStatus(
+                $reservation,
+                $request->validated('status')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,
             'data' => new ReservationResource($reservation),
             'message' => 'Reservation status updated.',
+        ]);
+    }
+
+    /** Staff confirms a guest-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
+    public function confirm(Reservation $reservation): JsonResponse
+    {
+        try {
+            $reservation = $this->reservationService->confirm($reservation);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Failed to confirm reservation: '.$e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => new ReservationResource($reservation),
+            'message' => 'Reservation confirmed and payment link sent.',
         ]);
     }
 }

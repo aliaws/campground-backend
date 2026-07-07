@@ -11,7 +11,6 @@ use App\Models\Reservation;
 use App\Services\CustomerService;
 use App\Services\ReservationService;
 use App\Services\TenantResolver;
-use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,7 +18,6 @@ class PublicReservationController extends Controller
 {
     public function __construct(
         private ReservationService $reservationService,
-        private TransactionService $transactionService,
         private CustomerService $customerService,
     ) {}
 
@@ -81,7 +79,7 @@ class PublicReservationController extends Controller
                 'check_out_date' => $request->validated('check_out_date'),
                 'quantity' => $request->validated('quantity'),
                 'tenant_id' => $tenantId,
-            ]);
+            ], autoConfirm: false);
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,
@@ -90,12 +88,10 @@ class PublicReservationController extends Controller
             ], 422);
         }
 
-        $this->transactionService->autoCreateFromReservation($reservation);
-
         return response()->json([
             'success' => true,
             'data' => new GuestReservationResource($reservation),
-            'message' => 'Reservation created. Check your email for a secure payment link.',
+            'message' => 'Your booking request has been received. Our team will contact you shortly to confirm and arrange payment.',
         ], 201);
     }
 

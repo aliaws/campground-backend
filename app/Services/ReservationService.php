@@ -60,7 +60,13 @@ class ReservationService
         return $this->priceCalculator->quote($product, $checkIn, $checkOut, $quantity);
     }
 
-    public function create(array $data): Reservation
+    /**
+     * @param bool $autoConfirm When true (staff-created, default), the reservation is
+     *   immediately confirmed and synced to GHL — today's exact behavior, unchanged.
+     *   When false (guest-submitted), it's created as a 'requested' local-only record
+     *   with no GHL booking/invoice/transaction — see confirm() for what turns it real.
+     */
+    public function create(array $data, bool $autoConfirm = true): Reservation
     {
         $product = Product::findOrFail($data['product_id']);
         $quantity = (int) ($data['quantity'] ?? 1);
@@ -74,23 +80,48 @@ class ReservationService
             'total_amount' => $quote['total_amount'],
             'security_deposit_amount' => $quote['security_deposit_amount'],
             'price_breakdown' => $quote,
-            'status' => 'pending',
+            'status' => $autoConfirm ? 'pending' : 'requested',
         ]);
 
-        try {
-            $this->ghlBookingService->createBooking($reservation);
-        } catch (\Exception $e) {
-            Log::error('GHL booking creation failed', [
-                'reservation_id' => $reservation->id,
-                'error' => $e->getMessage(),
-            ]);
+        if ($autoConfirm) {
+            try {
+                $this->ghlBookingService->createBooking($reservation);
+            } catch (\Exception $e) {
+                Log::error('GHL booking creation failed', [
+                    'reservation_id' => $reservation->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $reservation->load(['customer', 'product']);
     }
 
+    /**
+     * Turns a guest-submitted 'requested' reservation into a real one: syncs the
+     * contact to GHL, creates the GHL booking + invoice (which emails the payment
+     * link), marks it confirmed, and creates the local transaction record. This is
+     * the ONLY path that should ever move a reservation out of 'requested'.
+     */
+    public function confirm(Reservation $reservation): Reservation
+    {
+        if ($reservation->status !== 'requested') {
+            throw new \InvalidArgumentException('Only requested reservations can be confirmed this way.');
+        }
+
+        $this->ghlBookingService->createBooking($reservation);
+        $reservation->update(['status' => 'confirmed']);
+        $this->transactionService->autoCreateFromReservation($reservation);
+
+        return $reservation->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
     public function updateStatus(Reservation $reservation, string $status): Reservation
     {
+        if ($reservation->status === 'requested' && $status === 'confirmed') {
+            throw new \InvalidArgumentException('Use the confirm action to confirm a requested reservation.');
+        }
+
         $reservation->update(['status' => $status]);
 
         try {
