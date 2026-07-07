@@ -52,7 +52,7 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['serviceVariants', 'categories', 'amenities', 'features', 'prices']);
+        $product->load(['rental', 'serviceVariants', 'categories', 'amenities', 'features', 'prices']);
 
         return response()->json([
             'success' => true,

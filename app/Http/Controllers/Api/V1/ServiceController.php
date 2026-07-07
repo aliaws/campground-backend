@@ -35,7 +35,7 @@ class ServiceController extends Controller
     public function show(Request $request, Product $product): JsonResponse
     {
         $product->load([
-            'parent', 'serviceVariants', 'categories', 'amenities', 'features', 'prices',
+            'rental', 'parent', 'serviceVariants', 'categories', 'amenities', 'features', 'prices',
         ]);
 
         if ($product->parent_product_id !== null) {

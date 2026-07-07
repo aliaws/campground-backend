@@ -58,7 +58,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $product->load(['categories', 'prices', 'variants.options', 'amenities', 'features']);
+        $product->load(['rental', 'categories', 'prices', 'variants.options', 'amenities', 'features']);
 
         return response()->json([
             'success' => true,

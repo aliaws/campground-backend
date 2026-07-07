@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\ProductPrice;
 use App\Models\ProductVariant;
+use App\Models\Rental;
+use App\Models\RentalPricingRule;
 use App\Models\Reservation;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
@@ -13,7 +15,54 @@ use Illuminate\Support\Facades\Storage;
 
 class ProductService
 {
-    private const EAGER = ['categories', 'prices', 'variants.options', 'amenities', 'features', 'serviceVariants'];
+    private const EAGER = ['categories', 'prices', 'variants.options', 'amenities', 'features', 'serviceVariants', 'rental'];
+
+    /**
+     * Splits rental-specific fields (and pricing_rule) out of an incoming
+     * create/update payload — they belong on Rental/RentalPricingRule now,
+     * not Product. Returns [$productData, $rentalData, $pricingRule].
+     */
+    private function splitRentalData(array $data): array
+    {
+        $rentalData = array_intersect_key($data, array_flip(Product::RENTAL_PROXIED_ATTRIBUTES));
+        $pricingRule = $rentalData['pricing_rule'] ?? null;
+        unset($rentalData['pricing_rule']);
+
+        $productData = array_diff_key($data, array_flip(Product::RENTAL_PROXIED_ATTRIBUTES));
+
+        return [$productData, $rentalData, $pricingRule];
+    }
+
+    /** Upserts the Rental row (and its active pricing rule) for a SERVICE product. */
+    private function syncRentalData(Product $product, array $rentalData, ?array $pricingRule): void
+    {
+        if (empty($rentalData) && $pricingRule === null) {
+            return;
+        }
+
+        $rental = Rental::updateOrCreate(
+            ['product_id' => $product->id],
+            $rentalData + ['tenant_id' => $product->tenant_id]
+        );
+
+        if ($pricingRule !== null) {
+            RentalPricingRule::updateOrCreate(
+                ['rental_id' => $rental->id, 'priority' => 1],
+                [
+                    'name' => $pricingRule['name'] ?? 'Default',
+                    'applies_to' => $pricingRule['applies_to'] ?? 'rental',
+                    'base_price' => $pricingRule['base_price'] ?? 0,
+                    'base_price_strategy' => $pricingRule['base_price_strategy'] ?? 'per_day',
+                    'rules' => $pricingRule['rules'] ?? null,
+                    'security_deposit_amount' => $pricingRule['security_deposit_amount'] ?? null,
+                    'security_deposit_refundable' => $pricingRule['security_deposit_refundable'] ?? true,
+                    'payment_terms' => $pricingRule['payment_terms'] ?? null,
+                    'ghl_pricing_rule_id' => $pricingRule['ghl_pricing_rule_id'] ?? null,
+                    'tenant_id' => $product->tenant_id,
+                ]
+            );
+        }
+    }
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -58,7 +107,10 @@ class ProductService
 
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
 
-        $product = Product::create($data);
+        [$productData, $rentalData, $pricingRule] = $this->splitRentalData($data);
+
+        $product = Product::create($productData);
+        $this->syncRentalData($product, $rentalData, $pricingRule);
 
         if (! empty($categoryIds)) {
             $product->categories()->sync($categoryIds);
@@ -85,7 +137,10 @@ class ProductService
 
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
 
-        $product->update($data);
+        [$productData, $rentalData, $pricingRule] = $this->splitRentalData($data);
+
+        $product->update($productData);
+        $this->syncRentalData($product, $rentalData, $pricingRule);
 
         if ($categoryIds !== null) {
             $product->categories()->sync($categoryIds);
@@ -210,10 +265,9 @@ class ProductService
     {
         $query = Product::service()
             ->byTenant($filters['tenant_id'])
-            ->whereNull('parent_product_id')
-            ->whereNotNull('ghl_service_id')
+            ->whereHas('rental', fn (Builder $q) => $q->whereNull('parent_product_id')->whereNotNull('ghl_service_id'))
             ->where('status', 'active')
-            ->with(['serviceVariants', 'categories', 'amenities', 'features', 'prices']);
+            ->with(['rental', 'serviceVariants', 'categories', 'amenities', 'features', 'prices']);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {

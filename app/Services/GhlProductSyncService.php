@@ -587,8 +587,6 @@ class GhlProductSyncService
                     'error' => $e->getMessage(),
                 ];
             }
-
-            usleep(100000);
         }
 
         return $results;
@@ -628,8 +626,6 @@ class GhlProductSyncService
                     'error' => $e->getMessage(),
                 ];
             }
-
-            usleep(100000);
         }
 
         return $results;
@@ -717,8 +713,6 @@ class GhlProductSyncService
                     'error' => $e->getMessage(),
                 ];
             }
-
-            usleep(100000);
         }
 
         return $results;

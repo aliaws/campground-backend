@@ -4,9 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
@@ -17,11 +19,24 @@ class Product extends Model
 
     public const VALUE_TYPES = ['flat', 'percentage'];
 
+    /**
+     * Rental-specific attribute names that now live on the `rentals` table.
+     * Reads for these fall through to $this->rental via getAttribute()
+     * below — the columns still exist on `products` for one more release
+     * (dropped once every consumer is cut over to reading Rental directly)
+     * but are no longer the source of truth.
+     */
+    public const RENTAL_PROXIED_ATTRIBUTES = [
+        'variant_name', 'booking_unit', 'min_duration', 'max_duration', 'duration_unit',
+        'booking_start_time', 'booking_end_time', 'max_quantity', 'campsite_status',
+        'site_type', 'capacity', 'available_quantity', 'hookups', 'map_position',
+        'map_polygon', 'pet_friendly', 'ada_accessible', 'industry_type', 'pricing_rule',
+        'ghl_service_id', 'ghl_service_category_id', 'ghl_metadata', 'parent_product_id',
+    ];
+
     protected $fillable = [
         'name',
         'product_type',
-        'parent_product_id',
-        'variant_name',
         'description',
         'sku',
         'status',
@@ -33,32 +48,10 @@ class Product extends Model
         'display_priority',
         'tax_inclusive',
         'is_taxes_enabled',
-        'site_type',
-        'capacity',
-        'available_quantity',
-        'hookups',
-        'map_position',
-        'map_polygon',
-        'pet_friendly',
-        'ada_accessible',
-        'campsite_status',
-        'booking_unit',
-        'min_duration',
-        'max_duration',
-        'duration_unit',
-        'booking_start_time',
-        'booking_end_time',
-        'max_quantity',
-        'pricing_rule',
         'tenant_id',
         'slug',
         'track_product_inventory',
         'ghl_image_url',
-        'ghl_service_id',
-        'industry_type',
-        'ghl_service_category_id',
-        'ghl_service_location_id',
-        'ghl_metadata',
         'engage_product_id',
         'engage_sync_status',
         'engage_last_synced_at',
@@ -68,20 +61,28 @@ class Product extends Model
     {
         return [
             'medias' => 'json',
-            'hookups' => 'json',
-            'map_position' => 'json',
-            'map_polygon' => 'json',
-            'pricing_rule' => 'json',
-            'ghl_metadata' => 'json',
             'is_variable' => 'boolean',
             'available_in_store' => 'boolean',
             'tax_inclusive' => 'boolean',
             'is_taxes_enabled' => 'boolean',
-            'pet_friendly' => 'boolean',
-            'ada_accessible' => 'boolean',
             'track_product_inventory' => 'boolean',
             'engage_last_synced_at' => 'datetime',
         ];
+    }
+
+    /** Rental-specific data (booking window, campsite fields, pricing) — see Rental model. */
+    public function rental(): HasOne
+    {
+        return $this->hasOne(Rental::class);
+    }
+
+    public function getAttribute($key)
+    {
+        if (in_array($key, self::RENTAL_PROXIED_ATTRIBUTES, true)) {
+            return $this->rental?->getAttribute($key);
+        }
+
+        return parent::getAttribute($key);
     }
 
     // ── Scopes ────────────────────────────────────────────────────────────────
@@ -118,16 +119,35 @@ class Product extends Model
         return $this->belongsToMany(Category::class, 'product_categories');
     }
 
-    /** Base product this service variant belongs to (GHL: service.variantId) */
-    public function parent(): BelongsTo
+    /**
+     * Base product this service variant belongs to (GHL: service.variantId).
+     * Goes through `rentals.parent_product_id` — a real Eloquent through
+     * relation, so ->load('parent')/whenLoaded('parent') keep working exactly
+     * as before even though the FK now lives on `rentals`, not `products`.
+     */
+    public function parent(): HasOneThrough
     {
-        return $this->belongsTo(Product::class, 'parent_product_id');
+        return $this->hasOneThrough(
+            Product::class,
+            Rental::class,
+            'product_id',        // FK on rentals referencing this product
+            'id',                 // PK on the related (parent) products row
+            'id',                 // local key on this product
+            'parent_product_id'   // FK on rentals referencing the parent product
+        );
     }
 
     /** Service variants stored as their own product rows (GHL Services model) */
-    public function serviceVariants(): HasMany
+    public function serviceVariants(): HasManyThrough
     {
-        return $this->hasMany(Product::class, 'parent_product_id');
+        return $this->hasManyThrough(
+            Product::class,
+            Rental::class,
+            'parent_product_id',  // FK on rentals referencing this (parent) product
+            'id',                  // PK on the related (variant) products row
+            'id',                  // local key on this product
+            'product_id'           // FK on rentals referencing the variant product
+        );
     }
 
     /**

@@ -75,6 +75,92 @@ class GhlClient
         return $this->setting;
     }
 
+    /**
+     * Fires multiple GET requests concurrently instead of one at a time —
+     * same total number of GHL calls as calling get() in a loop, just
+     * issued in parallel, so it doesn't add rate-limit risk.
+     *
+     * Http::pool() bypasses request()'s inline 401-detect-refresh-retry
+     * logic, so this method (1) proactively refreshes the token before
+     * building the pool if it's already known-expired, and (2) after the
+     * pool resolves, retries any 401s once, sequentially, behind a single
+     * refreshToken() call — never let concurrent 401s each trigger their
+     * own refresh, since GHL's refresh token is one-time-use/rotating and
+     * two racing refreshes would corrupt the tenant's stored token.
+     *
+     * @param  array<string, array{endpoint: string, query?: array}>  $requests  keyed by caller-chosen id
+     * @return array<string, array|\Throwable> same keys as $requests; each value is the decoded
+     *                                          JSON body, or a Throwable if that request ultimately failed
+     */
+    public function poolGet(array $requests, ?string $version = null): array
+    {
+        if (! $this->accessToken) {
+            throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
+        }
+
+        if (empty($requests)) {
+            return [];
+        }
+
+        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+            $this->refreshToken();
+        }
+
+        $results = $this->firePool($requests, $version);
+
+        $retryKeys = array_keys(array_filter(
+            $results,
+            fn ($result) => $result instanceof \Illuminate\Http\Client\Response && $result->status() === 401
+        ));
+
+        if (! empty($retryKeys) && $this->setting?->refresh_token) {
+            $this->refreshToken();
+            $retryResults = $this->firePool(array_intersect_key($requests, array_flip($retryKeys)), $version);
+            $results = array_replace($results, $retryResults);
+        }
+
+        return array_map(function ($result) {
+            if ($result instanceof \Illuminate\Http\Client\Response) {
+                return $result->failed()
+                    ? new \RuntimeException("GHL API error: {$result->status()} - {$result->body()}")
+                    : ($result->json() ?? []);
+            }
+
+            // Http::pool() returns a ConnectionException (or similar Throwable) in
+            // place of a Response when a request fails at the transport level.
+            return $result instanceof \Throwable ? $result : new \RuntimeException('GHL pooled request failed');
+        }, $results);
+    }
+
+    /** @return array<string, \Illuminate\Http\Client\Response|\Throwable> */
+    private function firePool(array $requests, ?string $version): array
+    {
+        $headers = $this->buildHeaders($version);
+        $baseUrl = rtrim($this->baseUrl, '/');
+
+        return Http::pool(fn ($pool) => collect($requests)->map(
+            fn (array $req, string $key) => $pool->as($key)
+                ->withHeaders($headers)
+                ->get($baseUrl.'/'.ltrim($req['endpoint'], '/'), $req['query'] ?? [])
+        )->all());
+    }
+
+    private function buildHeaders(?string $version): array
+    {
+        $headers = [
+            'Authorization' => "Bearer {$this->accessToken}",
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ];
+
+        $apiVersion = $version ?? $this->setting?->api_version;
+        if ($apiVersion) {
+            $headers['Version'] = $apiVersion;
+        }
+
+        return $headers;
+    }
+
     private function request(
         string $method,
         string $endpoint,
@@ -91,16 +177,7 @@ class GhlClient
             $this->refreshToken();
         }
 
-        $headers = [
-            'Authorization' => "Bearer {$this->accessToken}",
-            'Content-Type' => 'application/json',
-            'Accept' => 'application/json',
-        ];
-
-        $apiVersion = $version ?? $this->setting?->api_version;
-        if ($apiVersion) {
-            $headers['Version'] = $apiVersion;
-        }
+        $headers = $this->buildHeaders($version);
 
         $url = rtrim($baseUrl ?? $this->baseUrl, '/').'/'.ltrim($endpoint, '/');
         if (! empty($query)) {
@@ -116,8 +193,7 @@ class GhlClient
 
         if ($response->status() === 401 && $this->setting?->refresh_token) {
             $this->refreshToken();
-            $headers['Authorization'] = "Bearer {$this->accessToken}";
-            $http = Http::withHeaders($headers);
+            $http = Http::withHeaders($this->buildHeaders($version));
             $response = match ($method) {
                 'get' => $http->get($url, $data),
                 'delete' => $http->delete($url),
