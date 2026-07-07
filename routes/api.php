@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicReservationController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\ReservationController;
@@ -33,6 +34,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('throttle:guest-browse')->group(function () {
             Route::get('/services', [PublicServiceController::class, 'index']);
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
+            Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::post('/reservations/quote', [PublicReservationController::class, 'quote']);
             Route::get('/reservations/{reservation}', [PublicReservationController::class, 'show']);
         });
