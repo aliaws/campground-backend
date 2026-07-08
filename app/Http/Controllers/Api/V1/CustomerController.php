@@ -40,15 +40,7 @@ class CustomerController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'data' => CustomerResource::collection($customers),
-                'current_page' => $customers->currentPage(),
-                'last_page' => $customers->lastPage(),
-                'per_page' => $customers->perPage(),
-                'total' => $customers->total(),
-                'next_page_url' => $customers->nextPageUrl(),
-                'prev_page_url' => $customers->previousPageUrl(),
-            ],
+            'data' => CustomerResource::collection($customers),
             'message' => 'Customers retrieved.',
         ]);
     }
