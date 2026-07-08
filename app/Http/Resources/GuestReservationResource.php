@@ -13,6 +13,8 @@ class GuestReservationResource extends JsonResource
         return [
             'id' => $this->id,
             'product_name' => $this->whenLoaded('product', fn () => $this->product->name),
+            'booking_start_time' => $this->whenLoaded('product', fn () => $this->product->booking_start_time),
+            'booking_end_time' => $this->whenLoaded('product', fn () => $this->product->booking_end_time),
             'check_in_date' => $this->check_in_date,
             'check_out_date' => $this->check_out_date,
             'quantity' => $this->quantity,

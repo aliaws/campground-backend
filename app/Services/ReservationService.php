@@ -47,6 +47,10 @@ class ReservationService
     /**
      * Price a booking without creating it — applies the product's pricing rule
      * (seasonal overrides, day-of-week adjustments, duration/quantity discounts).
+     * Unlike assertAvailable(), this never throws on insufficient stock — it's a
+     * read-only preview, so the caller (customer/POS quote UI) can show "3 of 5
+     * available" or "fully booked" instead of an error. assertAvailable() is what
+     * actually rejects the booking at create() time.
      */
     public function quote(Product $product, string $checkIn, string $checkOut, int $quantity = 1): array
     {
@@ -55,9 +59,34 @@ class ReservationService
         }
 
         $this->assertDurationAllowed($product, $checkIn, $checkOut);
-        $this->assertAvailable($product, $checkIn, $checkOut, $quantity);
 
-        return $this->priceCalculator->quote($product, $checkIn, $checkOut, $quantity);
+        $remaining = $this->remainingStock($product, $checkIn, $checkOut);
+
+        return $this->priceCalculator->quote($product, $checkIn, $checkOut, $quantity) + [
+            'remaining_quantity' => $remaining,
+            'is_available' => $remaining === null || $remaining >= $quantity,
+        ];
+    }
+
+    /**
+     * Units still bookable for this date range — null means unlimited stock.
+     * Shared by assertAvailable() (throws) and quote() (reports, doesn't throw).
+     */
+    public function remainingStock(Product $product, string $checkIn, string $checkOut): ?int
+    {
+        $stock = $product->available_quantity;
+
+        if ($stock === null) {
+            return null;
+        }
+
+        $booked = (int) Reservation::where('product_id', $product->id)
+            ->where('status', '!=', 'cancelled')
+            ->where('check_in_date', '<', $checkOut)
+            ->where('check_out_date', '>', $checkIn)
+            ->sum('quantity');
+
+        return max($stock - $booked, 0);
     }
 
     /**
@@ -72,6 +101,7 @@ class ReservationService
         $quantity = (int) ($data['quantity'] ?? 1);
 
         $quote = $this->quote($product, $data['check_in_date'], $data['check_out_date'], $quantity);
+        $this->assertAvailable($product, $data['check_in_date'], $data['check_out_date'], $quantity);
 
         $reservation = Reservation::create($data + [
             'quantity' => $quantity,
@@ -154,20 +184,9 @@ class ReservationService
     /** Reject the booking when overlapping reservations exhaust the product's stock. */
     private function assertAvailable(Product $product, string $checkIn, string $checkOut, int $quantity): void
     {
-        $stock = $product->available_quantity;
+        $remaining = $this->remainingStock($product, $checkIn, $checkOut);
 
-        if ($stock === null) {
-            return;
-        }
-
-        $booked = (int) Reservation::where('product_id', $product->id)
-            ->where('status', '!=', 'cancelled')
-            ->where('check_in_date', '<', $checkOut)
-            ->where('check_out_date', '>', $checkIn)
-            ->sum('quantity');
-
-        if ($booked + $quantity > $stock) {
-            $remaining = max($stock - $booked, 0);
+        if ($remaining !== null && $quantity > $remaining) {
             throw new \InvalidArgumentException(
                 "Not available for the selected dates. Remaining quantity: {$remaining}."
             );

@@ -99,7 +99,7 @@ class PublicReservationController extends Controller
     public function show(Request $request, Reservation $reservation): JsonResponse
     {
         $email = strtolower((string) $request->query('email'));
-        $reservation->loadMissing('customer', 'product');
+        $reservation->loadMissing('customer', 'product.rental');
 
         if (! $email || strtolower((string) $reservation->customer?->email) !== $email) {
             return response()->json([
