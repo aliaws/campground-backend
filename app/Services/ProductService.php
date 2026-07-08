@@ -40,6 +40,13 @@ class ProductService
             return;
         }
 
+        // Anything created/edited through our own admin "Add Service" form is a
+        // rental by definition — force the tag so it's never left NULL (which
+        // would otherwise silently exclude it from the Services list).
+        if ($product->product_type === 'SERVICE' && empty($rentalData['industry_type'])) {
+            $rentalData['industry_type'] = 'rental';
+        }
+
         $rental = Rental::updateOrCreate(
             ['product_id' => $product->id],
             $rentalData + ['tenant_id' => $product->tenant_id]
@@ -76,18 +83,31 @@ class ProductService
             $query->where('product_type', $filters['product_type']);
         }
 
-        if (! empty($filters['exclude_type'])) {
-            $query->where('product_type', '!=', $filters['exclude_type']);
+        // The only GHL-verified signal for "this is a rental" is rentals.industry_type
+        // === 'rental' — product_type=SERVICE alone is not enough (GHL assigns the
+        // payments-layer product's own productType inconsistently; it exists purely
+        // so the booking can be invoiced, not as a deliberately-typed catalog entry).
+        if (array_key_exists('is_rental', $filters)) {
+            $isRental = (bool) $filters['is_rental'];
+            $query->where(function (Builder $q) use ($isRental) {
+                if ($isRental) {
+                    $q->where('product_type', 'SERVICE')
+                        ->whereHas('rental', fn (Builder $r) => $r->where('industry_type', 'rental'));
+                } else {
+                    $q->where('product_type', '!=', 'SERVICE')
+                        ->orWhereDoesntHave('rental')
+                        ->orWhereHas('rental', fn (Builder $r) => $r->where(
+                            fn (Builder $r2) => $r2->whereNull('industry_type')->orWhere('industry_type', '!=', 'rental')
+                        ));
+                }
+            });
         }
 
+        // Hide rental variants (their own Product+Rental row via parent_product_id)
+        // from the top-level list — shown nested under their base listing instead.
         if (! empty($filters['base_listings_only'])) {
-            // Hide rental service variants (their own Product+Rental row via
-            // rentals.parent_product_id) from the top-level list — they're
-            // shown nested under their base listing instead.
-            $query->where(function (Builder $q) {
-                $q->whereDoesntHave('rental')
-                    ->orWhereHas('rental', fn (Builder $r) => $r->whereNull('parent_product_id'));
-            });
+            $query->where(fn (Builder $q) => $q->whereDoesntHave('rental')
+                ->orWhereHas('rental', fn (Builder $r) => $r->whereNull('parent_product_id')));
         }
 
         if (! empty($filters['status'])) {
@@ -279,7 +299,7 @@ class ProductService
     {
         $query = Product::service()
             ->byTenant($filters['tenant_id'])
-            ->whereHas('rental', fn (Builder $q) => $q->whereNull('parent_product_id')->whereNotNull('ghl_service_id'))
+            ->whereHas('rental', fn (Builder $q) => $q->whereNull('parent_product_id')->whereNotNull('ghl_service_id')->where('industry_type', 'rental'))
             ->where('status', 'active')
             ->with(['rental', 'serviceVariants', 'categories', 'amenities', 'features', 'prices']);
 
