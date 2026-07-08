@@ -1,18 +1,20 @@
 # Campground POS — Full System Context
 
+> This file is the authoritative reference for how this system actually works.
+> Large parts of it were rewritten after a deep audit (querying GHL's live API
+> directly, cross-checking against the DB) that found several previous
+> assumptions were wrong — those corrections are called out explicitly below.
+> If something here conflicts with older comments in code, **trust this file
+> first**, then re-verify against the code before assuming either is stale.
+
 ## Overview
 
-A campground vacation booking POS with GoHighLevel (GHL) CRM integration. Two product concepts:
-- **Physical/Digital Products** (`PHYSICAL` / `DIGITAL`) — sellable merchandise
-- **Services/Rentals** (`SERVICE`) — bookable campsites, cabins, glamping, RV sites
+A campground vacation booking POS with GoHighLevel (GHL) CRM integration. Everything sellable/bookable lives in one `products` table, split conceptually into:
+- **Physical/Digital Products** (`product_type: PHYSICAL` / `DIGITAL`) — sellable merchandise, no booking.
+- **Rental Services** (`product_type: SERVICE`, one-to-one `Rental` row) — bookable campsites, cabins, glamping, RV sites.
 
-**Key architectural decision:** GHL has two separate APIs:
-- **Services API** (`services.leadconnectorhq.com/calendars/services`) — for rental bookings
-- **Products API** (`products.leadconnectorhq.com`) — for physical/digital merch
-
-When a GHL Service is created, GHL auto-creates a Product in Payments. Our backend stores everything in the unified `products` table, but the frontend treats them differently:
-- `/services` page → only GHL rental services (with `ghl_service_id`), showing variants inline
-- `/products` page → all products (PHYSICAL, DIGITAL, SERVICE)
+**Critical, hard-won fact — read this before touching Products/Services logic:**
+`product_type = 'SERVICE'` is **necessary but not sufficient** to mean "this is a rental." The only GHL-verified signal for "this is genuinely a rental, not some other kind of service" is **`rentals.industry_type === 'rental'`**. Do not filter/split on `product_type` alone. See "Rentals vs Products" section below for the full reasoning and evidence — this was the source of a real, repeated bug this session.
 
 ---
 
@@ -25,435 +27,190 @@ When a GHL Service is created, GHL auto-creates a Product in Payments. Our backe
 
 ---
 
-## Backend Architecture (Laravel 13.x + PostgreSQL)
-
-### Stack
-- **PHP** 8.3, **Laravel** 13, **PostgreSQL** 16 (Docker), **Sanctum** (token auth)
-- Docker: `postgres:16`, user=`user`, password=`admin`, port=5432, DB=`campground_pos`
+## Backend Architecture (Laravel 13, PHP 8.4)
 
 ### Directory Structure
 ```
 app/
 ├── Http/
-│   ├── Controllers/Api/V1/   → Thin controllers
-│   ├── Requests/              → FormRequest validation
-│   └── Resources/             → API Resources (JSON shape)
+│   ├── Controllers/Api/V1/          → Thin controllers (+ Public/ for guest-facing endpoints)
+│   ├── Requests/                     → FormRequest validation
+│   └── Resources/                    → API Resources (JSON shape)
 ├── Integrations/GHL/
-│   ├── GhlClient.php          → Low-level HTTP client for GHL API
-│   └── GhlWebhookHandler.php  → Inbound webhook receiver
-├── Models/                    → 17 Eloquent models (all ULID primary keys)
-├── Providers/
-└── Services/                  → Business logic layer
-    ├── ProductService.php
-    ├── ReservationService.php
+│   └── GhlClient.php                 → Low-level HTTP client for GHL API (get/post/put/delete/poolGet)
+├── Models/                           → Eloquent models, ULID primary keys
+└── Services/                         → Business logic layer
+    ├── ProductService.php            → Product CRUD + list filters (is_rental, base_listings_only)
+    ├── ReservationService.php        → Booking creation, quote, availability
+    ├── BookingPriceCalculator.php    → Pricing-rule engine (per-night price + discounts)
     ├── TransactionService.php
-    ├── BookingPriceCalculator.php   → Pricing rule engine
-    ├── GhlService.php               → Contact/opportunity sync
-    ├── GhlAuthService.php           → OAuth2 token refresh
-    ├── GhlProductSyncService.php    → Product/price/variant/category sync
-    ├── GhlServiceSyncService.php    → GHL Calendar Services/Rentals pull
+    ├── GhlService.php                 → Contact sync
+    ├── GhlAuthService.php             → OAuth2 token refresh
+    ├── GhlBookingService.php          → Creates GHL calendar bookings + invoices for a Reservation
+    ├── GhlProductSyncService.php      → Physical/Digital product + price + category sync (Payments API)
+    ├── GhlServiceSyncService.php      → Rental service pull (Calendar Services API, industryType=rental)
     └── GhlImageSyncService.php
 ```
 
-### Route Structure (`routes/api.php`)
-All prefixed with `/api/v1`:
+### Key Models — the Product/Rental/RentalPricingRule split
 
-| Group | Endpoints |
-|-------|-----------|
-| Auth | `POST /auth/login`, `POST /auth/register`, `POST /auth/logout`, `GET /auth/me` |
-| Products | CRUD + image upload, prices, categories attach |
-| Services | `GET /services`, `GET /services/{id}`, `POST /services/pull-ghl` |
-| Customers | CRUD + `POST /{id}/sync-ghl`, `POST /bulk-sync-ghl`, `POST /bulk-pull-ghl` |
-| Reservations | CRUD + `POST /quote`, `PATCH /{id}/status` |
-| Transactions | CRUD + `PATCH /{id}/payment-status`, `GET /{id}/invoice` |
-| Categories | CRUD + GHL sync/pull |
-| Amenities/Features | CRUD |
-| Settings | Engage OAuth, countries, custom fields |
-| Webhooks | `POST /webhooks/ghl` (no auth) |
-
-### Key Models
-
-**Product** — Unified `products` table:
+**`Product`** (`products` table) — the common table for every sellable/bookable item:
 - `product_type`: `PHYSICAL` | `DIGITAL` | `SERVICE`
-- `parent_product_id`: links service variants to base product (GHL model)
-- `variant_name`, `ghl_service_id`: GHL Calendar service variant fields
-- Booking fields: `booking_unit`, `min_duration`, `max_duration`, `duration_unit`, `booking_start_time`, `booking_end_time`, `max_quantity`
-- `pricing_rule` (JSON): GHL pricingRule shape with base_price, rules array
-- `fromPrice()`: computed storefront "From $/day" across variants
-- Relations: `categories()`, `prices()`, `variants()`, `serviceVariants()` (self-referencing), `amenities()`, `features()`, `reservations()`
-- Scopes: `byTenant()`, `service()`, `physical()`, `digital()`
+- `Product::RENTAL_PROXIED_ATTRIBUTES` (a fixed list including `parent_product_id`, `variant_name`, `industry_type`, `ghl_service_id`, `available_quantity`, `max_quantity`, `booking_*`, `site_type`, `capacity`, `hookups`, `map_position`, `pet_friendly`, `ada_accessible`, `pricing_rule`) — reading/writing any of these on a `Product` instance is **transparently proxied to its `Rental` row** via magic `getAttribute`/custom setters in `Product.php`. So `$product->available_quantity` really means `$product->rental->available_quantity`. Only `SERVICE`-type products have a `Rental` row.
+- Relations: `rental()` (hasOne), `parent()` (hasOneThrough via `rentals.parent_product_id`), `serviceVariants()` (hasManyThrough — other rentals whose `parent_product_id` points at this product), `categories()`, `prices()`, `variants()` (generic `ProductVariant`/option model — pricing options like Size/Color, **not the same thing as rental variants**), `amenities()`, `features()`.
+- `isServiceVariant()`: `parent_product_id !== null`.
 
-**Reservation**:
-- `customer_id`, `product_id`, `check_in_date`, `check_out_date`
-- `quantity`, `base_amount`, `discount_amount`, `total_amount`, `security_deposit_amount`
-- `price_breakdown` (JSON): full nightly breakdown from quote engine
-- `status`: `pending` | `confirmed` | `cancelled`
-- `ghl_opportunity_id`: linked GHL opportunity
+**`Rental`** (`rentals` table) — one-to-one with `Product` via `product_id`. Rental-specific data:
+- `parent_product_id` — set only on variant rows; the base listing's row has this `null`. Each variant (e.g. "Regular", "Premium") is its **own separate `Product` + `Rental` row** — not a sub-record. This is required because each variant needs its own `engage_product_id` (see "why productType is unreliable" below) to invoice that specific variant's booking.
+- `industry_type` — **the field that matters most**. Mirrors GHL's own `industryType` on the calendar service. Only `'rental'` means "real rental." Set by `GhlServiceSyncService::upsertFromDetail()` from GHL, or forced to `'rental'` by `ProductService::syncRentalData()` when a SERVICE product is created/edited through our own admin form (since anything created via "Add Service" is a rental by definition).
+- `ghl_service_id` — GHL calendar service ID (scheduling layer). `null` for locally-created rentals never synced to GHL.
+- `available_quantity` / `max_quantity` — nullable int; **`null` means unlimited**, checked everywhere (`ReservationService::remainingStock()`). A real number is compared against overlapping-date bookings.
+- `booking_start_time` / `booking_end_time` — check-in-after / check-out-before times of day. **Informational policy only** — a `Reservation` has no time component, these are never enforced, just displayed.
+- `booking_unit`, `min_duration`, `max_duration`, `duration_unit` — stay-length bounds, enforced in `ReservationService::assertDurationAllowed()`.
+- `site_type`, `capacity`, `hookups`, `map_position`, `map_polygon`, `pet_friendly`, `ada_accessible`, `campsite_status` — campsite-specific display fields.
+- `pricingRules()` / `activePricingRule()` — see pricing section below.
 
-**Customer**:
-- `name`, `email`, `phone`, `address` (JSON)
-- `ghl_contact_id`, `ghl_sync_status`, `ghl_last_synced_at`
-
-**GHL Sync Fields** (on Product, Category, Customer, Reservation):
-- `engage_product_id` / `engage_collection_id` / `ghl_contact_id` / `ghl_opportunity_id` — GHL entity IDs
-- `engage_sync_status`: `not_synced` | `pending` | `synced` | `error`
-- `engage_last_synced_at`
-
-### Services API — GHL-Shaped Response (`ServiceResource`)
-
-The `/services` endpoint returns data shaped like the GHL Services API, NOT the Product model. Uses `app/Http/Resources/ServiceResource.php`.
-
-**Listing** (`GET /services`):
+**`RentalPricingRule`** (`rental_pricing_rules` table) — **the actual source of truth for booking price**, via `Rental::activePricingRule()` (lowest `priority` wins; no admin UI creates >1 rule per rental yet) → `Rental::getPricingRuleAttribute()` reassembles the flat `pricing_rule` JSON shape:
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "01kwksv1z65tgkwn5zew325cmb",          // local DB ID
-      "_id": "6966e6a92c860677c2fab136",             // GHL service ID
-      "isActive": true,
-      "name": "Pine Ridge Family Campsite",           // clean name (no variant suffix)
-      "slug": "300---forest-edge-tent-copy",
-      "description": "...",
-      "coverImage": "https://...",
-      "bookingUnit": "day",
-      "quantity": 1,
-      "maxQuantity": 1,
-      "images": [{ "_id": "...", "url": "...", "name": "Image 1", "position": 0 }],
-      "serviceCategoryId": "6952b37f7931bd505749c9ed",
-      "categoryName": "Cabins",
-      "variantName": "Regular",                       // base variant name
-      "isVariantsEnabled": true,                      // true when >1 variant
-      "isVariant": false,
-      "variants": [                                   // ALL variants including base
-        {
-          "id": "01kwksv1z65tgkwn5zew325cmb",        // local DB ID
-          "_id": "6966e6a92c860677c2fab136",          // GHL service ID
-          "variantName": "Regular",
-          "payment": { "amount": 35, "description": "..." },
-          "isVariant": false,
-          "variantId": null,                          // null for base
-          "productId": "6966e6a94798be5a73a44f5d"     // GHL Payments productId
-        },
-        {
-          "id": "01kwksv559jjtn5dgyzp4rf8s8",
-          "_id": "6a4642b21a2c4582d7da99e0",
-          "variantName": "Exclusive",
-          "payment": { "amount": 23 },
-          "isVariant": true,
-          "variantId": "6966e6a92c860677c2fab136",    // points to base GHL service ID
-          "productId": "6a4642b3c8e4bb0514c75f5d"
-        }
-      ],
-      "pricingRule": {                                // full GHL pricingRule
-        "name": "Pine Ridge Family Campsite Pricing",
-        "appliesTo": "rental",
-        "basePrice": { "value": 35, "strategy": "per_day" },
-        "rules": [
-          { "type": "date_range", "match": { "from": "2026-07-09", "to": "2026-07-22" }, "value": 23, "valueType": "flat" },
-          { "type": "day_of_week", "match": { "dayOfWeek": 1 }, "value": 7.3, "valueType": "percentage" },
-          { "type": "duration_discount", "match": { "duration": 23, "durationUnit": "day" }, "value": 20, "valueType": "percentage" }
-        ],
-        "securityDeposit": { "amount": 0, "refundable": true },
-        "paymentTerms": { "type": "full" }
-      },
-      "bookingPeriodType": "date-selection",          // derived: fixed | date-selection | date-time-selection
-      "minDuration": 1,
-      "maxDuration": 30,
-      "bookingStartTime": null,
-      "bookingEndTime": null,
-      "fromPrice": 23,                                // min across variants
-      "categories": [...],
-      "amenities": [...],
-      "features": [...]
-    }
-  ],
-  "message": "Services retrieved."
+  "name": "...", "applies_to": "rental",
+  "base_price": 35.00, "base_price_strategy": "per_day",
+  "rules": [ { "type": "date_range"|"day_of_week"|"duration_discount"|"quantity_discount", "match": {...}, "value": 20, "valueType": "flat"|"percentage" } ],
+  "security_deposit_amount": 0, "security_deposit_refundable": true,
+  "payment_terms": { "type": "full" }, "ghl_pricing_rule_id": "..."
 }
 ```
 
-**Important:** Only services synced FROM GHL appear (those with `ghl_service_id IS NOT NULL`). Local service-type products are excluded from this endpoint.
+**Important gotcha — two "price" systems that look related but aren't**: `ProductPrice` (`product_prices` table, the admin form's generic "Pricing" tab, `productsApi.addPrice/updatePrice`) is a **separate, independent** field from `RentalPricingRule`. `BookingPriceCalculator::quote()` reads `$product->pricing_rule` (→ `RentalPricingRule`) **first**, and only falls back to `ProductPrice.amount` when no pricing rule exists at all. Editing the generic "Pricing" tab for an **already GHL-synced** rental has **zero effect** on what a guest is actually charged — it only affects the GHL payments-catalog display price. The admin form (`ProductsManager.tsx`) now has a distinct "Rental Base Price" control in the Campsite Details tab, bound to `pricing_rule.base_price`, which is what actually needs editing to change a booking's price.
 
-### GHL Integration — Two-Way Sync
+**Same pattern, "categories"**: our own `Category` model (`categories` table, `product_categories` pivot, `engage_collection_id` synced to GHL "collections" via `GhlProductSyncService`) is a **completely separate, disconnected** system from `Rental.ghl_service_category_id` (GHL's own calendar-side "service category," pulled passively, never linked to our `Category` table, never synced anywhere). As of this writing, **0 of 38 rentals have a local Category assigned** — the admin Category picker has simply never been used for rentals. Known, deliberately not reconciled (would need more GHL API work); flagged as a real gap, not fixed.
 
-**Outbound (Local → GHL):**
-| Trigger | GHL Action |
-|---------|------------|
-| Customer created/updated | Create/update GHL contact |
-| Reservation created | Create GHL opportunity |
-| Reservation status changed | Update GHL opportunity stage |
-| Product created/updated | Create/update GHL product (with variants, prices, image) |
-| Category created/updated | Create/update GHL collection |
+### Rentals vs Products — the `industry_type` distinction (read before changing the split)
 
-**Inbound (GHL → Local):**
+**Why `product_type` alone is unreliable**: GHL auto-creates a payments-layer "product" for every rental service purely so the booking can be invoiced (a `productId` to attach the invoice to) — it is not a curated catalog entry. Verified live: the exact same rental's own variants get **inconsistent `productType`** in GHL's own `products/` catalog (e.g. one variant tagged `SERVICE`, its sibling variant of the same listing tagged `DIGITAL`). This field cannot be trusted to mean "rental," and the invoicing-only product itself should never be surfaced as a standalone Product.
 
-**Manual pull** (button in admin UI):
-| Action | Endpoint |
-|--------|----------|
-| Pull all GHL contacts → local customers | `POST /customers/bulk-pull-ghl` (`GhlService::bulkPullContacts()`) |
-| Pull all GHL services/rentals → local products | `POST /services/pull-ghl` (`GhlServiceSyncService::pullServices()`) |
+**The correct signal**: `GET calendars/services?locationId=...&industryType=rental` (GHL, server-side filtered) is the authoritative rental registry. Cross-checking this against the DB found a stale row: a product ("300 - Forest Edge Tent") had a real `ghl_service_id` and locally-stored `industry_type = 'rental'`, but querying GHL directly (even with `industryType=rental` in the query — that param does **not** coerce the answer, it's just required by the endpoint) showed its true `industryType` is `"service"`. That row was corrected to `industry_type = 'service'` and now correctly shows in Products, not Services.
 
-**Webhook-driven (GHL → Local):**
-| Event | Action |
-|-------|--------|
-| `contact.created` | Create/update customer with `ghl_contact_id` |
-| `contact.updated` | Update matching customer |
-| `opportunity.created` | Link to latest unlinked reservation |
-| `opportunity.stage_changed` | Map: `new→pending`, `booked→confirmed`, `lost→cancelled` |
+**Current filter implementation** (`ProductService::list()`):
+```php
+// is_rental=1 (Services page): product_type=SERVICE AND rentals.industry_type='rental'
+// is_rental=0 (Products page): everything else, INCLUDING SERVICE-type products
+//   whose industry_type isn't 'rental' (e.g. the corrected Forest Edge Tent)
+// base_listings_only=1: additionally excludes rows where rentals.parent_product_id is set
+//   (i.e. hides variants from the top-level list — they're shown nested instead)
+```
+Frontend: `ProductsManager.tsx` (shared component, `mode: 'goods' | 'services'`) → `app/admin/products/page.tsx` (`mode="goods"`) and `app/admin/services/page.tsx` (`mode="services"`), linked from `Sidebar.tsx`.
 
-**GHL Service Sync** (`GhlServiceSyncService::pullServices()`):
-- Pulls all Calendar Services with `industryType=rental` from `GET /calendars/services`
-- For each service, fetches detail from `GET /calendars/services/{id}` (has pricingRule, variants, durations)
-- Base services (`variantId=null`) become product rows with `parent_product_id=null`
-- Variant services (`variantId=parentId`) get `parent_product_id` linking to base
-- Name is saved as-is from GHL (e.g., "Pine Ridge Family Campsite") — NOT with variant suffix
-- `pricingRule` → `pricing_rule` JSON on the product
-- Only services with `ghl_service_id` appear on the frontend services page
+**Variant display**: a rental's variants are never shown as separate top-level rows in Services — only base listings (`parent_product_id IS NULL`) show at the top level. Expanding a row (or opening its edit modal's "Variants" tab, which for services mode shows the *real* rental variants, not the irrelevant generic `ProductVariant` editor) shows the **base itself first** (labeled "(default)", using its own `Rental.variant_name`, e.g. "Regular") followed by the other `service_variants` as peers — the base's own variant identity is never left implicit.
 
-### Booking Price Calculator (`BookingPriceCalculator`)
+**Preventing future corruption**: `GhlProductSyncService::bulkPullFromGhl()` ("Pull All from GHL" on the Products page) fetches GHL's entire `products/` catalog. Without protection, this would stub in the invoicing-only payment products behind rentals as fake standalone Products (using GHL's unreliable `productType`). Fixed via `GhlServiceSyncService::fetchRentalProductIds()` (one `calendars/services?industryType=rental` call, returns every rental-linked payment `productId`) — `bulkPullFromGhl()` fetches this set once and skips any GHL catalog entry on it. Verified: running the bulk pull produces `created: 0` / zero duplicate `engage_product_id` rows.
 
-Computes per-night quote:
-1. **Base price** per day from `pricing_rule.base_price`
-2. **Nightly rules** (applied per-date):
-   - `date_range`: flat/% override for specific dates (peak season)
-   - `day_of_week`: % adjustment for specific days (weekend pricing)
-3. **Subtotal discounts** (applied to total):
-   - `duration_discount`: %/flat off for long stays
-   - `quantity_discount`: %/flat off for multi-unit
-4. Output: `nights`, `nightly[]` (per-date breakdown), `subtotal`, `discounts[]`, `total_amount`, `security_deposit_amount`, `grand_total`
+### Availability & real-time booking
+
+`Rental.available_quantity`: `null` = unlimited (checked everywhere). **Known historical bug, fixed**: `ProductsManager.tsx` had the state/payload plumbing for `available_quantity` but no actual `<Input>` bound to it, so every locally-created rental (29 of 38 at the time) silently got `NULL`. Fixed by adding the input (Campsite Details tab) and backfilling existing NULLs to `1`.
+
+`ReservationService`:
+- `remainingStock(Product, checkIn, checkOut): ?int` — shared helper, `null` = unlimited, else stock minus overlapping non-cancelled reservation quantities. Used by both:
+  - `assertAvailable()` (private, throws `InvalidArgumentException` if quantity requested exceeds remaining) — called explicitly in `create()`, actually rejects overbooking at creation time.
+  - `quote()` — **never throws on insufficient stock**, just adds `remaining_quantity`/`is_available: bool` to its returned array, so the UI can show live status ("2 of 3 available" / "Fully booked") instead of a hard error while previewing.
+- `assertDurationAllowed()` — still throws in `quote()` for min/max stay violations (unrelated to availability, always a hard validation).
+
+Frontend: `usePublicServiceQuote`/`useServiceQuote` responses (typed via `BookingQuote` in `types/booking.ts`) now include `remaining_quantity`/`is_available`. Both the customer rental page (`app/(customer)/rentals/[id]/page.tsx`) and the POS booking modal (`app/pos/services/[id]/page.tsx`) show an inline "✓ N of M available" / "✕ Fully booked for these dates" message and cap the quantity stepper by the live `remaining_quantity` (falling back to the product's static `maxQuantity` before a quote exists), and disable the booking button when `is_available === false`. Check-in/check-out times (`booking_start_time`/`booking_end_time`) are displayed (not enforced) on both booking pages and the guest confirmation page (`app/(customer)/rentals/confirmation/[reservationId]/page.tsx`), via `GuestReservationResource`.
+
+**Deliberately not built** (discussed and declined for now): pooled stock across variants (each variant keeps its own independent `available_quantity` — a "Regular" booking never affects "Premium"'s count) and a full blocked-dates calendar picker (current UX is a live message after picking plain dates, not a calendar with greyed-out days).
+
+### Reservation lifecycle (`requested` → `confirmed`, or `pending` → `confirmed`)
+
+Two distinct creation paths through `ReservationService::create(array $data, bool $autoConfirm = true)`:
+- **Staff-created** (internal POS, `autoConfirm: true`, default): immediately synced to GHL — `status: 'pending'` then a real `GhlBookingService::createBooking()` call (contact sync, calendar booking, invoice, payment email) happens inline. Unchanged, original behavior.
+- **Guest-submitted** (public booking form, `autoConfirm: false`): created as `status: 'requested'`, purely local — **no GHL contact sync, no booking, no invoice, no transaction** happen at submission time.
+
+`ReservationService::confirm(Reservation)` — the **only** path that turns a `requested` reservation real: calls `GhlBookingService::createBooking()` (contact sync + booking + invoice + payment email, NOT wrapped in try/catch — failures must surface to staff, unlike the staff-created path which logs and swallows GHL errors), sets `status: 'confirmed'`, creates the `Transaction`. Triggered by the "Confirm" button in `app/pos/reservations/page.tsx`, hitting `POST /reservations/{id}/confirm`.
+
+Guard: `ReservationService::updateStatus()` (the generic `PATCH /reservations/{id}/status` endpoint) explicitly rejects `requested → confirmed` transitions — must go through `confirm()` instead, since only that path actually creates the GHL booking.
+
+**UX note on `confirm()` latency**: the full GHL round trip (contact sync → fees/taxes → booking create → invoice fetch → payment email) can take **10-20+ seconds** for real GHL calls. The POS Confirm button shows an explicit "Confirming… this may take up to 15-20 seconds" banner and success/error banners on completion — earlier versions had no such feedback and looked broken (it wasn't; it was just slow with zero UI feedback).
+
+### GHL Integration — key sync entry points
+
+| Action | Method | Notes |
+|---|---|---|
+| Pull rentals from GHL | `GhlServiceSyncService::pullServices()` | Server-filtered `industryType=rental`; only path that legitimately sets `industry_type='rental'` from real GHL data |
+| Pull products from GHL | `GhlProductSyncService::bulkPullFromGhl()` | Now excludes rental-linked payment product ids (see above) |
+| Sync a product to GHL | `GhlProductSyncService::syncProductToGhl()` | Pushes `collectionIds` from local `Category.engage_collection_id` |
+| Create/sync a customer contact | `GhlService::syncContactToGhl()` | Called lazily inside `GhlBookingService::createBooking()`, only if `ghl_contact_id` is null |
+| Create a real booking + invoice | `GhlBookingService::createBooking()` | The one method that does contact sync + calendar booking + invoice + payment email; called by both the staff auto-confirm path and `ReservationService::confirm()` |
+| Update/cancel an existing GHL booking | `GhlBookingService::updateBookingStatus()` | No-op if `ghl_booking_id` is null — never creates a booking, only touches an existing one |
 
 ---
 
-## Frontend Architecture (Next.js 16 + React 19 + TypeScript)
+## Frontend Architecture (Next.js 16, React 19)
 
-### Stack
-- **Next.js** 16, **React** 19, **TypeScript** 5
-- **TanStack React Query** 5, **Axios**, **Tailwind CSS** 4
-- **Lucide React** icons
+### Route groups
+- `app/(customer)/...` — the guest-facing booking site (site root, own layout with header/footer nav — Gallery/About/Contact/Login). Deliberately does not use `AppLayout`.
+- `app/pos/...` — internal staff POS (dashboard, reservations, services, transactions, campsite-map, staff), uses `AppLayout` + `Navbar` (blue theme).
+- `app/admin/...` — admin panel (Products, Services, Customers, Configurations, Engage Settings), uses `AppLayout` + `Sidebar`.
+- Auth guard (`AppLayout`) is client-side only — no `middleware.ts` exists. Reads `AuthContext` (token in `localStorage('auth_token')`), renders `null` while loading/unauthenticated, redirects via `useEffect`. No content flash, but also no server-side gate.
 
-### Directory Structure
-```
-app/                          → Next.js App Router pages
-├── services/                 → Storefront: browse & book GHL rental services
-│   ├── page.tsx              → Service listing with filters (category, price, dates, sort)
-│   └── [id]/page.tsx         → Service detail + variant selection + booking panel + BookingModal
-├── customers/page.tsx        → Public customers list
-├── reservations/page.tsx     → Reservation list with status filter
-├── products/                 → Product listing/detail (ALL types)
-├── admin/                    → Admin CRUD interfaces
-│   ├── customers/page.tsx    → Admin: full CRUD + GHL sync + Pull from GHL button
-│   ├── products/             → Admin: product create/edit
-│   ├── categories/           → Admin: category management
-│   ├── amenities/            → Admin: amenenity management
-│   ├── features/             → Admin: feature management
-│   ├── prices/page.tsx       → Admin: all prices view
-│   ├── engages/              → GHL OAuth settings
-│   └── ...                   → countries, custom-fields, webhooks
-├── dashboard/page.tsx        → POS dashboard
-├── login/page.tsx            → Auth login
-├── register/page.tsx         → Auth registration
-├── transactions/page.tsx     → Transactions list
-├── campsite-map/page.tsx     → Map view
-├── reports/page.tsx          → Reports
-├── settings/                 → Settings pages
-├── staff/page.tsx            → Staff view
-├── layout.tsx                → Root layout with providers
-└── page.tsx                  → Home page
-components/
-├── ui/                       → Reusable UI components
-│   ├── AppLayout.tsx         → Main app shell with sidebar
-│   ├── Sidebar.tsx           → Navigation sidebar
-│   ├── Navbar.tsx            → Top navbar
-│   ├── Button.tsx, Input.tsx, Select.tsx, Textarea.tsx
-│   ├── Card.tsx, Table.tsx, Modal.tsx, Badge.tsx
-│   ├── CategorySelect.tsx
-│   └── Providers.tsx         → QueryClient + Auth provider wrapper
-└── dashboard/                → Dashboard widgets
-    ├── CampsiteGrid.tsx
-    ├── ActiveReservations.tsx
-    ├── RevenueSummary.tsx
-    └── TransactionBreakdown.tsx
-hooks/                        → React Query hooks
-├── useCustomers.ts           → Customer CRUD + sync + pull from GHL
-├── useServices.ts            → Services list, detail, quote, pull from GHL
-├── useReservations.ts        → Reservation CRUD + status update
-├── useProducts.ts            → Product CRUD
-├── useCategories.ts          → Category CRUD
-├── useAmenities.ts           → Amenity CRUD
-├── useFeatures.ts            → Feature CRUD
-└── useTransactions.ts        → Transaction CRUD
-lib/
-├── api/                      → API client modules
-│   ├── client.ts             → Axios instance with auth interceptor
-│   ├── auth.ts               → Auth API
-│   ├── customers.ts          → Customer API
-│   ├── services.ts           → Services API (list, detail, quote, pull)
-│   ├── products.ts           → Products API
-│   ├── reservations.ts       → Reservations API
-│   ├── transactions.ts       → Transactions API
-│   ├── catalog.ts            → Categories/amenities/features API
-│   └── settings.ts           → Settings API
-├── auth/AuthContext.tsx       → Auth context provider
-├── theme/ThemeContext.tsx     → Theme provider
-└── utils/image.ts            → Image URL helper
-types/                        → TypeScript interfaces
-├── api.ts                    → ApiResponse<T>, PaginatedResponse<T>, User
-├── service.ts                → Service, ServiceVariant, ServicePricingRule (GHL-shaped)
-├── customer.ts               → Customer
-├── product.ts                → Product, PricingRule, PricingRuleLine, ProductPrice, etc.
-├── booking.ts                → BookingQuote, NightlyPrice, QuoteDiscount, QuoteParams
-├── reservation.ts            → Reservation
-├── transaction.ts            → Transaction
-└── ghl.ts                    → GHL-related types
-```
+### Key shared components
+- `components/products/ProductsManager.tsx` — shared Products/Services admin CRUD (see split logic above). `mode: 'goods' | 'services'` controls filters, labels, and which "Variants" tab content renders.
+- `components/ui/AppLayout.tsx`, `Navbar.tsx`, `Sidebar.tsx` — POS/admin chrome.
+- `app/(customer)/layout.tsx` — customer site chrome (sticky header, green branding, active-pill nav, mobile hamburger).
 
-### Auth Flow
-1. `lib/auth/AuthContext.tsx` — wraps app, checks localStorage for token
-2. On login: `POST /api/v1/auth/login` → stores token in `localStorage('auth_token')`
-3. `lib/api/client.ts` — Axios interceptor adds `Authorization: Bearer <token>` to every request
-4. On 401: clears token, redirects to `/login`
-5. Login users from seeder: `test@example.com` / `password`, `admin@campground.com` / `password`
+### Booking flow (guest)
+```
+/ (customer home, listings)
+  → /rentals/{id}                         Pick variant, dates, quantity
+      live quote via usePublicServiceQuote (now includes remaining_quantity/is_available)
+      → /rentals/checkout                 Guest enters name/email/phone
+          → POST /public/reservations     autoConfirm=false → status: 'requested'
+          → /rentals/confirmation/{id}    "We'll review and contact you" — NOT a payment link
+```
+Staff later confirms in `/pos/reservations` → `POST /reservations/{id}/confirm` → real GHL booking/invoice/payment email sent then.
 
-### Booking Flow (End-to-End)
-```
-/services                          → Browse GHL rental services (grid/list, filter by category/price/dates)
-  ↓                                Only shows services with ghl_service_id (actual GHL rentals)
-/services/{id}                     → Service detail page
-  ├── Shows variants[] from GHL API (e.g. Regular, Exclusive, Premium)
-  ├── Pick start date + duration
-  ├── Choose quantity
-  ├── Live quote from POST /reservations/quote (auto-refetches)
-  └── "Book Now" → BookingModal
-        ↓
-BookingModal                       → Confirm booking
-  ├── Loads customers via useCustomers({ per_page: 100 }) — returns array directly
-  │   useCustomers returns res.data.data (already extracted), so access as Array.isArray(data) ? data : data?.data || []
-  ├── Select customer from dropdown
-  └── Confirm → POST /api/v1/reservations
-        ↓
-Backend:
-  1. ReservationService::create()
-     → BookingPriceCalculator::quote() for pricing
-     → Reservation::create() with price_breakdown
-     → GhlService::createOpportunity() → GHL opportunity
-  2. TransactionService::autoCreateFromReservation()
-     → Creates Transaction + TransactionItem
-        ↓
-Redirect to /reservations           → View reservation list
-```
-
-### Services API Client (frontend)
-```ts
-// lib/api/services.ts — uses Service type (GHL-shaped), NOT Product
-servicesApi.list(params?)              → GET /services → Service[]
-servicesApi.get(id)                    → GET /services/{id} → Service
-servicesApi.quote(data)                → POST /reservations/quote → BookingQuote
-servicesApi.pullFromGhl()             → POST /services/pull-ghl
-```
-
-### Customer API Client (frontend)
-```ts
-// lib/api/customers.ts
-customersApi.list(params?)              → GET /customers
-customersApi.get(id)                    → GET /customers/{id}
-customersApi.create(data)               → POST /customers
-customersApi.update(id, data)           → PUT /customers/{id}
-customersApi.delete(id)                 → DELETE /customers/{id}
-customersApi.syncToGhl(id)              → POST /customers/{id}/sync-ghl
-customersApi.bulkSyncToGhl()            → POST /customers/bulk-sync-ghl
-customersApi.bulkPullFromGhl()          → POST /customers/bulk-pull-ghl
-```
-
-### API Response Format
-All responses follow:
-```json
-{
-  "success": true,
-  "data": { ... },          // Single object or PaginatedResponse
-  "message": "..."
-}
-```
-
-Paginated:
-```json
-{
-  "data": [ ... ],
-  "current_page": 1,
-  "last_page": 5,
-  "per_page": 15,
-  "total": 72,
-  "next_page_url": "...",
-  "prev_page_url": null
-}
-```
+### Types
+- `types/booking.ts` — `BookingQuote` (now includes `remaining_quantity`, `is_available`), `QuoteParams`.
+- `types/product.ts` — `Product` (includes `parent_product_id`, `variant_name`, `service_variants?: Product[]`, `pricing_rule: PricingRule | null`).
+- `types/guestReservation.ts` — `GuestReservation` (now includes `booking_start_time`/`booking_end_time`).
+- `types/reservation.ts` — `Reservation.status`: `'requested' | 'pending' | 'confirmed' | 'cancelled'`.
 
 ---
 
-## GHL Services API Reference
+## Known gaps / deliberately deferred (do not assume these are "todo bugs" to silently fix — confirm with the user first)
 
-Source files in `json/` folder:
-
-- `all service.json` — `GET /calendars/services?locationId=...&industryType=rental` — flat list of all services (base + variants)
-- `single service details.json` — `GET /calendars/services/{id}?locationId=...` — base service with embedded `variants[]`, `pricingRule`, durations
-- `sindle service variant details.json` — `GET /calendars/services/{variantId}` — single variant with its own `pricingRule`
-
-**Key GHL fields per service:**
-| Field | Description |
-|-------|-------------|
-| `_id` | GHL service/rental record ID |
-| `name` | Service name (clean, no variant suffix) |
-| `variantName` | Variant label (Regular, Premium, Exclusive, etc.) |
-| `isVariant` | `true` if this is a variant, `false` if base |
-| `variantId` | GHL service ID of the parent (null for base) |
-| `productId` | GHL Payments-layer Product ID (auto-created) |
-| `pricingRule` | Full pricing config with `basePrice`, `rules[]`, `securityDeposit` |
-| `bookingPeriodType` | `fixed` / `date-selection` / `date-time-selection` |
-| `minDuration` / `maxDuration` | Booking duration bounds |
-| `serviceCategoryId` | GHL service category ID (separate from Payments collections) |
+- Dead "New Reservation" button on `app/pos/reservations/page.tsx` — no `onClick` handler at all. Found during exploration, unrelated to the availability work, not yet fixed.
+- Category duality (local `Category` system vs GHL's calendar-side `serviceCategoryId`) — not reconciled, 0 rentals have a local category.
+- Pooled variant stock and a full blocked-dates calendar — both explicitly discussed and declined in favor of the simpler independent-stock / live-message approach.
+- 4 orphaned `Rental` rows exist in the DB with no matching `Product` (dangling FK from past deletions) — harmless (invisible to any Product-based query) but not cleaned up.
 
 ---
 
 ## Docker Environment
 
 ```bash
-# PostgreSQL (running)
-docker run -d \
-  --name postgres \
-  -e POSTGRES_USER=user \
-  -e POSTGRES_PASSWORD=admin \
-  -e POSTGRES_DB=demo \
-  -p 5432:5432 \
-  postgres:16
+docker run -d --name postgres \
+  -e POSTGRES_USER=user -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=demo \
+  -p 5432:5432 postgres:16
 ```
-
-**.env** key values:
-```
-DB_CONNECTION=pgsql
-DB_HOST=localhost
-DB_PORT=5432
-DB_DATABASE=campground_pos
-DB_USERNAME=user
-DB_PASSWORD=admin
-```
-
----
+`.env`: `DB_CONNECTION=pgsql`, `DB_HOST=localhost`, `DB_PORT=5432`, `DB_DATABASE=campground_pos`, `DB_USERNAME=user`, `DB_PASSWORD=admin`.
 
 ## Key Commands
 
 ```bash
 # Backend
-php artisan serve                    # Start API server on :8000
-php artisan migrate                  # Run pending migrations
-php artisan db:seed                  # Seed database
+php artisan serve                    # API on :8000
+php artisan migrate
+php artisan db:seed
 
-# Frontend (separate terminal)
+# Frontend (Node 20 required for Playwright — this box's default `node` is v16;
+# use `export PATH="/home/ali/.nvm/versions/node/v20.20.2/bin:$PATH"` first)
 cd ~/Projects/Laravel/CampCommander/campground-frontend
-npm run dev                          # Start Next.js dev server
+npm run dev
 ```
 
-## Login Credentials (from seed)
+Deployment: a separate server (`ssh` box, `/var/www/html/campground-backend`, nginx + php8.4-fpm) runs the `ali/add_features_products` branch. **Gotcha hit once**: `php artisan route:cache` had been run at some point and gone stale after later `git pull`s — new routes 404'd with "The route ... could not be found" until `php artisan route:clear` was run. If a route works locally but 404s on the deployed server, check `bootstrap/cache/routes-v7.php`'s mtime vs the latest commit before assuming a code problem.
+
+## Login credentials (from seed — unverified this session; only ever used via temporary bcrypt overrides for browser testing, always restored to the original hash afterward)
 | Name | Email | Password | Role |
 |------|-------|----------|------|
-| Test User | `test@example.com` | `password` | staff |
-| Test Admin | `admin@campground.com` | `password` | admin |
-| Staff User | `staff@campground.com` | `password` | staff |
+| Test Admin | `admin@campground.com` | `password` (per original seeder — not independently re-verified) | admin |
