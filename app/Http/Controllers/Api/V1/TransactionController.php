@@ -27,7 +27,15 @@ class TransactionController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => TransactionResource::collection($transactions),
+            'data' => [
+                'data' => TransactionResource::collection($transactions),
+                'current_page' => $transactions->currentPage(),
+                'last_page' => $transactions->lastPage(),
+                'per_page' => $transactions->perPage(),
+                'total' => $transactions->total(),
+                'next_page_url' => $transactions->nextPageUrl(),
+                'prev_page_url' => $transactions->previousPageUrl(),
+            ],
             'message' => 'Transactions retrieved.',
         ]);
     }

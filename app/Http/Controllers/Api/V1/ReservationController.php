@@ -31,7 +31,15 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => ReservationResource::collection($reservations),
+            'data' => [
+                'data' => ReservationResource::collection($reservations),
+                'current_page' => $reservations->currentPage(),
+                'last_page' => $reservations->lastPage(),
+                'per_page' => $reservations->perPage(),
+                'total' => $reservations->total(),
+                'next_page_url' => $reservations->nextPageUrl(),
+                'prev_page_url' => $reservations->previousPageUrl(),
+            ],
             'message' => 'Reservations retrieved.',
         ]);
     }

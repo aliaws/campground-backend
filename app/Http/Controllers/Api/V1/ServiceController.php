@@ -27,7 +27,15 @@ class ServiceController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => ServiceResource::collection($services),
+            'data' => [
+                'data' => ServiceResource::collection($services),
+                'current_page' => $services->currentPage(),
+                'last_page' => $services->lastPage(),
+                'per_page' => $services->perPage(),
+                'total' => $services->total(),
+                'next_page_url' => $services->nextPageUrl(),
+                'prev_page_url' => $services->previousPageUrl(),
+            ],
             'message' => 'Services retrieved.',
         ]);
     }
