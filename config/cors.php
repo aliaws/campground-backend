@@ -14,6 +14,7 @@ return [
     'allowed_origins_patterns' => [
         '#^https://[\w-]+\.hostingersite\.com$#',
         '#^https://[\w-]+\.builder-preview\.com$#',
+        '#^https://[\w-]+\.accuratedigital\.dev$#',
     ],
 
     'allowed_headers' => ['*'],
