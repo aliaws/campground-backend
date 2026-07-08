@@ -434,6 +434,19 @@ class GhlService
                     'invoice_status' => 'completed',
                 ])
             );
+
+            if ($reservation->status === 'requested') {
+                try {
+                    // Resolved lazily to avoid a circular constructor dependency
+                    // (ReservationService -> GhlBookingService -> GhlService).
+                    app(ReservationService::class)->autoConfirmAfterPayment($reservation);
+                } catch (\Exception $e) {
+                    Log::error('Auto-confirm after Text2Pay payment failed', [
+                        'reservation_id' => $reservation->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
     }
 

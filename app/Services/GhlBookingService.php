@@ -30,7 +30,13 @@ class GhlBookingService
         private GhlService $ghlService,
     ) {}
 
-    public function createBooking(Reservation $reservation): ?string
+    /**
+     * @param bool $skipPaymentEmail When true, the invoice this call auto-generates is
+     *   recorded as already paid instead of emailed — used when the guest already paid
+     *   via a separate Text2Pay invoice before staff/webhook confirmed the calendar slot,
+     *   so they're never asked to pay twice for the same reservation.
+     */
+    public function createBooking(Reservation $reservation, bool $skipPaymentEmail = false): ?string
     {
         $reservation->loadMissing(['customer', 'product.parent']);
         $product = $reservation->product;
@@ -100,7 +106,12 @@ class GhlBookingService
 
             if ($invoiceId) {
                 $this->syncInvoiceMetadata($reservation, $invoiceId);
-                $this->sendInvoicePaymentEmail($reservation);
+
+                if ($skipPaymentEmail) {
+                    $this->recordInvoicePayment($reservation, (float) $reservation->total_amount, 'card');
+                } else {
+                    $this->sendInvoicePaymentEmail($reservation);
+                }
             }
 
             return $bookingId;

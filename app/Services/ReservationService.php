@@ -156,6 +156,29 @@ class ReservationService
         return $reservation->fresh()->load(['customer', 'product', 'transactions']);
     }
 
+    /**
+     * Auto-confirm a guest reservation whose Text2Pay invoice was just paid (called from
+     * the GHL webhook handler, `GhlService::applyInvoiceStatus()`). Creates the real GHL
+     * calendar booking — same as confirm() — but records the already-collected payment on
+     * the booking's auto-generated invoice instead of emailing a duplicate payment request,
+     * and does NOT create a second Transaction (the one from guest submission was already
+     * marked paid by the webhook handler before this runs).
+     *
+     * No-op if the reservation isn't 'requested' anymore — keeps this safe to call from a
+     * webhook, which may retry/redeliver.
+     */
+    public function autoConfirmAfterPayment(Reservation $reservation): Reservation
+    {
+        if ($reservation->status !== 'requested') {
+            return $reservation;
+        }
+
+        $this->ghlBookingService->createBooking($reservation, skipPaymentEmail: true);
+        $reservation->update(['status' => 'confirmed']);
+
+        return $reservation->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
     public function updateStatus(Reservation $reservation, string $status): Reservation
     {
         if ($reservation->status === 'requested' && $status === 'confirmed') {
