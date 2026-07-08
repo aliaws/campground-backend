@@ -14,7 +14,7 @@ A campground vacation booking POS with GoHighLevel (GHL) CRM integration. Everyt
 - **Rental Services** (`product_type: SERVICE`, one-to-one `Rental` row) — bookable campsites, cabins, glamping, RV sites.
 
 **Critical, hard-won fact — read this before touching Products/Services logic:**
-`product_type = 'SERVICE'` is **necessary but not sufficient** to mean "this is a rental." The only GHL-verified signal for "this is genuinely a rental, not some other kind of service" is **`rentals.industry_type === 'rental'`**. Do not filter/split on `product_type` alone. See "Rentals vs Products" section below for the full reasoning and evidence — this was the source of a real, repeated bug this session.
+`product_type = 'SERVICE'` is **necessary but not sufficient** to mean "this is a rental." The deciding field is **`rentals.industry_type === 'rental'`** — nothing else. Do not filter/split on `product_type` alone, and do not fall back to `ghl_service_id` presence as an alternate signal (tried once, reverted — see "Rentals vs Products" below). Services should be a small, deliberate set (6 items as of this writing) — if a change makes that number jump by dozens, something is wrong; local SERVICE products created via the admin form are **not** automatically rentals just by existing. Edge cases where GHL's own `industryType` tag disagrees with reality (e.g. "300 - Forest Edge Tent" is a real bookable campsite GHL tags `industryType="service"`) are fixed by **correcting that one row's `industry_type` directly**, never by loosening the query. See "Rentals vs Products" section below for the full history — this got revised three times before landing here.
 
 ---
 
@@ -62,8 +62,8 @@ app/
 
 **`Rental`** (`rentals` table) — one-to-one with `Product` via `product_id`. Rental-specific data:
 - `parent_product_id` — set only on variant rows; the base listing's row has this `null`. Each variant (e.g. "Regular", "Premium") is its **own separate `Product` + `Rental` row** — not a sub-record. This is required because each variant needs its own `engage_product_id` (see "why productType is unreliable" below) to invoice that specific variant's booking.
-- `industry_type` — **the field that matters most**. Mirrors GHL's own `industryType` on the calendar service. Only `'rental'` means "real rental." Set by `GhlServiceSyncService::upsertFromDetail()` from GHL, or forced to `'rental'` by `ProductService::syncRentalData()` when a SERVICE product is created/edited through our own admin form (since anything created via "Add Service" is a rental by definition).
-- `ghl_service_id` — GHL calendar service ID (scheduling layer). `null` for locally-created rentals never synced to GHL.
+- `industry_type` — **the sole field deciding Services vs Products** (see "Rentals vs Products" below). Set from GHL's raw value by `GhlServiceSyncService::upsertFromDetail()` (not forced to `'rental'` — GHL's own tag is trusted as-is on pull, which is *why* "300 - Forest Edge Tent" ended up `'service'` and needed a manual correction), or forced to `'rental'` by `ProductService::syncRentalData()` when a SERVICE product is created/edited through our own admin form.
+- `ghl_service_id` — GHL calendar service ID (scheduling layer). Presence/absence does **not** by itself decide rental status (that's `industry_type` alone) — it matters separately for whether the customer storefront can show/book the item at all (`listServices()` requires it). `null` for locally-created rentals never synced to GHL.
 - `available_quantity` / `max_quantity` — nullable int; **`null` means unlimited**, checked everywhere (`ReservationService::remainingStock()`). A real number is compared against overlapping-date bookings.
 - `booking_start_time` / `booking_end_time` — check-in-after / check-out-before times of day. **Informational policy only** — a `Reservation` has no time component, these are never enforced, just displayed.
 - `booking_unit`, `min_duration`, `max_duration`, `duration_unit` — stay-length bounds, enforced in `ReservationService::assertDurationAllowed()`.
@@ -85,20 +85,27 @@ app/
 
 **Same pattern, "categories"**: our own `Category` model (`categories` table, `product_categories` pivot, `engage_collection_id` synced to GHL "collections" via `GhlProductSyncService`) is a **completely separate, disconnected** system from `Rental.ghl_service_category_id` (GHL's own calendar-side "service category," pulled passively, never linked to our `Category` table, never synced anywhere). As of this writing, **0 of 38 rentals have a local Category assigned** — the admin Category picker has simply never been used for rentals. Known, deliberately not reconciled (would need more GHL API work); flagged as a real gap, not fixed.
 
-### Rentals vs Products — the `industry_type` distinction (read before changing the split)
+### Rentals vs Products — what actually decides the split (revised three times — this is the final, confirmed rule; read before changing it again)
 
 **Why `product_type` alone is unreliable**: GHL auto-creates a payments-layer "product" for every rental service purely so the booking can be invoiced (a `productId` to attach the invoice to) — it is not a curated catalog entry. Verified live: the exact same rental's own variants get **inconsistent `productType`** in GHL's own `products/` catalog (e.g. one variant tagged `SERVICE`, its sibling variant of the same listing tagged `DIGITAL`). This field cannot be trusted to mean "rental," and the invoicing-only product itself should never be surfaced as a standalone Product.
 
-**The correct signal**: `GET calendars/services?locationId=...&industryType=rental` (GHL, server-side filtered) is the authoritative rental registry. Cross-checking this against the DB found a stale row: a product ("300 - Forest Edge Tent") had a real `ghl_service_id` and locally-stored `industry_type = 'rental'`, but querying GHL directly (even with `industryType=rental` in the query — that param does **not** coerce the answer, it's just required by the endpoint) showed its true `industryType` is `"service"`. That row was corrected to `industry_type = 'service'` and now correctly shows in Products, not Services.
+**Current, correct, final rule**: a `product_type=SERVICE` product counts as a rental **only if `rentals.industry_type === 'rental'`** — one field, no OR-clauses, no `ghl_service_id` fallback.
 
-**Current filter implementation** (`ProductService::list()`):
 ```php
+// ProductService::list() — is_rental filter
 // is_rental=1 (Services page): product_type=SERVICE AND rentals.industry_type='rental'
-// is_rental=0 (Products page): everything else, INCLUDING SERVICE-type products
-//   whose industry_type isn't 'rental' (e.g. the corrected Forest Edge Tent)
+// is_rental=0 (Products page): everything else
 // base_listings_only=1: additionally excludes rows where rentals.parent_product_id is set
 //   (i.e. hides variants from the top-level list — they're shown nested instead)
 ```
+`ProductService::listServices()` (customer storefront) additionally requires `whereNotNull('ghl_service_id')` on top of this — a real calendar link is required there since a guest booking a local-only unsynced rental would fail at invoice time.
+
+**Rejected alternative — do not reintroduce this**: at one point the rule became "`industry_type='rental'` **OR** `ghl_service_id IS NOT NULL`", to include "300 - Forest Edge Tent" (a real bookable campsite GHL happens to tag `industryType="service"`, confirmed live) without hand-correcting its data. This was reverted: it's the wrong lever to pull for a one-item edge case, because the *real* problem it caused was scope creep in the other direction — a separate backfill (see below) had tagged 25 unrelated local-only demo products as `industry_type='rental'` too, and the `ghl_service_id`-OR-clause did nothing to address that; the two issues got tangled together across several turns before being untangled. **The correct fix for a GHL-mistagged item is to correct that item's own `industry_type` value directly** (a one-time, explicit, reviewable data correction — same pattern as any other backfill in this file), never to loosen the query for everything.
+
+**Current data state** (post-correction): exactly **6** base listings show in Services — the 5 originally GHL-verified rentals (Lakeside Pine Retreat, Pine Ridge Family Campsite, Homey Blue Door Cottage, Folsom Lake Haven, The Midtown Modern) plus "300 - Forest Edge Tent" (manually corrected to `industry_type='rental'` despite GHL's own `"service"` tag). The ~25 other local-only SERVICE products created via the admin form during earlier testing (Creekside Tent, Pine Valley RV, Camp Gear, "this is for test services", etc.) are **not** tagged `industry_type='rental'` and correctly show in Products instead — **do not backfill these to `'rental'` again**; that was tried and explicitly reverted as unwanted scope creep, not a bug to "fix."
+
+If Services ever shows dramatically more than a handful of items, treat that as a red flag to investigate, not a sign the query got more "complete."
+
 Frontend: `ProductsManager.tsx` (shared component, `mode: 'goods' | 'services'`) → `app/admin/products/page.tsx` (`mode="goods"`) and `app/admin/services/page.tsx` (`mode="services"`), linked from `Sidebar.tsx`.
 
 **Variant display**: a rental's variants are never shown as separate top-level rows in Services — only base listings (`parent_product_id IS NULL`) show at the top level. Expanding a row (or opening its edit modal's "Variants" tab, which for services mode shows the *real* rental variants, not the irrelevant generic `ProductVariant` editor) shows the **base itself first** (labeled "(default)", using its own `Rental.variant_name`, e.g. "Regular") followed by the other `service_variants` as peers — the base's own variant identity is never left implicit.

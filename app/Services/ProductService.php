@@ -83,10 +83,12 @@ class ProductService
             $query->where('product_type', $filters['product_type']);
         }
 
-        // The only GHL-verified signal for "this is a rental" is rentals.industry_type
-        // === 'rental' — product_type=SERVICE alone is not enough (GHL assigns the
-        // payments-layer product's own productType inconsistently; it exists purely
-        // so the booking can be invoiced, not as a deliberately-typed catalog entry).
+        // A product is a rental if it's product_type=SERVICE AND rentals.industry_type
+        // = 'rental' — the single deciding field. Edge cases where GHL's own
+        // industryType tag disagrees with what this system treats as a rental (e.g.
+        // "300 - Forest Edge Tent" — a real bookable campsite GHL happens to tag
+        // industryType="service") are handled as a one-time manual data correction on
+        // that item's industry_type, not by loosening this query.
         if (array_key_exists('is_rental', $filters)) {
             $isRental = (bool) $filters['is_rental'];
             $query->where(function (Builder $q) use ($isRental) {
@@ -303,7 +305,7 @@ class ProductService
     {
         $query = Product::service()
             ->byTenant($filters['tenant_id'])
-            ->whereHas('rental', fn (Builder $q) => $q->whereNull('parent_product_id')->whereNotNull('ghl_service_id')->where('industry_type', 'rental'))
+            ->whereHas('rental', fn (Builder $q) => $q->whereNull('parent_product_id')->whereNotNull('ghl_service_id'))
             ->where('status', 'active')
             ->with(['rental', 'serviceVariants', 'categories', 'amenities', 'features', 'prices']);
 
