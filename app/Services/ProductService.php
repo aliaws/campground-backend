@@ -114,6 +114,11 @@ class ProductService
 
         if (! empty($filters['status'])) {
             $query->where('status', $filters['status']);
+        } else {
+            // Archived items (e.g. stray GHL invoicing-only artifacts that can't
+            // actually be booked/sold) are hidden from the default catalog view —
+            // still reachable by explicitly filtering status=archived if ever needed.
+            $query->where('status', '!=', 'archived');
         }
 
         if (! empty($filters['engage_sync_status'])) {
