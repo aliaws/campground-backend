@@ -122,9 +122,19 @@ class ReservationService
                     'error' => $e->getMessage(),
                 ]);
             }
+        } else {
+            try {
+                $this->ghlBookingService->createText2PayInvoice($reservation);
+                $this->transactionService->autoCreateFromReservation($reservation);
+            } catch (\Exception $e) {
+                Log::error('GHL Text2Pay invoice creation failed', [
+                    'reservation_id' => $reservation->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
-        return $reservation->load(['customer', 'product']);
+        return $reservation->fresh()->load(['customer', 'product']);
     }
 
     /**

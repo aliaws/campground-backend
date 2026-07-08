@@ -130,7 +130,13 @@ Frontend: `usePublicServiceQuote`/`useServiceQuote` responses (typed via `Bookin
 
 Two distinct creation paths through `ReservationService::create(array $data, bool $autoConfirm = true)`:
 - **Staff-created** (internal POS, `autoConfirm: true`, default): immediately synced to GHL — `status: 'pending'` then a real `GhlBookingService::createBooking()` call (contact sync, calendar booking, invoice, payment email) happens inline. Unchanged, original behavior.
-- **Guest-submitted** (public booking form, `autoConfirm: false`): created as `status: 'requested'`, purely local — **no GHL contact sync, no booking, no invoice, no transaction** happen at submission time.
+- **Guest-submitted** (public booking form, `autoConfirm: false`): created as `status: 'requested'`, purely local for the *booking* itself (no GHL calendar slot yet) — but **payment is available immediately**: `GhlBookingService::createText2PayInvoice()` + `TransactionService::autoCreateFromReservation()` run right at submission time (wrapped in try/catch — a GHL hiccup logs and never blocks the booking request from being recorded).
+
+**Guest payment via QR (Text2Pay) — deliberately decoupled from booking confirmation.** GHL's `POST invoices/text2pay` endpoint (see `github.com/GoHighLevel/highlevel-api-docs`, `apps/invoices.json`) creates/sends a standalone invoice and returns `invoiceUrl` — a hosted payment page — without needing any calendar booking. `GhlBookingService::createText2PayInvoice()` calls it (only needs `name`/`currency`/`amount`/`qty` per item, no `ghlPaymentsProductId()`/`ghlBookingServiceId()` linkage) and persists `ghl_invoice_id` / `ghl_invoice_number` / `ghl_invoice_status` / `ghl_invoice_url` onto the `Reservation`. `GuestReservationResource` exposes these as `payment_url` / `payment_status`; the customer confirmation page renders `payment_url` as a QR code (`qrcode.react`) plus a "Pay Now" link. `useGuestReservation` polls every 5s until `payment_status === 'paid'`.
+
+Paying does **not** create the GHL calendar booking — that still only happens via staff `confirm()` below, unchanged. This means a guest can pay before staff has verified availability; that's an accepted tradeoff, not a bug — do not "fix" by auto-confirming on payment without checking with the user first, since it reintroduces the double-booking risk `confirm()` was built to gate against.
+
+The existing `InvoicePaid`/`InvoicePartiallyPaid` webhook handling (`GhlService::applyInvoiceStatus()`, matches on `Reservation::ghl_invoice_id`) needed **zero changes** — it already flips any non-`paid` `Transaction` on the reservation to `paid` regardless of which invoice-creation path (booking-linked or Text2Pay) produced that `ghl_invoice_id`.
 
 `ReservationService::confirm(Reservation)` — the **only** path that turns a `requested` reservation real: calls `GhlBookingService::createBooking()` (contact sync + booking + invoice + payment email, NOT wrapped in try/catch — failures must surface to staff, unlike the staff-created path which logs and swallows GHL errors), sets `status: 'confirmed'`, creates the `Transaction`. Triggered by the "Confirm" button in `app/pos/reservations/page.tsx`, hitting `POST /reservations/{id}/confirm`.
 
@@ -147,6 +153,7 @@ Guard: `ReservationService::updateStatus()` (the generic `PATCH /reservations/{i
 | Sync a product to GHL | `GhlProductSyncService::syncProductToGhl()` | Pushes `collectionIds` from local `Category.engage_collection_id` |
 | Create/sync a customer contact | `GhlService::syncContactToGhl()` | Called lazily inside `GhlBookingService::createBooking()`, only if `ghl_contact_id` is null |
 | Create a real booking + invoice | `GhlBookingService::createBooking()` | The one method that does contact sync + calendar booking + invoice + payment email; called by both the staff auto-confirm path and `ReservationService::confirm()` |
+| Create a standalone payment link (no calendar booking) | `GhlBookingService::createText2PayInvoice()` | `POST invoices/text2pay`; called at guest-submission time so a QR/payment link exists immediately, decoupled from staff confirming availability |
 | Update/cancel an existing GHL booking | `GhlBookingService::updateBookingStatus()` | No-op if `ghl_booking_id` is null — never creates a booking, only touches an existing one |
 
 ---
@@ -171,14 +178,16 @@ Guard: `ReservationService::updateStatus()` (the generic `PATCH /reservations/{i
       live quote via usePublicServiceQuote (now includes remaining_quantity/is_available)
       → /rentals/checkout                 Guest enters name/email/phone
           → POST /public/reservations     autoConfirm=false → status: 'requested'
-          → /rentals/confirmation/{id}    "We'll review and contact you" — NOT a payment link
+                                           + Text2Pay invoice created inline (see below)
+          → /rentals/confirmation/{id}    Shows QR code + "Pay Now" (payment_url) immediately;
+                                           polls every 5s until payment_status === 'paid'
 ```
-Staff later confirms in `/pos/reservations` → `POST /reservations/{id}/confirm` → real GHL booking/invoice/payment email sent then.
+Staff separately confirms availability in `/pos/reservations` → `POST /reservations/{id}/confirm` → real GHL calendar booking created then. This is independent of payment — a guest can pay via QR before or after staff confirms the booking.
 
 ### Types
 - `types/booking.ts` — `BookingQuote` (now includes `remaining_quantity`, `is_available`), `QuoteParams`.
 - `types/product.ts` — `Product` (includes `parent_product_id`, `variant_name`, `service_variants?: Product[]`, `pricing_rule: PricingRule | null`).
-- `types/guestReservation.ts` — `GuestReservation` (now includes `booking_start_time`/`booking_end_time`).
+- `types/guestReservation.ts` — `GuestReservation` (now includes `booking_start_time`/`booking_end_time`, `payment_url`, `payment_status`).
 - `types/reservation.ts` — `Reservation.status`: `'requested' | 'pending' | 'confirmed' | 'cancelled'`.
 
 ---

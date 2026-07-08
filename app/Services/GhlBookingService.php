@@ -111,6 +111,71 @@ class GhlBookingService
     }
 
     /**
+     * Create a standalone GHL "Text2Pay" invoice for a guest reservation and persist
+     * its hosted payment URL — no calendar booking required. Used to let a guest pay
+     * immediately (e.g. via a QR code) without waiting for staff to confirm availability.
+     */
+    public function createText2PayInvoice(Reservation $reservation): void
+    {
+        $reservation->loadMissing(['customer', 'product.parent']);
+        $product = $reservation->product;
+        $customer = $reservation->customer;
+
+        if (! $customer->ghl_contact_id) {
+            $this->ghlService->syncContactToGhl($customer);
+            $customer = $customer->fresh();
+        }
+
+        if (! $customer->ghl_contact_id) {
+            throw new \RuntimeException('Unable to sync customer to GHL before creating Text2Pay invoice.');
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        $listing = $product->isServiceVariant() ? ($product->parent ?? $product) : $product;
+
+        $payload = [
+            'altId' => $locationId,
+            'altType' => 'location',
+            'name' => "Reservation — {$listing->name}",
+            'currency' => 'USD',
+            'items' => [[
+                'name' => $listing->name,
+                'currency' => 'USD',
+                'amount' => round((float) $reservation->total_amount, 2),
+                'qty' => 1,
+            ]],
+            'contactDetails' => [
+                'id' => $customer->ghl_contact_id,
+                'name' => $customer->name,
+                'phoneNo' => $customer->phone ?? '',
+                'email' => $customer->email ?? '',
+            ],
+            'issueDate' => now()->format('Y-m-d'),
+            'sentTo' => [
+                'email' => [$customer->email],
+            ],
+            'liveMode' => true,
+            'action' => 'send',
+            'userId' => $this->client->getSetting()?->user_id,
+        ];
+
+        try {
+            $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
+            $this->logOutbound('invoice.text2pay', $payload, $response);
+
+            $invoice = $response['invoice'] ?? [];
+            $this->persistInvoiceMetadata($reservation, $invoice, $response['invoiceUrl'] ?? null);
+        } catch (\Exception $e) {
+            $this->logOutbound('invoice.text2pay', $payload, ['error' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /**
      * Email the customer a GHL invoice with online payment link.
      */
     public function sendInvoicePaymentEmail(Reservation $reservation): void
@@ -444,16 +509,17 @@ class GhlBookingService
         $this->syncInvoiceMetadata($reservation);
     }
 
-    private function persistInvoiceMetadata(Reservation $reservation, array $invoice): void
+    private function persistInvoiceMetadata(Reservation $reservation, array $invoice, ?string $invoiceUrl = null): void
     {
         $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
         $number = $invoice['invoiceNumber'] ?? null;
 
-        $reservation->update([
+        $reservation->update(array_filter([
             'ghl_invoice_id' => $invoice['_id'] ?? $reservation->ghl_invoice_id,
             'ghl_invoice_number' => $number ? $prefix.$number : $reservation->ghl_invoice_number,
             'ghl_invoice_status' => $invoice['status'] ?? $reservation->ghl_invoice_status,
-        ]);
+            'ghl_invoice_url' => $invoiceUrl ?? $reservation->ghl_invoice_url,
+        ], fn ($value) => $value !== null));
     }
 
     private function logOutbound(string $eventType, array $requestPayload, array $responsePayload): void

@@ -21,6 +21,8 @@ class GuestReservationResource extends JsonResource
             'total_amount' => (float) $this->total_amount,
             'security_deposit_amount' => (float) $this->security_deposit_amount,
             'status' => $this->status,
+            'payment_url' => $this->ghl_invoice_url,
+            'payment_status' => $this->ghl_invoice_status,
             'created_at' => $this->created_at,
         ];
     }
