@@ -158,7 +158,11 @@ class GhlBookingService
             'sentTo' => [
                 'email' => [$customer->email],
             ],
-            'liveMode' => true,
+            // false to match this GHL location's connected payment processor — every
+            // invoice created via the calendar-booking flow comes back liveMode=false too.
+            // Flip to true only once a live Stripe/NMI account is connected, or every
+            // Text2Pay invoice will fail at checkout with "No valid payment method available."
+            'liveMode' => false,
             'action' => 'send',
             'userId' => $this->client->getSetting()?->user_id,
         ];
