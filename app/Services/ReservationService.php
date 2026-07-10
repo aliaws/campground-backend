@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\Product;
+use App\Models\ProductRental;
 use App\Models\Reservation;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +15,8 @@ class ReservationService
         private GhlBookingService $ghlBookingService,
         private TransactionService $transactionService,
         private BookingPriceCalculator $priceCalculator,
+        private GhlRentalGateway $gateway,
+        private RentalResolver $resolver,
     ) {}
 
     public function list(array $filters = []): LengthAwarePaginator
@@ -39,48 +43,51 @@ class ReservationService
             $query->where('check_out_date', '<=', $filters['date_to']);
         }
 
-        return $query->with(['customer', 'product', 'transactions'])
+        return $query->with(['customer', 'product', 'productRental', 'transactions'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
 
     /**
-     * Price a booking without creating it — applies the product's pricing rule
-     * (seasonal overrides, day-of-week adjustments, duration/quantity discounts).
-     * Unlike assertAvailable(), this never throws on insufficient stock — it's a
-     * read-only preview, so the caller (customer/POS quote UI) can show "3 of 5
-     * available" or "fully booked" instead of an error. assertAvailable() is what
-     * actually rejects the booking at create() time.
+     * Price a booking without creating it. Pricing rules, duration bounds and
+     * the stock ceiling all come LIVE from GHL (via the gateway's short cache);
+     * only the overlapping-reservation count is local. Never throws on
+     * insufficient stock — returns remaining_quantity/is_available so the UI
+     * can show "2 of 3 available" instead of an error. Duration violations
+     * still throw (hard validation), and GHL being unreachable throws a
+     * RuntimeException the controllers turn into a friendly 422.
      */
-    public function quote(Product $product, string $checkIn, string $checkOut, int $quantity = 1): array
+    public function quote(Product $product, ProductRental $rental, string $checkIn, string $checkOut, int $quantity = 1): array
     {
-        if (! $product->isCampsite()) {
-            throw new \InvalidArgumentException('Product must be a bookable service for reservations.');
-        }
+        $detail = $this->gateway->fetchRentalDetail($rental);
 
-        $this->assertDurationAllowed($product, $checkIn, $checkOut);
+        return $this->quoteFromDetail($detail, $rental, $checkIn, $checkOut, $quantity);
+    }
 
-        $remaining = $this->remainingStock($product, $checkIn, $checkOut);
+    private function quoteFromDetail(GhlServiceDetail $detail, ProductRental $rental, string $checkIn, string $checkOut, int $quantity): array
+    {
+        $this->assertDurationAllowed($detail, $checkIn, $checkOut);
 
-        return $this->priceCalculator->quote($product, $checkIn, $checkOut, $quantity) + [
+        $remaining = $this->remainingStock($rental, $detail->quantity(), $checkIn, $checkOut);
+
+        return $this->priceCalculator->quote($detail->pricingRule(), $checkIn, $checkOut, $quantity) + [
             'remaining_quantity' => $remaining,
             'is_available' => $remaining === null || $remaining >= $quantity,
         ];
     }
 
     /**
-     * Units still bookable for this date range — null means unlimited stock.
-     * Shared by assertAvailable() (throws) and quote() (reports, doesn't throw).
+     * Units still bookable for this date range — null means unlimited. Stock
+     * ceiling comes from the live GHL detail; bookings are counted locally
+     * per rental variant (each variant's stock is independent).
      */
-    public function remainingStock(Product $product, string $checkIn, string $checkOut): ?int
+    public function remainingStock(ProductRental $rental, ?int $stock, string $checkIn, string $checkOut): ?int
     {
-        $stock = $product->available_quantity;
-
         if ($stock === null) {
             return null;
         }
 
-        $booked = (int) Reservation::where('product_id', $product->id)
+        $booked = (int) Reservation::where('product_rental_id', $rental->id)
             ->where('status', '!=', 'cancelled')
             ->where('check_in_date', '<', $checkOut)
             ->where('check_out_date', '>', $checkIn)
@@ -90,28 +97,48 @@ class ReservationService
     }
 
     /**
-     * @param bool $autoConfirm When true (staff-created, default), the reservation is
-     *   immediately confirmed and synced to GHL — today's exact behavior, unchanged.
-     *   When false (guest-submitted), it's created as a 'requested' local-only record
-     *   with no GHL booking/invoice/transaction — see confirm() for what turns it real.
+     * $data['product_id'] may be a products.id (default variant) or a
+     * product_rentals.id (other variants) — resolved here; the reservation
+     * always stores product_id = base listing + product_rental_id = variant,
+     * plus a snapshot of the GHL booking times taken at creation.
+     *
+     * @param  bool  $autoConfirm  When true (staff-created, default), the reservation is
+     *                             immediately synced to GHL. When false (guest-submitted), it's created as a
+     *                             'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
      */
     public function create(array $data, bool $autoConfirm = true): Reservation
     {
-        $product = Product::findOrFail($data['product_id']);
+        $resolved = $this->resolver->resolve($data['product_id'], $data['tenant_id']);
+
+        if (! $resolved) {
+            throw new \InvalidArgumentException('Product must be a bookable service for reservations.');
+        }
+
+        [$product, $rental] = $resolved;
         $quantity = (int) ($data['quantity'] ?? 1);
 
-        $quote = $this->quote($product, $data['check_in_date'], $data['check_out_date'], $quantity);
-        $this->assertAvailable($product, $data['check_in_date'], $data['check_out_date'], $quantity);
+        $detail = $this->gateway->fetchRentalDetail($rental);
+        $quote = $this->quoteFromDetail($detail, $rental, $data['check_in_date'], $data['check_out_date'], $quantity);
 
-        $reservation = Reservation::create($data + [
+        if (! $quote['is_available']) {
+            throw new \InvalidArgumentException(
+                "Not available for the selected dates. Remaining quantity: {$quote['remaining_quantity']}."
+            );
+        }
+
+        $reservation = Reservation::create(array_merge($data, [
+            'product_id' => $product->id,
+            'product_rental_id' => $rental->id,
             'quantity' => $quantity,
+            'booking_start_time' => $detail->bookingStartTime(),
+            'booking_end_time' => $detail->bookingEndTime(),
             'base_amount' => $quote['subtotal'],
             'discount_amount' => $quote['discount_amount'],
             'total_amount' => $quote['total_amount'],
             'security_deposit_amount' => $quote['security_deposit_amount'],
             'price_breakdown' => $quote,
             'status' => $autoConfirm ? 'pending' : 'requested',
-        ]);
+        ]));
 
         if ($autoConfirm) {
             try {
@@ -134,7 +161,7 @@ class ReservationService
             }
         }
 
-        return $reservation->fresh()->load(['customer', 'product']);
+        return $reservation->fresh()->load(['customer', 'product', 'productRental']);
     }
 
     /**
@@ -199,30 +226,18 @@ class ReservationService
         return $reservation->fresh()->load(['customer', 'product']);
     }
 
-    /** Enforce the product's min/max stay length (GHL booking config). */
-    private function assertDurationAllowed(Product $product, string $checkIn, string $checkOut): void
+    /** Enforce the min/max stay length from the live GHL booking config. */
+    private function assertDurationAllowed(GhlServiceDetail $detail, string $checkIn, string $checkOut): void
     {
         $nights = max((int) now()->parse($checkIn)->startOfDay()->diffInDays(now()->parse($checkOut)->startOfDay()), 1);
-        $unit = $product->duration_unit ?? 'day';
+        $unit = $detail->durationUnit() ?? 'day';
 
-        if ($product->min_duration && $nights < $product->min_duration) {
-            throw new \InvalidArgumentException("Minimum stay is {$product->min_duration} {$unit}(s).");
+        if ($detail->minDuration() && $nights < $detail->minDuration()) {
+            throw new \InvalidArgumentException("Minimum stay is {$detail->minDuration()} {$unit}(s).");
         }
 
-        if ($product->max_duration && $nights > $product->max_duration) {
-            throw new \InvalidArgumentException("Maximum stay is {$product->max_duration} {$unit}(s).");
-        }
-    }
-
-    /** Reject the booking when overlapping reservations exhaust the product's stock. */
-    private function assertAvailable(Product $product, string $checkIn, string $checkOut, int $quantity): void
-    {
-        $remaining = $this->remainingStock($product, $checkIn, $checkOut);
-
-        if ($remaining !== null && $quantity > $remaining) {
-            throw new \InvalidArgumentException(
-                "Not available for the selected dates. Remaining quantity: {$remaining}."
-            );
+        if ($detail->maxDuration() && $nights > $detail->maxDuration()) {
+            throw new \InvalidArgumentException("Maximum stay is {$detail->maxDuration()} {$unit}(s).");
         }
     }
 }

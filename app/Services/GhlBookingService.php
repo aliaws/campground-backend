@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
+use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\Customer;
 use App\Models\Product;
+use App\Models\ProductRental;
 use App\Models\Reservation;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
@@ -28,22 +30,37 @@ class GhlBookingService
     public function __construct(
         private GhlClient $client,
         private GhlService $ghlService,
+        private GhlRentalGateway $gateway,
     ) {}
 
     /**
-     * @param bool $skipPaymentEmail When true, the invoice this call auto-generates is
-     *   recorded as already paid instead of emailed — used when the guest already paid
-     *   via a separate Text2Pay invoice before staff/webhook confirmed the calendar slot,
-     *   so they're never asked to pay twice for the same reservation.
+     * @param  bool  $skipPaymentEmail  When true, the invoice this call auto-generates is
+     *                                  recorded as already paid instead of emailed — used when the guest already paid
+     *                                  via a separate Text2Pay invoice before staff/webhook confirmed the calendar slot,
+     *                                  so they're never asked to pay twice for the same reservation.
      */
     public function createBooking(Reservation $reservation, bool $skipPaymentEmail = false): ?string
     {
-        $reservation->loadMissing(['customer', 'product.parent']);
+        $reservation->loadMissing(['customer', 'product', 'productRental']);
         $product = $reservation->product;
+        $rental = $reservation->productRental;
 
-        if (! $product?->ghlPaymentsProductId() || ! $product->ghlBookingServiceId()) {
+        if (! $rental?->ghl_id) {
             throw new \InvalidArgumentException(
                 'This product is not linked to a GHL rental service. Pull services from GHL first.'
+            );
+        }
+
+        // Everything variant-specific — the per-variant payments productId,
+        // pricing-rule deposit flags, booking period type — comes live from GHL.
+        $detail = $this->gateway->fetchRentalDetail($rental);
+        $baseDetail = ($rental->service_id && $rental->service_id !== $rental->ghl_id)
+            ? $this->gateway->fetchServiceDetail($rental->service_id)
+            : $detail;
+
+        if (! $detail->paymentsProductId()) {
+            throw new \InvalidArgumentException(
+                'GHL did not return a payments product for this rental service.'
             );
         }
 
@@ -64,7 +81,11 @@ class GhlBookingService
         }
 
         $timezone = $this->client->getTimezone();
-        $productsPayload = $this->buildProductsPayload($reservation, $product);
+        $productsPayload = [[
+            'id' => $detail->paymentsProductId(),
+            'qty' => max((int) $reservation->quantity, 1),
+            'overridePrice' => round((float) $reservation->total_amount, 2),
+        ]];
         $feesPayload = [
             'locationId' => $locationId,
             'module' => 'rental',
@@ -81,6 +102,9 @@ class GhlBookingService
             $createPayload = $this->buildCreatePayload(
                 $reservation,
                 $product,
+                $rental,
+                $detail,
+                $baseDetail,
                 $customer,
                 $locationId,
                 $timezone,
@@ -128,7 +152,7 @@ class GhlBookingService
      */
     public function createText2PayInvoice(Reservation $reservation): void
     {
-        $reservation->loadMissing(['customer', 'product.parent']);
+        $reservation->loadMissing(['customer', 'product']);
         $product = $reservation->product;
         $customer = $reservation->customer;
 
@@ -146,15 +170,13 @@ class GhlBookingService
             throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
         }
 
-        $listing = $product->isServiceVariant() ? ($product->parent ?? $product) : $product;
-
         $payload = [
             'altId' => $locationId,
             'altType' => 'location',
-            'name' => "Reservation — {$listing->name}",
+            'name' => "Reservation — {$product->name}",
             'currency' => 'USD',
             'items' => [[
-                'name' => $listing->name,
+                'name' => $product->name,
                 'currency' => 'USD',
                 'amount' => round((float) $reservation->total_amount, 2),
                 'qty' => 1,
@@ -339,6 +361,9 @@ class GhlBookingService
     private function buildCreatePayload(
         Reservation $reservation,
         Product $product,
+        ProductRental $rental,
+        GhlServiceDetail $detail,
+        GhlServiceDetail $baseDetail,
         Customer $customer,
         string $locationId,
         string $timezone,
@@ -352,11 +377,11 @@ class GhlBookingService
             'source' => 'rental',
             'formData' => $this->buildContactFormData($customer, $firstName, $lastName, $locationId, $timezone),
             'selectedSlotInfo' => [
-                'services' => [$this->buildSelectedService($reservation, $product, $timezone)],
+                'services' => [$this->buildSelectedService($reservation, $product, $rental, $detail, $baseDetail, $timezone)],
                 'subAccountId' => $locationId,
                 'timezone' => $timezone,
             ],
-            'industryType' => $product->industry_type ?? 'rental',
+            'industryType' => 'rental',
             'securityDeposit' => $securityDeposit,
             'securityDepositCharged' => 0,
         ];
@@ -386,25 +411,29 @@ class GhlBookingService
         ];
     }
 
-    private function buildSelectedService(Reservation $reservation, Product $product, string $timezone): array
-    {
-        $listing = $product->isServiceVariant() ? ($product->parent ?? $product) : $product;
-        $metadata = $product->ghl_metadata ?? [];
-        $pricingRule = $product->pricing_rule ?? [];
+    private function buildSelectedService(
+        Reservation $reservation,
+        Product $product,
+        ProductRental $rental,
+        GhlServiceDetail $detail,
+        GhlServiceDetail $baseDetail,
+        string $timezone,
+    ): array {
+        $pricingRule = $detail->pricingRule() ?? [];
         $securityDeposit = round((float) $reservation->security_deposit_amount, 2);
 
         return [
-            'id' => $product->ghlBookingServiceId(),
+            'id' => $rental->ghl_id,
             'position' => 0,
             'skipSchedulingNotice' => true,
             'startDate' => $this->buildIsoDateTime(
                 $reservation->check_in_date->format('Y-m-d'),
-                $product->booking_start_time ?? '09:00',
+                $reservation->booking_start_time ?? $detail->bookingStartTime() ?? '09:00',
                 $timezone,
             ),
             'endDate' => $this->buildIsoDateTime(
                 $reservation->check_out_date->format('Y-m-d'),
-                $product->booking_end_time ?? '17:00',
+                $reservation->booking_end_time ?? $detail->bookingEndTime() ?? '17:00',
                 $timezone,
             ),
             'quantity' => max((int) $reservation->quantity, 1),
@@ -412,24 +441,14 @@ class GhlBookingService
             'skipLookBusy' => false,
             'securityDeposit' => $securityDeposit,
             'securityDepositRefundable' => $pricingRule['security_deposit_refundable'] ?? true,
-            'name' => $listing->name,
-            'variantName' => $product->variant_name ?? 'Regular',
+            'name' => $product->name,
+            'variantName' => $rental->name ?? 'Regular',
             'price' => round((float) $reservation->total_amount, 2),
-            'masterListingId' => $product->ghlBaseServiceId(),
-            'bookingPeriodType' => $metadata['bookingPeriodType'] ?? 'date-selection',
-            'isVariantsEnabled' => (bool) ($metadata['isVariantsEnabled'] ?? $product->isServiceVariant()),
-            'productId' => $product->ghlPaymentsProductId(),
+            'masterListingId' => $rental->service_id ?? $rental->ghl_id,
+            'bookingPeriodType' => $baseDetail->bookingPeriodType() ?? 'date-selection',
+            'isVariantsEnabled' => $baseDetail->isVariantsEnabled(),
+            'productId' => $detail->paymentsProductId(),
         ];
-    }
-
-    /** @return array<int, array{id: string, qty: int, overridePrice: float}> */
-    private function buildProductsPayload(Reservation $reservation, Product $product): array
-    {
-        return [[
-            'id' => $product->ghlPaymentsProductId(),
-            'qty' => max((int) $reservation->quantity, 1),
-            'overridePrice' => round((float) $reservation->total_amount, 2),
-        ]];
     }
 
     private function buildIsoDateTime(string $date, string $time, string $timezone): string

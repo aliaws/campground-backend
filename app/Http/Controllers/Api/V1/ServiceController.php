@@ -3,18 +3,22 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\LiveServiceResource;
 use App\Http\Resources\ServiceResource;
 use App\Models\Product;
+use App\Services\GhlRentalGateway;
 use App\Services\GhlServiceSyncService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class ServiceController extends Controller
 {
     public function __construct(
         private ProductService $productService,
         private GhlServiceSyncService $ghlServiceSyncService,
+        private GhlRentalGateway $gateway,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -34,26 +38,44 @@ class ServiceController extends Controller
 
     public function show(Request $request, Product $product): JsonResponse
     {
-        $product->load([
-            'rental', 'parent', 'serviceVariants', 'categories', 'amenities', 'features', 'prices',
-        ]);
-
-        if ($product->parent_product_id !== null) {
+        if ($product->tenant_id !== $request->user()->tenant_id || $product->product_rental_id === null) {
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Use the base rental listing ID, not a variant row.',
+                'message' => 'Service not found.',
             ], 404);
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => new ServiceResource($product),
-            'message' => 'Service retrieved.',
-        ]);
+        $product->load(['rentals', 'defaultRental', 'categories']);
+
+        try {
+            $details = $this->gateway->fetchListingBundle($product);
+
+            if (empty($details)) {
+                throw new \RuntimeException('No live GHL details available.');
+            }
+
+            $paymentsByGhlId = $this->gateway->fetchPaymentsMap($product, $details);
+
+            return response()->json([
+                'success' => true,
+                'data' => new LiveServiceResource($product, $details, $paymentsByGhlId),
+                'message' => 'Service retrieved.',
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Staff service show fell back to local payload', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => new ServiceResource($product),
+                'message' => 'Service retrieved.',
+            ]);
+        }
     }
 
-    /** Pull all Calendar Services/Rentals (with variants + pricing rules) from GHL. */
     public function pullFromGhl(Request $request): JsonResponse
     {
         try {

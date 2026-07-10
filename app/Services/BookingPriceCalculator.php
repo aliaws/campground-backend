@@ -2,12 +2,12 @@
 
 namespace App\Services;
 
-use App\Models\Product;
 use Carbon\CarbonImmutable;
 
 /**
- * Computes booking prices by applying the product's pricing_rule JSON the way
- * GHL Rentals does: a per-day base price, then rules in sequence order —
+ * Computes booking prices by applying a flat pricing-rule array (fetched live
+ * from GHL via GhlServiceDetail::pricingRule()) the way GHL Rentals does:
+ * a per-day base price, then rules in sequence order —
  *  - date_range         flat override (or % adjustment) of the nightly price
  *  - day_of_week        % adjustment (or flat override) of the nightly price
  *  - duration_discount  % / flat discount on the subtotal for long stays
@@ -16,6 +16,8 @@ use Carbon\CarbonImmutable;
 class BookingPriceCalculator
 {
     /**
+     * @param  ?array  $rule  flat pricing-rule shape: base_price, rules[],
+     *                        security_deposit_amount, payment_terms
      * @return array{
      *   nights: int, quantity: int, base_price: float,
      *   nightly: array, subtotal: float, discounts: array, discount_amount: float,
@@ -23,15 +25,14 @@ class BookingPriceCalculator
      *   payment_terms: ?array
      * }
      */
-    public function quote(Product $product, string $checkIn, string $checkOut, int $quantity = 1): array
+    public function quote(?array $rule, string $checkIn, string $checkOut, int $quantity = 1): array
     {
         $checkInDate = CarbonImmutable::parse($checkIn)->startOfDay();
         $checkOutDate = CarbonImmutable::parse($checkOut)->startOfDay();
         $nights = max((int) $checkInDate->diffInDays($checkOutDate), 1);
 
-        $rule = $product->pricing_rule;
-        $basePrice = isset($rule['base_price']) ? (float) $rule['base_price'] : $this->fallbackBasePrice($product);
-        $rules = $product->orderedPricingRules();
+        $basePrice = (float) ($rule['base_price'] ?? 0);
+        $rules = $this->orderedRules($rule);
 
         // ── Nightly prices ────────────────────────────────────────────────────
         $nightly = [];
@@ -140,9 +141,13 @@ class BookingPriceCalculator
         return round($valueType === 'flat' ? $value : $subtotal * $value / 100, 2);
     }
 
-    /** Without a pricing rule, fall back to the product's default price. */
-    private function fallbackBasePrice(Product $product): float
+    /** The rule list ordered by sequence, ready to apply. */
+    private function orderedRules(?array $rule): array
     {
-        return (float) ($product->prices()->orderBy('created_at')->value('amount') ?? 0);
+        $rules = $rule['rules'] ?? [];
+
+        usort($rules, fn ($a, $b) => ($a['sequence'] ?? 0) <=> ($b['sequence'] ?? 0));
+
+        return $rules;
     }
 }

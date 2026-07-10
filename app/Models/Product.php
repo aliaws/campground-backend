@@ -4,55 +4,32 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasManyThrough;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
 {
     use HasUlids, SoftDeletes;
 
-    public const RULE_TYPES = ['date_range', 'day_of_week', 'duration_discount', 'quantity_discount'];
-
-    public const VALUE_TYPES = ['flat', 'percentage'];
-
-    /**
-     * Rental-specific attribute names that now live on the `rentals` table.
-     * Reads for these fall through to $this->rental via getAttribute()
-     * below — the columns still exist on `products` for one more release
-     * (dropped once every consumer is cut over to reading Rental directly)
-     * but are no longer the source of truth.
-     */
-    public const RENTAL_PROXIED_ATTRIBUTES = [
-        'variant_name', 'booking_unit', 'min_duration', 'max_duration', 'duration_unit',
-        'booking_start_time', 'booking_end_time', 'max_quantity', 'campsite_status',
-        'site_type', 'capacity', 'available_quantity', 'hookups', 'map_position',
-        'map_polygon', 'pet_friendly', 'ada_accessible', 'industry_type', 'pricing_rule',
-        'ghl_service_id', 'ghl_service_category_id', 'ghl_metadata', 'parent_product_id',
-    ];
-
     protected $fillable = [
         'name',
         'product_type',
         'description',
-        'sku',
         'status',
-        'is_variable',
         'available_in_store',
         'image',
-        'thumbnail',
-        'medias',
-        'display_priority',
         'tax_inclusive',
         'is_taxes_enabled',
         'tenant_id',
         'slug',
+        'quantity',
+        'price',
+        'product_rental_id',
         'track_product_inventory',
         'ghl_image_url',
-        'engage_product_id',
+        'ghl_product_id',
         'engage_sync_status',
         'engage_last_synced_at',
     ];
@@ -60,29 +37,14 @@ class Product extends Model
     protected function casts(): array
     {
         return [
-            'medias' => 'json',
-            'is_variable' => 'boolean',
             'available_in_store' => 'boolean',
             'tax_inclusive' => 'boolean',
             'is_taxes_enabled' => 'boolean',
             'track_product_inventory' => 'boolean',
             'engage_last_synced_at' => 'datetime',
+            'quantity' => 'integer',
+            'price' => 'decimal:2',
         ];
-    }
-
-    /** Rental-specific data (booking window, campsite fields, pricing) — see Rental model. */
-    public function rental(): HasOne
-    {
-        return $this->hasOne(Rental::class);
-    }
-
-    public function getAttribute($key)
-    {
-        if (in_array($key, self::RENTAL_PROXIED_ATTRIBUTES, true)) {
-            return $this->rental?->getAttribute($key);
-        }
-
-        return parent::getAttribute($key);
     }
 
     // ── Scopes ────────────────────────────────────────────────────────────────
@@ -97,11 +59,6 @@ class Product extends Model
         return $query->where('product_type', 'SERVICE');
     }
 
-    public function scopeIndustryType($query, string $industryType)
-    {
-        return $query->where('industry_type', $industryType);
-    }
-
     public function scopePhysical($query)
     {
         return $query->where('product_type', 'PHYSICAL');
@@ -112,6 +69,12 @@ class Product extends Model
         return $query->where('product_type', 'DIGITAL');
     }
 
+    /** Bookable rental listings: products with a GHL-linked default rental variant. */
+    public function scopeRental($query)
+    {
+        return $query->whereNotNull('product_rental_id');
+    }
+
     // ── Relations ─────────────────────────────────────────────────────────────
 
     public function categories(): BelongsToMany
@@ -119,98 +82,34 @@ class Product extends Model
         return $this->belongsToMany(Category::class, 'product_categories');
     }
 
-    /**
-     * Base product this service variant belongs to (GHL: service.variantId).
-     * Goes through `rentals.parent_product_id` — a real Eloquent through
-     * relation, so ->load('parent')/whenLoaded('parent') keep working exactly
-     * as before even though the FK now lives on `rentals`, not `products`.
-     */
-    public function parent(): HasOneThrough
+    /** All rental variants of this listing (the default/base row included). */
+    public function rentals(): HasMany
     {
-        return $this->hasOneThrough(
-            Product::class,
-            Rental::class,
-            'product_id',        // FK on rentals referencing this product
-            'id',                 // PK on the related (parent) products row
-            'id',                 // local key on this product
-            'parent_product_id'   // FK on rentals referencing the parent product
-        );
+        return $this->hasMany(ProductRental::class);
     }
 
-    /** Service variants stored as their own product rows (GHL Services model) */
-    public function serviceVariants(): HasManyThrough
+    /** The default (base listing) rental variant — FK may be stale until next pull. */
+    public function defaultRental(): BelongsTo
     {
-        return $this->hasManyThrough(
-            Product::class,
-            Rental::class,
-            'parent_product_id',  // FK on rentals referencing this (parent) product
-            'id',                  // PK on the related (variant) products row
-            'id',                  // local key on this product
-            'product_id'           // FK on rentals referencing the variant product
-        );
+        return $this->belongsTo(ProductRental::class, 'product_rental_id');
     }
 
     /**
-     * Storefront "From $/day" price: cheapest base price across this service
-     * and its variants; falls back to the first product price.
+     * GHL base listing row: calendar service where variantId was null
+     * (ghl_id === service_id on the local row).
      */
-    public function fromPrice(): ?float
+    public function resolveBaseRental(): ?ProductRental
     {
-        $candidates = collect([$this->pricing_rule['base_price'] ?? null])
-            ->concat(
-                $this->relationLoaded('serviceVariants')
-                    ? $this->serviceVariants->map(fn (Product $v) => $v->pricing_rule['base_price'] ?? null)
-                    : []
-            )
-            ->filter(fn ($price) => $price !== null)
-            ->map(fn ($price) => (float) $price);
-
-        if ($candidates->isNotEmpty()) {
-            return $candidates->min();
+        if ($this->relationLoaded('rentals')) {
+            $base = $this->rentals->first(fn (ProductRental $r) => $r->isBaseListing());
+            if ($base) {
+                return $base;
+            }
         }
 
-        $fallback = $this->relationLoaded('prices')
-            ? $this->prices->min('amount')
-            : $this->prices()->min('amount');
+        $base = $this->rentals()->whereColumn('ghl_id', 'service_id')->first();
 
-        return $fallback !== null ? (float) $fallback : null;
-    }
-
-    /** The pricing_rule JSON's rule list, ordered by sequence and ready to apply. */
-    public function orderedPricingRules(): array
-    {
-        $rules = $this->pricing_rule['rules'] ?? [];
-
-        usort($rules, fn ($a, $b) => ($a['sequence'] ?? 0) <=> ($b['sequence'] ?? 0));
-
-        return $rules;
-    }
-
-    public function prices(): HasMany
-    {
-        return $this->hasMany(ProductPrice::class);
-    }
-
-    /** Variant groups (e.g. "Size", "Color") */
-    public function variants(): HasMany
-    {
-        return $this->hasMany(ProductVariant::class)->orderBy('position');
-    }
-
-    /** All variant options across all variant groups — convenience shortcut */
-    public function variantOptions(): HasMany
-    {
-        return $this->hasMany(ProductVariantOption::class);
-    }
-
-    public function amenities(): BelongsToMany
-    {
-        return $this->belongsToMany(Amenity::class, 'product_amenities');
-    }
-
-    public function features(): BelongsToMany
-    {
-        return $this->belongsToMany(Feature::class, 'product_features');
+        return $base ?? $this->defaultRental;
     }
 
     public function reservations(): HasMany
@@ -230,37 +129,33 @@ class Product extends Model
         return $this->product_type === 'SERVICE';
     }
 
-    /** Bookable campsite/rental — SERVICE products are the bookable type */
-    public function isCampsite(): bool
+    /**
+     * Bookable rental listing — has a GHL-linked default variant. This is the
+     * single deciding rule (replaces the old rentals.industry_type check):
+     * only the GHL rental pull creates product_rentals rows, so local-only
+     * SERVICE products are never bookable rentals by construction.
+     */
+    public function isRental(): bool
     {
-        return $this->isService();
+        return $this->product_rental_id !== null;
     }
 
-    public function isServiceVariant(): bool
+    /** Storefront "From $/day" — always the GHL base variant (variantId = null). */
+    public function defaultVariantPrice(): ?float
     {
-        return $this->parent_product_id !== null;
-    }
+        $base = $this->resolveBaseRental();
 
-    /** Scheduling-layer rental service ID used for GHL calendar bookings. */
-    public function ghlBookingServiceId(): ?string
-    {
-        return $this->ghl_service_id;
-    }
-
-    /** Payments-layer product ID (auto-created by GHL per service/variant). */
-    public function ghlPaymentsProductId(): ?string
-    {
-        return $this->engage_product_id;
-    }
-
-    /** Base listing's scheduling service ID (self when base, parent's when variant). */
-    public function ghlBaseServiceId(): ?string
-    {
-        if ($this->isServiceVariant()) {
-            return $this->parent?->ghl_service_id;
+        if ($base?->listing_price !== null) {
+            return (float) $base->listing_price;
         }
 
-        return $this->ghl_service_id;
+        return $this->price !== null ? (float) $this->price : null;
+    }
+
+    /** @deprecated Use defaultVariantPrice() */
+    public function fromPrice(): ?float
+    {
+        return $this->defaultVariantPrice();
     }
 
     public function isPhysical(): bool

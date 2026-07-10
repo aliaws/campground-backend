@@ -7,8 +7,8 @@ use App\Http\Requests\QuoteReservationRequest;
 use App\Http\Requests\StoreReservationRequest;
 use App\Http\Requests\UpdateReservationStatusRequest;
 use App\Http\Resources\ReservationResource;
-use App\Models\Product;
 use App\Models\Reservation;
+use App\Services\RentalResolver;
 use App\Services\ReservationService;
 use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +19,7 @@ class ReservationController extends Controller
     public function __construct(
         private ReservationService $reservationService,
         private TransactionService $transactionService,
+        private RentalResolver $rentalResolver,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -39,11 +40,25 @@ class ReservationController extends Controller
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
     public function quote(QuoteReservationRequest $request): JsonResponse
     {
-        $product = Product::findOrFail($request->validated('product_id'));
+        $resolved = $this->rentalResolver->resolve(
+            $request->validated('product_id'),
+            $request->user()->tenant_id
+        );
+
+        if (! $resolved) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Service not found.',
+            ], 404);
+        }
+
+        [$product, $rental] = $resolved;
 
         try {
             $quote = $this->reservationService->quote(
                 $product,
+                $rental,
                 $request->validated('check_in_date'),
                 $request->validated('check_out_date'),
                 (int) ($request->validated('quantity') ?? 1)
@@ -53,6 +68,12 @@ class ReservationController extends Controller
                 'success' => false,
                 'data' => null,
                 'message' => $e->getMessage(),
+            ], 422);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Live availability is temporarily unavailable. Please try again.',
             ], 422);
         }
 
@@ -88,7 +109,7 @@ class ReservationController extends Controller
 
     public function show(Reservation $reservation): JsonResponse
     {
-        $reservation->load(['customer', 'product', 'transactions']);
+        $reservation->load(['customer', 'product', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,

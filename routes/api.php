@@ -33,6 +33,7 @@ Route::prefix('v1')->group(function () {
     Route::prefix('public')->group(function () {
         Route::middleware('throttle:guest-browse')->group(function () {
             Route::get('/services', [PublicServiceController::class, 'index']);
+            Route::get('/services/variant/{id}', [PublicServiceController::class, 'variant']);
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::post('/reservations/quote', [PublicReservationController::class, 'quote']);
@@ -52,14 +53,6 @@ Route::prefix('v1')->group(function () {
         Route::put('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
         Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
-
-        // All prices (admin view)
-        Route::get('/prices', [ProductController::class, 'allPrices']);
-
-        // Product prices
-        Route::get('/products/{product}/prices', [ProductController::class, 'prices']);
-        Route::post('/products/{product}/prices', [ProductController::class, 'storePrice']);
-        Route::put('/products/{product}/prices/{price}', [ProductController::class, 'updatePrice']);
 
         // Product categories
         Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);

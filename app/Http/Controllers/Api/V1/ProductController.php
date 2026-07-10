@@ -3,13 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StorePriceRequest;
 use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
-use App\Http\Resources\ProductPriceResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
-use App\Models\ProductPrice;
 use App\Services\GhlProductSyncService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
@@ -58,7 +55,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $product->load(['rental', 'categories', 'prices', 'variants.options', 'amenities', 'features']);
+        $product->load(['categories', 'rentals', 'defaultRental']);
 
         return response()->json([
             'success' => true,
@@ -97,88 +94,6 @@ class ProductController extends Controller
         ]);
     }
 
-    // ── Prices ────────────────────────────────────────────────────────────────
-
-    public function allPrices(Request $request): JsonResponse
-    {
-        $query = ProductPrice::with('product')
-            ->whereHas('product', fn ($q) => $q->where('tenant_id', $request->user()->tenant_id))
-            ->where('deleted', false);
-
-        if ($request->input('search')) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhereHas('product', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
-            });
-        }
-
-        $prices = $query->orderBy('created_at', 'desc')->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => $prices->map(fn ($p) => [
-                'id' => $p->id,
-                'name' => $p->name,
-                'type' => $p->type,
-                'amount' => (float) $p->amount,
-                'compare_at_price' => $p->compare_at_price !== null ? (float) $p->compare_at_price : null,
-                'currency' => $p->currency,
-                'variant_option_ids' => $p->variant_option_ids,
-                'track_inventory' => $p->track_inventory,
-                'available_quantity' => $p->available_quantity,
-                'recurring_interval' => $p->recurring_interval,
-                'recurring_interval_count' => $p->recurring_interval_count,
-                'sku' => $p->sku,
-                'deleted' => $p->deleted,
-                'engage_price_id' => $p->engage_price_id,
-                'engage_sync_status' => $p->engage_sync_status,
-                'sync_error_message' => $p->sync_error_message,
-                'product_id' => $p->product_id,
-                'product_name' => $p->product?->name,
-                'product_engage_id' => $p->product?->engage_product_id,
-                'created_at' => $p->created_at,
-                'updated_at' => $p->updated_at,
-            ]),
-            'message' => 'All prices retrieved.',
-        ]);
-    }
-
-    public function prices(Product $product): JsonResponse
-    {
-        return response()->json([
-            'success' => true,
-            'data' => ProductPriceResource::collection(
-                $product->prices()->where('deleted', false)->get()
-            ),
-            'message' => 'Prices retrieved.',
-        ]);
-    }
-
-    public function storePrice(StorePriceRequest $request, Product $product): JsonResponse
-    {
-        $price = $this->productService->addPrice($product, $request->validated());
-
-        return response()->json([
-            'success' => true,
-            'data' => new ProductPriceResource($price),
-            'message' => 'Price created.',
-        ], 201);
-    }
-
-    public function updatePrice(StorePriceRequest $request, Product $product, ProductPrice $price): JsonResponse
-    {
-        $price = $this->productService->updatePrice($price, $request->validated());
-
-        return response()->json([
-            'success' => true,
-            'data' => new ProductPriceResource($price),
-            'message' => 'Price updated.',
-        ]);
-    }
-
-    // ── Categories ────────────────────────────────────────────────────────────
-
     public function attachCategories(Request $request, Product $product): JsonResponse
     {
         $request->validate([
@@ -195,8 +110,6 @@ class ProductController extends Controller
         ]);
     }
 
-    // ── GHL sync ──────────────────────────────────────────────────────────────
-
     public function syncToGhl(Product $product): JsonResponse
     {
         try {
@@ -204,9 +117,7 @@ class ProductController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => new ProductResource(
-                    $product->load(['categories', 'prices', 'variants.options'])
-                ),
+                'data' => new ProductResource($product->load(['categories'])),
                 'message' => 'Product synced to GHL.',
             ]);
         } catch (\Exception $e) {

@@ -3,26 +3,26 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
+use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\Product;
-use App\Models\Rental;
-use App\Models\RentalPricingRule;
+use App\Models\ProductRental;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Pulls GHL Calendar Rentals into the unified products table.
+ * Pulls GHL Calendar Rentals into the minimal local schema: one Product per
+ * base listing + one product_rentals row per variant (the base itself included
+ * as the "default" row). Only identifiers and listing-page fields are stored —
+ * durations, quantities, pricing rules and booking times are read live via
+ * GhlRentalGateway, never persisted.
  *
  * GHL rental mental model (scheduling vs payments):
  * - Scheduling layer: GET calendars/services?industryType=rental
- *   Each listing AND each variant is its own service record (_id → ghl_service_id).
- * - Payments layer: every service/variant auto-creates a Product (productId → engage_product_id).
+ *   Each listing AND each variant is its own service record (_id → product_rentals.ghl_id).
+ * - Payments layer: every service/variant auto-creates a Product (productId);
+ *   the BASE listing's is stored as products.ghl_product_id, variants' are
+ *   fetched live at booking time.
  * - The service *catalog* API (calendars/services/catalog) is for classic Services v2
  *   bookings and is often empty for rental accounts — do NOT use it for sync or listing.
- *
- * Sync strategy:
- * 1. List all rental services, identify base listings (variantId is null).
- * 2. For each base, GET detail (has embedded variants[], pricingRule, durations).
- * 3. Upsert the base row, then upsert each embedded variant (fetching variant detail
- *    when needed for its own pricingRule).
  */
 class GhlServiceSyncService
 {
@@ -30,6 +30,7 @@ class GhlServiceSyncService
 
     public function __construct(
         private GhlClient $client,
+        private GhlRentalGateway $gateway,
     ) {}
 
     /**
@@ -71,11 +72,9 @@ class GhlServiceSyncService
      *
      * Base-listing details and their embedded variants' details are each
      * fetched in one concurrent batch (via GhlClient::poolGet) rather than
-     * one HTTP round trip at a time — same total number of GHL calls, just
-     * issued in parallel, cutting wall-clock time from ~10-15s to ~2-3s for
-     * a typical catalog. DB upserts stay sequential (they were never the
-     * bottleneck) and still happen base-first so variants can resolve their
-     * parent's Product id via upsertFromDetail().
+     * one HTTP round trip at a time. Every fetched detail also warms the
+     * gateway's live-detail cache, so the first quote/show after a pull is
+     * a cache hit.
      */
     public function pullServices(string $tenantId): array
     {
@@ -92,8 +91,12 @@ class GhlServiceSyncService
 
         $services = $list['services'] ?? [];
 
-        // Only process base listings; variants come from embedded variants[] on detail.
-        $bases = collect($services)->filter(fn ($s) => empty($s['variantId']))->values();
+        // Only process GHL base listings (variantId = null).
+        $bases = collect($services)->filter(function (array $s) {
+            $variantId = $s['variantId'] ?? null;
+
+            return $variantId === null || $variantId === '';
+        })->values();
 
         $pulled = 0;
         $errors = [];
@@ -128,12 +131,17 @@ class GhlServiceSyncService
 
         $variantResults = $this->client->poolGet($variantRequests);
 
-        foreach ($baseDetails as $ghlBaseId => $detail) {
+        foreach ($baseDetails as $ghlBaseId => $rawDetail) {
             try {
-                $base = $this->upsertFromDetail($detail, $tenantId, null);
+                $this->gateway->put($ghlBaseId, $rawDetail);
+                $baseDetail = new GhlServiceDetail($rawDetail);
+
+                $product = $this->upsertBaseListing($baseDetail, $tenantId);
                 $pulled++;
 
-                foreach ($detail['variants'] ?? [] as $embedded) {
+                $seenGhlIds = [$ghlBaseId];
+
+                foreach ($rawDetail['variants'] ?? [] as $embedded) {
                     $variantId = $embedded['id'] ?? null;
                     if (! $variantId || $variantId === $ghlBaseId) {
                         continue;
@@ -151,12 +159,28 @@ class GhlServiceSyncService
                         continue;
                     }
 
-                    $variantDetail = $variantResult['service'] ?? $variantResult;
-                    $this->upsertFromDetail($variantDetail, $tenantId, $base->id);
+                    $rawVariant = $variantResult['service'] ?? $variantResult;
+                    $this->gateway->put($variantId, $rawVariant);
+                    $variantDetail = new GhlServiceDetail($rawVariant);
+
+                    if ($variantDetail->baseServiceId() && $variantDetail->baseServiceId() !== $ghlBaseId) {
+                        Log::warning('GHL variant parent mismatch — skipping', [
+                            'variant_id' => $variantId,
+                            'expected_base' => $ghlBaseId,
+                            'actual_variant_id' => $variantDetail->baseServiceId(),
+                        ]);
+
+                        continue;
+                    }
+
+                    $this->upsertVariant($variantDetail, $product, $ghlBaseId, $tenantId);
+                    $seenGhlIds[] = $variantId;
                     $pulled++;
                 }
+
+                $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId);
             } catch (\Exception $e) {
-                $errors[] = ['service_id' => $ghlBaseId, 'name' => $detail['name'] ?? null, 'error' => $e->getMessage()];
+                $errors[] = ['service_id' => $ghlBaseId, 'name' => $rawDetail['name'] ?? null, 'error' => $e->getMessage()];
                 Log::error('GHL rental service pull failed', ['service' => $ghlBaseId, 'error' => $e->getMessage()]);
             }
         }
@@ -172,160 +196,118 @@ class GhlServiceSyncService
         ];
     }
 
-    /**
-     * Identity now lives on Rental (rentals.ghl_service_id), not Product —
-     * find the existing Rental first to resolve which Product to update,
-     * rather than matching on products.ghl_service_id directly.
-     */
-    private function upsertFromDetail(array $detail, string $tenantId, ?string $parentProductId): Product
+    /** Identity lives on product_rentals.ghl_id — resolve the Product through it. */
+    private function upsertBaseListing(GhlServiceDetail $detail, string $tenantId): Product
     {
-        $ghlId = $detail['_id'] ?? $detail['id'] ?? null;
+        $ghlId = $detail->id();
 
         if (! $ghlId) {
             throw new \RuntimeException('GHL service detail missing _id');
         }
 
-        // Resolve parent from GHL variantId when not passed explicitly.
-        if ($parentProductId === null && ! empty($detail['variantId'])) {
-            $parentProductId = Rental::where('tenant_id', $tenantId)
-                ->where('ghl_service_id', $detail['variantId'])
-                ->value('product_id');
-        }
-
-        $isVariant = $parentProductId !== null;
-
         $productAttributes = [
-            'name' => $detail['name'],
+            'name' => $detail->name(),
             'product_type' => 'SERVICE',
-            'description' => $detail['description'] ?? null,
-            'slug' => $detail['slug'] ?? null,
-            'status' => (! empty($detail['isActive']) && empty($detail['deleted'])) ? 'active' : 'draft',
-            'image' => $detail['coverImage'] ?? null,
-            'medias' => $this->mapImages($detail['images'] ?? []),
-            // Payments-layer product (auto-created by GHL per service/variant).
-            'engage_product_id' => $detail['productId'] ?? null,
+            'description' => $detail->description(),
+            'slug' => $detail->slug(),
+            'status' => $detail->isActive() ? 'active' : 'draft',
+            'image' => $detail->coverImage(),
+            'ghl_product_id' => $detail->paymentsProductId(),
+            'quantity' => $detail->quantity(),
+            'price' => $detail->basePrice() ?? $detail->paymentAmount(),
             'engage_sync_status' => 'synced',
             'engage_last_synced_at' => now(),
             'tenant_id' => $tenantId,
         ];
 
-        $existingRental = Rental::where('tenant_id', $tenantId)->where('ghl_service_id', $ghlId)->first();
+        $existing = ProductRental::where('tenant_id', $tenantId)->where('ghl_id', $ghlId)->first();
 
-        if ($existingRental) {
-            $product = $existingRental->product;
+        if ($existing) {
+            $product = $existing->product;
             $product->update($productAttributes);
         } else {
             $product = Product::create($productAttributes);
         }
 
-        $rental = Rental::updateOrCreate(
-            ['product_id' => $product->id],
-            [
-                'parent_product_id' => $parentProductId,
-                'variant_name' => $detail['variantName'] ?? ($isVariant ? 'Variant' : 'Regular'),
-                'available_quantity' => $detail['quantity'] ?? null,
-                'max_quantity' => $detail['maxQuantity'] ?? null,
-                'booking_unit' => $detail['bookingUnit'] ?? null,
-                'min_duration' => $detail['minDuration'] ?? null,
-                'max_duration' => $detail['maxDuration'] ?? null,
-                'duration_unit' => $detail['minDurationUnit'] ?? $detail['bookingUnit'] ?? null,
-                'booking_start_time' => $detail['bookingStartTime'] ?? null,
-                'booking_end_time' => $detail['bookingEndTime'] ?? null,
-                'industry_type' => $detail['industryType'] ?? self::RENTAL_INDUSTRY,
-                'ghl_service_id' => $ghlId,
-                'ghl_service_category_id' => $detail['serviceCategoryId'] ?? null,
-                'ghl_metadata' => $this->mapMetadata($detail),
-                'tenant_id' => $tenantId,
-            ]
-        );
+        $rental = $this->upsertRentalRow($detail, $product, $ghlId, $tenantId);
 
-        $this->upsertPricingRule($rental, $tenantId, $this->mapPricingRule($detail));
-
-        return $product;
+        return $product->fresh();
     }
 
-    private function upsertPricingRule(Rental $rental, string $tenantId, ?array $pricingRule): void
+    private function upsertVariant(GhlServiceDetail $detail, Product $baseProduct, string $baseGhlId, string $tenantId): ProductRental
     {
-        if ($pricingRule === null) {
-            return;
+        $ghlId = $detail->id();
+
+        if (! $ghlId) {
+            throw new \RuntimeException('GHL variant detail missing _id');
         }
 
-        RentalPricingRule::updateOrCreate(
-            ['rental_id' => $rental->id, 'priority' => 1],
-            [
-                'name' => $pricingRule['name'] ?? 'Default',
-                'applies_to' => $pricingRule['applies_to'] ?? 'rental',
-                'base_price' => $pricingRule['base_price'] ?? 0,
-                'base_price_strategy' => $pricingRule['base_price_strategy'] ?? 'per_day',
-                'rules' => $pricingRule['rules'] ?? null,
-                'security_deposit_amount' => $pricingRule['security_deposit_amount'] ?? null,
-                'security_deposit_refundable' => $pricingRule['security_deposit_refundable'] ?? true,
-                'payment_terms' => $pricingRule['payment_terms'] ?? null,
-                'ghl_pricing_rule_id' => $pricingRule['ghl_pricing_rule_id'] ?? null,
-                'tenant_id' => $tenantId,
-            ]
+        return $this->upsertRentalRow($detail, $baseProduct, $baseGhlId, $tenantId);
+    }
+
+    private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $tenantId): ProductRental
+    {
+        $isBase = $detail->id() === $baseGhlId;
+        $baseListingPrice = $isBase ? ($detail->basePrice() ?? $detail->paymentAmount()) : null;
+
+        // map_position is local-only data — deliberately never written here.
+        return ProductRental::updateOrCreate(
+            ['tenant_id' => $tenantId, 'ghl_id' => $detail->id()],
+            array_filter([
+                'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
+                'is_active' => $detail->isActive(),
+                'service_duration' => $detail->serviceDuration() ?? $detail->minDuration(),
+                'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
+                'slug' => $detail->slug(),
+                'ghl_product_id' => $detail->paymentsProductId(),
+                'listing_price' => $baseListingPrice,
+                'product_id' => $product->id,
+                'service_category_id' => $detail->serviceCategoryId(),
+                'service_id' => $baseGhlId,
+            ], fn ($value) => $value !== null)
         );
     }
 
-    /** GHL pricingRule → our pricing_rule JSON (same rules shape by design). */
-    private function mapPricingRule(array $detail): ?array
+    /**
+     * After variants are synced: pin listing snapshot to the GHL base service
+     * (variantId = null) — default rental pointer, price, and product fields.
+     */
+    private function finalizeListing(Product $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
     {
-        $rule = $detail['pricingRule'] ?? null;
+        $baseRental = ProductRental::where('product_id', $product->id)
+            ->where('ghl_id', $baseGhlId)
+            ->where('service_id', $baseGhlId)
+            ->first();
 
-        if (! $rule) {
-            $amount = $detail['payment']['amount'] ?? null;
+        $basePrice = $baseDetail->basePrice() ?? $baseDetail->paymentAmount();
 
-            return $amount !== null
-                ? ['base_price' => (float) $amount, 'base_price_strategy' => 'per_day', 'rules' => []]
-                : null;
+        $listingUpdate = array_filter([
+            'name' => $baseDetail->name(),
+            'description' => $baseDetail->description(),
+            'image' => $baseDetail->coverImage(),
+            'ghl_product_id' => $baseDetail->paymentsProductId(),
+            'quantity' => $baseDetail->quantity(),
+            'price' => $basePrice,
+            'product_rental_id' => $baseRental?->id,
+        ], fn ($value) => $value !== null);
+
+        if ($listingUpdate !== []) {
+            $product->update($listingUpdate);
         }
 
-        return [
-            'name' => $rule['name'] ?? null,
-            'applies_to' => $rule['appliesTo'] ?? 'rental',
-            'base_price' => (float) ($rule['basePrice']['value'] ?? $detail['payment']['amount'] ?? 0),
-            'base_price_strategy' => $rule['basePrice']['strategy'] ?? 'per_day',
-            'rules' => $rule['rules'] ?? [],
-            'security_deposit_amount' => isset($rule['securityDeposit']['amount']) ? (float) $rule['securityDeposit']['amount'] : null,
-            'security_deposit_refundable' => $rule['securityDeposit']['refundable'] ?? true,
-            'payment_terms' => $rule['paymentTerms'] ?? null,
-            'ghl_pricing_rule_id' => $rule['id'] ?? null,
-        ];
-    }
-
-    private function mapImages(array $images): ?array
-    {
-        if (empty($images)) {
-            return null;
+        if ($baseRental && $basePrice !== null) {
+            $baseRental->update(['listing_price' => $basePrice]);
         }
 
-        return collect($images)->map(fn ($img) => [
-            'id' => $img['_id'] ?? null,
-            'title' => $img['name'] ?? null,
-            'url' => $img['url'] ?? null,
-            'type' => 'image',
-            'isFeatured' => ($img['position'] ?? null) === 0,
-        ])->values()->all();
-    }
+        $pruned = ProductRental::where('product_id', $product->id)
+            ->whereNotIn('ghl_id', $seenGhlIds)
+            ->get();
 
-    private function mapMetadata(array $detail): ?array
-    {
-        $metadata = array_filter([
-            'ghl_variant_id' => $detail['variantId'] ?? null,
-            'ghl_payments_product_id' => $detail['productId'] ?? null,
-            'bookingPeriodType' => $detail['bookingPeriodType'] ?? null,
-            'isVariantsEnabled' => $detail['isVariantsEnabled'] ?? null,
-            'teamMembers' => $detail['teamMembers'] ?? null,
-            'addOns' => $detail['addOns'] ?? null,
-            'resources' => $detail['resources'] ?? null,
-            'locations' => $detail['locations'] ?? null,
-            'embedded_variant_ids' => collect($detail['variants'] ?? [])
-                ->pluck('id')
-                ->filter()
-                ->values()
-                ->all() ?: null,
-        ], fn ($value) => $value !== null && $value !== []);
-
-        return $metadata === [] ? null : $metadata;
+        foreach ($pruned as $rental) {
+            $rental->update(['is_active' => false]);
+            if ($rental->ghl_id) {
+                $this->gateway->forget($rental->ghl_id);
+            }
+        }
     }
 }

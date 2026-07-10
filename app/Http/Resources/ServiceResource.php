@@ -3,134 +3,148 @@
 namespace App\Http\Resources;
 
 use App\Models\Product;
+use App\Models\ProductRental;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Collection;
 
+/**
+ * Local-only service payload for index listings and show fallback when GHL
+ * is unreachable. Same key set as LiveServiceResource for frontend compat.
+ */
 class ServiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $variants = $this->buildVariants();
+        /** @var Product $product */
+        $product = $this->resource;
+        $defaultRental = $product->resolveBaseRental();
 
-        return [
-            'id' => $this->id,
-            '_id' => $this->ghl_service_id,
-            'isActive' => $this->status === 'active',
-            'isPrivate' => false,
-            'name' => $this->name,
-            'slug' => $this->slug,
-            'description' => $this->description,
-            'coverImage' => $this->image,
-            'bookingUnit' => $this->booking_unit ?? 'day',
-            'quantity' => $this->available_quantity ?? 1,
-            'maxQuantity' => $this->max_quantity ?? 1,
-            'images' => $this->mapImages($this->medias),
-            'serviceCategoryId' => $this->ghl_service_category_id,
-            'categoryName' => $this->categories?->first()?->name,
-            'variantName' => $this->variant_name ?? 'Regular',
-            'isVariantsEnabled' => count($variants) > 1,
-            'isVariant' => $this->parent_product_id !== null,
-            'variantId' => $this->when($this->parent_product_id !== null, fn () => $this->parent?->ghl_service_id),
-            'variants' => $variants,
-            'pricingRule' => $this->pricing_rule ?? $this->buildFallbackPricingRule(),
-            'productId' => $this->engage_product_id,
-            'bookingPeriodType' => $this->deriveBookingPeriodType(),
-            'minDuration' => $this->min_duration,
-            'maxDuration' => $this->max_duration,
-            'durationUnit' => $this->duration_unit ?? 'day',
-            'minDurationUnit' => $this->duration_unit ?? 'day',
-            'maxDurationUnit' => $this->duration_unit ?? 'day',
-            'bookingStartTime' => $this->booking_start_time,
-            'bookingEndTime' => $this->booking_end_time,
-            'hasQuantityEnabled' => $this->max_quantity !== null && $this->max_quantity > 1,
-            'serviceDuration' => $this->min_duration ?? 0,
-            'serviceDurationUnit' => $this->duration_unit ?? 'day',
-            'teamMembers' => [],
-            'isServiceAvailable' => $this->status === 'active',
-            'displayPriority' => $this->display_priority,
-            'categories' => CategoryResource::collection($this->whenLoaded('categories')),
-            'amenities' => AmenityResource::collection($this->whenLoaded('amenities')),
-            'features' => FeatureResource::collection($this->whenLoaded('features')),
-            'fromPrice' => $this->fromPrice(),
-            'createdAt' => $this->created_at,
-            'updatedAt' => $this->updated_at,
-        ];
-    }
+        $rentals = $product->relationLoaded('rentals')
+            ? $product->rentals->where('is_active', true)->values()
+            : $product->rentals()->where('is_active', true)->get();
 
-    private function buildVariants(): array
-    {
-        $self = $this->buildVariantItem($this->resource, true);
-        $children = $this->relationLoaded('serviceVariants')
-            ? $this->serviceVariants->map(fn (Product $v) => $this->buildVariantItem($v, false))->values()->all()
-            : [];
+        $sortedRentals = $rentals->sortBy(
+            fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1
+        )->values();
 
-        return array_merge([$self], $children);
-    }
+        $variants = $this->buildLocalVariants($product, $sortedRentals);
+        $listingPrice = $product->defaultVariantPrice();
 
-    private function buildVariantItem(Product $product, bool $isBase): array
-    {
         return [
             'id' => $product->id,
-            '_id' => $product->ghl_service_id,
+            '_id' => $defaultRental?->ghl_id,
+            'isActive' => $product->status === 'active',
+            'isPrivate' => false,
             'name' => $product->name,
-            'variantName' => $product->variant_name ?? 'Regular',
+            'slug' => $product->slug,
             'description' => $product->description,
             'coverImage' => $product->image,
-            'payment' => [
-                'amount' => $product->pricing_rule['base_price'] ?? $product->fromPrice() ?? 0,
-                'description' => $product->description,
-            ],
-            'isVariant' => ! $isBase,
-            'variantId' => $isBase ? null : $product->parent?->ghl_service_id,
-            'productId' => $product->engage_product_id,
-            'position' => $isBase ? 0 : ($product->display_priority ?? 1),
-            'bookingUnit' => $product->booking_unit ?? 'day',
-            'quantity' => $product->available_quantity ?? 1,
-            'maxQuantity' => $product->max_quantity ?? 1,
-            'minDuration' => $product->min_duration,
-            'maxDuration' => $product->max_duration,
-            'pricingRule' => $product->pricing_rule,
-            'isActive' => $product->status === 'active',
+            'bookingUnit' => 'day',
+            'quantity' => $product->quantity ?? 1,
+            'maxQuantity' => $product->quantity ?? 1,
+            'images' => $product->image ? [['url' => $product->image, 'name' => $product->name, 'position' => 0, '_id' => null]] : [],
+            'serviceCategoryId' => $defaultRental?->service_category_id,
+            'categoryName' => $product->categories?->first()?->name,
+            'variantName' => $defaultRental?->name ?? 'Regular',
+            'isVariantsEnabled' => count($variants) > 1,
+            'isVariant' => false,
+            'variantId' => null,
+            'variants' => $variants,
+            'pricingRule' => $this->buildLocalPricingRule($listingPrice),
+            'productId' => $product->ghl_product_id,
+            'bookingPeriodType' => 'date-selection',
+            'minDuration' => null,
+            'maxDuration' => null,
+            'durationUnit' => 'day',
+            'minDurationUnit' => 'day',
+            'maxDurationUnit' => 'day',
+            'bookingStartTime' => null,
+            'bookingEndTime' => null,
+            'hasQuantityEnabled' => ($product->quantity ?? 1) > 1,
+            'serviceDuration' => $defaultRental?->service_duration ?? 0,
+            'serviceDurationUnit' => $defaultRental?->service_duration_unit ?? 'day',
+            'teamMembers' => [],
+            'isServiceAvailable' => $product->status === 'active',
+            'displayPriority' => 0,
+            'categories' => CategoryResource::collection($this->whenLoaded('categories')),
+            'amenities' => [],
+            'features' => [],
+            'fromPrice' => $listingPrice,
+            'createdAt' => $product->created_at,
+            'updatedAt' => $product->updated_at,
         ];
     }
 
-    private function mapImages(?array $medias): array
+    /** @param Collection<int, ProductRental> $rentals */
+    private function buildLocalVariants(Product $product, $rentals): array
     {
-        if (empty($medias)) {
-            return [];
+        $listingPrice = $product->defaultVariantPrice();
+
+        if ($rentals->isEmpty()) {
+            return [[
+                'id' => $product->id,
+                '_id' => null,
+                'name' => $product->name,
+                'variantName' => 'Regular',
+                'description' => $product->description,
+                'coverImage' => $product->image,
+                'payment' => ['amount' => (float) ($listingPrice ?? 0), 'description' => $product->description],
+                'isVariant' => false,
+                'variantId' => null,
+                'productId' => $product->ghl_product_id,
+                'position' => 0,
+                'bookingUnit' => 'day',
+                'quantity' => $product->quantity ?? 1,
+                'maxQuantity' => $product->quantity ?? 1,
+                'minDuration' => null,
+                'maxDuration' => null,
+                'pricingRule' => $this->buildLocalPricingRule($listingPrice),
+                'isActive' => $product->status === 'active',
+            ]];
         }
 
-        return collect($medias)->map(fn ($m, $i) => [
-            '_id' => $m['id'] ?? null,
-            'url' => $m['url'] ?? null,
-            'name' => $m['title'] ?? 'Image '.($i + 1),
-            'position' => $m['isFeatured'] ? 0 : $i + 1,
-        ])->values()->all();
+        return $rentals->map(function (ProductRental $rental) use ($product, $listingPrice) {
+            $isDefault = $rental->isBaseListing();
+            $variantPrice = $isDefault ? (float) ($listingPrice ?? 0) : 0.0;
+
+            return [
+                'id' => $isDefault ? $product->id : $rental->id,
+                '_id' => $rental->ghl_id,
+                'name' => $product->name,
+                'variantName' => $rental->name ?? 'Regular',
+                'description' => $product->description,
+                'coverImage' => $product->image,
+                'payment' => [
+                    'amount' => $variantPrice,
+                    'description' => $product->description,
+                ],
+                'isVariant' => ! $isDefault,
+                'variantId' => $isDefault ? null : $rental->service_id,
+                'productId' => $rental->ghl_product_id ?? $product->ghl_product_id,
+                'position' => $isDefault ? 0 : 1,
+                'bookingUnit' => 'day',
+                'quantity' => $product->quantity ?? 1,
+                'maxQuantity' => $product->quantity ?? 1,
+                'minDuration' => null,
+                'maxDuration' => null,
+                'pricingRule' => $isDefault ? $this->buildLocalPricingRule($listingPrice) : null,
+                'isActive' => $rental->is_active,
+            ];
+        })->values()->all();
     }
 
-    private function buildFallbackPricingRule(): ?array
+    private function buildLocalPricingRule(?float $listingPrice): ?array
     {
-        $price = $this->fromPrice();
-        if ($price === null) {
+        if ($listingPrice === null) {
             return null;
         }
 
         return [
-            'basePrice' => ['value' => $price, 'strategy' => 'per_day'],
+            'basePrice' => ['value' => $listingPrice, 'strategy' => 'per_day'],
+            'base_price' => $listingPrice,
+            'base_price_strategy' => 'per_day',
             'rules' => [],
         ];
-    }
-
-    private function deriveBookingPeriodType(): string
-    {
-        if ($this->booking_start_time && $this->booking_end_time) {
-            return 'date-time-selection';
-        }
-
-        if ($this->min_duration !== null && $this->max_duration !== null && $this->min_duration === $this->max_duration && $this->min_duration === 1) {
-            return 'fixed';
-        }
-
-        return 'date-selection';
     }
 }
