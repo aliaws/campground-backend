@@ -30,9 +30,9 @@ class Customer extends Model
         ];
     }
 
-    public function reservations(): HasMany
+    public function bookings(): HasMany
     {
-        return $this->hasMany(Reservation::class);
+        return $this->hasMany(Booking::class);
     }
 
     public function transactions(): HasMany

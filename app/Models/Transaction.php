@@ -14,7 +14,7 @@ class Transaction extends Model
 
     protected $fillable = [
         'customer_id',
-        'reservation_id',
+        'booking_id',
         'total_amount',
         'payment_method',
         'payment_status',
@@ -36,9 +36,9 @@ class Transaction extends Model
         return $this->belongsTo(Customer::class);
     }
 
-    public function reservation(): BelongsTo
+    public function booking(): BelongsTo
     {
-        return $this->belongsTo(Reservation::class);
+        return $this->belongsTo(Booking::class);
     }
 
     public function items(): HasMany

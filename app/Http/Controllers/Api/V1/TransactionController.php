@@ -47,7 +47,7 @@ class TransactionController extends Controller
 
     public function show(Transaction $transaction): JsonResponse
     {
-        $transaction->load(['customer', 'items.product', 'reservation']);
+        $transaction->load(['customer', 'items.product', 'booking']);
 
         return response()->json([
             'success' => true,
@@ -72,23 +72,23 @@ class TransactionController extends Controller
 
     public function invoice(Transaction $transaction): JsonResponse
     {
-        $transaction->load(['customer', 'items.product', 'reservation']);
+        $transaction->load(['customer', 'items.product', 'booking']);
 
-        $reservation = $transaction->reservation;
+        $booking = $transaction->booking;
         $ghlInvoice = null;
 
-        if ($reservation?->ghl_invoice_id) {
+        if ($booking?->ghl_invoice_id) {
             $ghlInvoice = [
-                'id' => $reservation->ghl_invoice_id,
-                'number' => $reservation->ghl_invoice_number,
-                'status' => $reservation->ghl_invoice_status,
-                'booking_id' => $reservation->ghl_booking_id,
+                'id' => $booking->ghl_invoice_id,
+                'number' => $booking->ghl_invoice_number,
+                'status' => $booking->ghl_invoice_status,
+                'ghl_booking_id' => $booking->ghl_booking_id,
             ];
         }
 
         $invoice = [
             'transaction' => new TransactionResource($transaction),
-            'invoice_number' => $reservation?->ghl_invoice_number
+            'invoice_number' => $booking?->ghl_invoice_number
                 ?? "INV-{$transaction->created_at->format('Ymd')}-{$transaction->id}",
             'ghl_invoice' => $ghlInvoice,
             'items' => $transaction->items->map(fn ($item) => [

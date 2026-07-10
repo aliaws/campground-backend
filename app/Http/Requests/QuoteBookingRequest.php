@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Requests\Public;
+namespace App\Http\Requests;
 
 use App\Rules\BookableRentalId;
 use Illuminate\Foundation\Http\FormRequest;
 
-class StoreGuestReservationRequest extends FormRequest
+class QuoteBookingRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -19,9 +19,6 @@ class StoreGuestReservationRequest extends FormRequest
             'check_in_date' => ['required', 'date', 'after_or_equal:today'],
             'check_out_date' => ['required', 'date', 'after:check_in_date'],
             'quantity' => ['nullable', 'integer', 'min:1'],
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:50'],
         ];
     }
 }

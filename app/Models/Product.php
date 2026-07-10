@@ -112,9 +112,9 @@ class Product extends Model
         return $base ?? $this->defaultRental;
     }
 
-    public function reservations(): HasMany
+    public function bookings(): HasMany
     {
-        return $this->hasMany(Reservation::class);
+        return $this->hasMany(Booking::class);
     }
 
     public function transactionItems(): HasMany

@@ -3,21 +3,22 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\QuoteReservationRequest;
-use App\Http\Requests\StoreReservationRequest;
-use App\Http\Requests\UpdateReservationStatusRequest;
-use App\Http\Resources\ReservationResource;
-use App\Models\Reservation;
+use App\Http\Requests\QuoteBookingRequest;
+use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\UpdateBookingCheckInOutRequest;
+use App\Http\Requests\UpdateBookingStatusRequest;
+use App\Http\Resources\BookingResource;
+use App\Models\Booking;
+use App\Services\BookingService;
 use App\Services\RentalResolver;
-use App\Services\ReservationService;
 use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class ReservationController extends Controller
+class BookingController extends Controller
 {
     public function __construct(
-        private ReservationService $reservationService,
+        private BookingService $bookingService,
         private TransactionService $transactionService,
         private RentalResolver $rentalResolver,
     ) {}
@@ -28,17 +29,17 @@ class ReservationController extends Controller
             'tenant_id' => $request->user()->tenant_id,
         ]);
 
-        $reservations = $this->reservationService->list($filters);
+        $bookings = $this->bookingService->list($filters);
 
         return response()->json([
             'success' => true,
-            'data' => ReservationResource::collection($reservations),
-            'message' => 'Reservations retrieved.',
+            'data' => BookingResource::collection($bookings),
+            'message' => 'Bookings retrieved.',
         ]);
     }
 
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
-    public function quote(QuoteReservationRequest $request): JsonResponse
+    public function quote(QuoteBookingRequest $request): JsonResponse
     {
         $resolved = $this->rentalResolver->resolve(
             $request->validated('product_id'),
@@ -56,7 +57,7 @@ class ReservationController extends Controller
         [$product, $rental] = $resolved;
 
         try {
-            $quote = $this->reservationService->quote(
+            $quote = $this->bookingService->quote(
                 $product,
                 $rental,
                 $request->validated('check_in_date'),
@@ -84,10 +85,10 @@ class ReservationController extends Controller
         ]);
     }
 
-    public function store(StoreReservationRequest $request): JsonResponse
+    public function store(StoreBookingRequest $request): JsonResponse
     {
         try {
-            $reservation = $this->reservationService->create(
+            $booking = $this->bookingService->create(
                 $request->validated() + ['tenant_id' => $request->user()->tenant_id]
             );
         } catch (\InvalidArgumentException $e) {
@@ -98,31 +99,35 @@ class ReservationController extends Controller
             ], 422);
         }
 
-        $transaction = $this->transactionService->autoCreateFromReservation($reservation);
+        $this->transactionService->autoCreateFromBooking($booking);
 
         return response()->json([
             'success' => true,
-            'data' => new ReservationResource($reservation),
-            'message' => 'Reservation created.',
+            'data' => new BookingResource($booking),
+            'message' => 'Booking created.',
         ], 201);
     }
 
-    public function show(Reservation $reservation): JsonResponse
+    public function show(Booking $booking): JsonResponse
     {
-        $reservation->load(['customer', 'product', 'productRental', 'transactions']);
+        $booking->load(['customer', 'product', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
-            'data' => new ReservationResource($reservation),
-            'message' => 'Reservation retrieved.',
+            'data' => new BookingResource($booking),
+            'message' => 'Booking retrieved.',
         ]);
     }
 
-    public function updateStatus(UpdateReservationStatusRequest $request, Reservation $reservation): JsonResponse
+    public function updateStatus(UpdateBookingStatusRequest $request, Booking $booking): JsonResponse
     {
+        if ($booking->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
         try {
-            $reservation = $this->reservationService->updateStatus(
-                $reservation,
+            $booking = $this->bookingService->updateStatus(
+                $booking,
                 $request->validated('status')
             );
         } catch (\InvalidArgumentException $e) {
@@ -135,16 +140,39 @@ class ReservationController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new ReservationResource($reservation),
-            'message' => 'Reservation status updated.',
+            'data' => new BookingResource($booking),
+            'message' => 'Booking status updated.',
+        ]);
+    }
+
+    public function updateCheckInOut(UpdateBookingCheckInOutRequest $request, Booking $booking): JsonResponse
+    {
+        if ($booking->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
+        try {
+            $booking = $this->bookingService->updateCheckInOut($booking, $request->validated());
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => new BookingResource($booking),
+            'message' => 'Check-in/out updated.',
         ]);
     }
 
     /** Staff confirms a guest-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
-    public function confirm(Reservation $reservation): JsonResponse
+    public function confirm(Booking $booking): JsonResponse
     {
         try {
-            $reservation = $this->reservationService->confirm($reservation);
+            $booking = $this->bookingService->confirm($booking);
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,
@@ -155,14 +183,14 @@ class ReservationController extends Controller
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Failed to confirm reservation: '.$e->getMessage(),
+                'message' => 'Failed to confirm booking: '.$e->getMessage(),
             ], 422);
         }
 
         return response()->json([
             'success' => true,
-            'data' => new ReservationResource($reservation),
-            'message' => 'Reservation confirmed and payment link sent.',
+            'data' => new BookingResource($booking),
+            'message' => 'Booking confirmed and payment link sent.',
         ]);
     }
 }

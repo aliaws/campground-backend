@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Reservation extends Model
+class Booking extends Model
 {
     use HasUlids;
 
@@ -17,6 +17,8 @@ class Reservation extends Model
         'product_rental_id',
         'check_in_date',
         'check_out_date',
+        'check_in',
+        'check_out',
         'booking_start_time',
         'booking_end_time',
         'quantity',
@@ -40,6 +42,8 @@ class Reservation extends Model
         return [
             'check_in_date' => 'date',
             'check_out_date' => 'date',
+            'check_in' => 'datetime',
+            'check_out' => 'datetime',
             'quantity' => 'integer',
             'base_amount' => 'decimal:2',
             'discount_amount' => 'decimal:2',

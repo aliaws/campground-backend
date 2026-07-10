@@ -16,7 +16,7 @@ class StoreTransactionRequest extends FormRequest
     {
         return [
             'customer_id' => ['required', 'string', 'max:26', 'exists:customers,id'],
-            'reservation_id' => ['nullable', 'string', 'max:26', 'exists:reservations,id'],
+            'booking_id' => ['nullable', 'string', 'max:26', 'exists:bookings,id'],
             'payment_method' => ['required', Rule::in(['cash', 'card'])],
             'payment_status' => ['required', Rule::in(['paid', 'pending', 'draft'])],
             'tenant_id' => ['required', 'string', 'max:26'],

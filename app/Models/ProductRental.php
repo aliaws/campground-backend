@@ -48,9 +48,9 @@ class ProductRental extends Model
         return $this->belongsTo(Product::class);
     }
 
-    public function reservations(): HasMany
+    public function bookings(): HasMany
     {
-        return $this->hasMany(Reservation::class);
+        return $this->hasMany(Booking::class);
     }
 
     /** True when this row is its product's default (base listing) variant. */

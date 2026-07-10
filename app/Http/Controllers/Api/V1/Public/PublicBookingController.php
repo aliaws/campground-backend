@@ -3,27 +3,27 @@
 namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Public\StoreGuestReservationRequest;
-use App\Http\Requests\QuoteReservationRequest;
-use App\Http\Resources\GuestReservationResource;
-use App\Models\Reservation;
+use App\Http\Requests\Public\StoreGuestBookingRequest;
+use App\Http\Requests\QuoteBookingRequest;
+use App\Http\Resources\GuestBookingResource;
+use App\Models\Booking;
+use App\Services\BookingService;
 use App\Services\CustomerService;
 use App\Services\RentalResolver;
-use App\Services\ReservationService;
 use App\Services\TenantResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class PublicReservationController extends Controller
+class PublicBookingController extends Controller
 {
     public function __construct(
-        private ReservationService $reservationService,
+        private BookingService $bookingService,
         private CustomerService $customerService,
         private RentalResolver $rentalResolver,
     ) {}
 
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
-    public function quote(QuoteReservationRequest $request): JsonResponse
+    public function quote(QuoteBookingRequest $request): JsonResponse
     {
         $tenantId = TenantResolver::resolveDefault();
         $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $tenantId);
@@ -47,7 +47,7 @@ class PublicReservationController extends Controller
         }
 
         try {
-            $quote = $this->reservationService->quote(
+            $quote = $this->bookingService->quote(
                 $product,
                 $rental,
                 $request->validated('check_in_date'),
@@ -75,7 +75,7 @@ class PublicReservationController extends Controller
         ]);
     }
 
-    public function store(StoreGuestReservationRequest $request): JsonResponse
+    public function store(StoreGuestBookingRequest $request): JsonResponse
     {
         $tenantId = TenantResolver::resolveDefault();
 
@@ -105,7 +105,7 @@ class PublicReservationController extends Controller
         );
 
         try {
-            $reservation = $this->reservationService->create([
+            $booking = $this->bookingService->create([
                 'customer_id' => $customer->id,
                 'product_id' => $request->validated('product_id'),
                 'check_in_date' => $request->validated('check_in_date'),
@@ -123,29 +123,29 @@ class PublicReservationController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new GuestReservationResource($reservation),
+            'data' => new GuestBookingResource($booking),
             'message' => 'Your booking request has been received. Our team will contact you shortly to confirm and arrange payment.',
         ], 201);
     }
 
     /** Guest confirmation lookup — requires the booking email as a cheap ownership check. */
-    public function show(Request $request, Reservation $reservation): JsonResponse
+    public function show(Request $request, Booking $booking): JsonResponse
     {
         $email = strtolower((string) $request->query('email'));
-        $reservation->loadMissing('customer', 'product', 'productRental');
+        $booking->loadMissing('customer', 'product', 'productRental');
 
-        if (! $email || strtolower((string) $reservation->customer?->email) !== $email) {
+        if (! $email || strtolower((string) $booking->customer?->email) !== $email) {
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Reservation not found.',
+                'message' => 'Booking not found.',
             ], 404);
         }
 
         return response()->json([
             'success' => true,
-            'data' => new GuestReservationResource($reservation),
-            'message' => 'Reservation retrieved.',
+            'data' => new GuestBookingResource($booking),
+            'message' => 'Booking retrieved.',
         ]);
     }
 }

@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use App\Rules\BookableRentalId;
 use Illuminate\Foundation\Http\FormRequest;
 
-class StoreReservationRequest extends FormRequest
+class StoreBookingRequest extends FormRequest
 {
     public function authorize(): bool
     {

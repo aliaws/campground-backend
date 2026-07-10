@@ -101,14 +101,14 @@ All endpoints are prefixed with `/api/v1`.
 | PUT | `/customers/{id}` | Update customer (auto-syncs to GHL) |
 | DELETE | `/customers/{id}` | Soft-delete customer |
 
-### Reservations
+### Bookings
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/reservations` | List reservations (filter: `?status=...&customer_id=...&date_from=...&date_to=...`) |
-| POST | `/reservations` | Create reservation (auto-creates transaction, syncs to GHL) |
-| GET | `/reservations/{id}` | Get reservation with customer, product, transactions |
-| PATCH | `/reservations/{id}/status` | Update status (`pending`, `confirmed`, `cancelled`) — syncs to GHL |
+| GET | `/bookings` | List bookings (filter: `?status=...&customer_id=...&date_from=...&date_to=...`) |
+| POST | `/bookings` | Create booking (auto-creates transaction, syncs to GHL) |
+| GET | `/bookings/{id}` | Get booking with customer, product, transactions |
+| PATCH | `/bookings/{id}/status` | Update status (`pending`, `confirmed`, `cancelled`) — syncs to GHL |
 
 ### Transactions
 
@@ -116,7 +116,7 @@ All endpoints are prefixed with `/api/v1`.
 |--------|----------|-------------|
 | GET | `/transactions` | List transactions (filter: `?payment_status=...&payment_method=...&invoice_status=...&customer_id=...&date_from=...&date_to=...`) |
 | POST | `/transactions` | Create transaction with line items |
-| GET | `/transactions/{id}` | Get transaction with customer, items, reservation |
+| GET | `/transactions/{id}` | Get transaction with customer, items, booking |
 | PATCH | `/transactions/{id}/payment-status` | Update payment status (`draft`, `pending`, `paid`) |
 | GET | `/transactions/{id}/invoice` | Generate invoice data |
 
@@ -146,7 +146,7 @@ All endpoints are prefixed with `/api/v1`.
 Two-way sync with GoHighLevel CRM:
 
 - **Inbound webhooks** (`POST /api/v1/webhooks/ghl`) receive contact/opportunity updates from GHL
-- **Outbound sync** (`GhlService` + `GhlClient`) pushes customer and reservation data to GHL
+- **Outbound sync** (`GhlService` + `GhlClient`) pushes customer and booking data to GHL
 - Every webhook payload (inbound and outbound) is logged in the `webhook_logs` table for audit/debugging
 
 ### Supported Inbound Events
@@ -155,8 +155,8 @@ Two-way sync with GoHighLevel CRM:
 |-------|--------|
 | `contact.created` | Create/update customer with `ghl_contact_id` |
 | `contact.updated` | Update matching customer |
-| `opportunity.created` | Link to latest unlinked reservation |
-| `opportunity.stage_changed` | Update reservation status (`new`→`pending`, `booked`→`confirmed`, `lost`→`cancelled`) |
+| `opportunity.created` | Link to latest unlinked booking |
+| `opportunity.stage_changed` | Update booking status (`new`→`pending`, `booked`→`confirmed`, `lost`→`cancelled`) |
 
 ### Outbound Sync
 
@@ -164,8 +164,8 @@ Two-way sync with GoHighLevel CRM:
 |---------|------------|
 | Customer created | Create GHL contact |
 | Customer updated | Update GHL contact |
-| Reservation created | Create GHL opportunity |
-| Reservation status changed | Update GHL opportunity stage |
+| Booking created | Create GHL opportunity |
+| Booking status changed | Update GHL opportunity stage |
 
 Configure via Engage Settings (`/settings/engage`):
 
@@ -192,7 +192,7 @@ Configure via Engage Settings (`/settings/engage`):
 | `product_prices` | Seasonal pricing tiers per product | No | No |
 | `product_variations` | Size/type variations per product | No | No |
 | `customers` | Customers (synced to GHL via `ghl_contact_id`) | Yes | Yes |
-| `reservations` | Booking records | No | Yes |
+| `bookings` | Booking records | No | Yes |
 | `transactions` | Payments/invoices | Yes | Yes |
 | `transaction_items` | Line items per transaction | No | No |
 | `engage_settings` | GHL integration config per tenant | No | Yes |
@@ -210,13 +210,13 @@ Route → Controller → Service → Model
            API Resource (response)
 ```
 
-Controllers are thin — all business logic lives in dedicated Service classes (`ProductService`, `ReservationService`, `TransactionService`, `GhlService`). Form Requests handle validation; API Resources shape JSON responses.
+Controllers are thin — all business logic lives in dedicated Service classes (`ProductService`, `BookingService`, `TransactionService`, `GhlService`). Form Requests handle validation; API Resources shape JSON responses.
 
 ### Key Business Logic
 
-- **Reservation creation** auto-calculates `total_amount` from `base_price × nights`, auto-creates a pending transaction, and pushes an opportunity to GHL
+- **Booking creation** auto-calculates `total_amount` from `base_price × nights`, auto-creates a pending transaction, and pushes an opportunity to GHL
 - **Payment status update** to `paid` auto-sets `invoice_status` to `completed`
-- **Available campsites query** excludes products with overlapping reservations
+- **Available campsites query** excludes products with overlapping bookings
 - **GHL sync failures** are logged but don't block the main operation (try/catch with logging)
 
 ## Role-Based Access

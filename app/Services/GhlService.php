@@ -3,9 +3,9 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
+use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\EngageSetting;
-use App\Models\Reservation;
 use App\Models\Transaction;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
@@ -234,9 +234,9 @@ class GhlService
         return $results;
     }
 
-    public function createOpportunity(Reservation $reservation): ?string
+    public function createOpportunity(Booking $booking): ?string
     {
-        $customer = $reservation->customer;
+        $customer = $booking->customer;
 
         if (! $customer->ghl_contact_id) {
             $this->syncContactToGhl($customer);
@@ -249,7 +249,7 @@ class GhlService
 
         $payload = [
             'contactId' => $customer->ghl_contact_id,
-            'name' => "Reservation - {$reservation->product->name} ({$reservation->check_in_date} to {$reservation->check_out_date})",
+            'name' => "Booking - {$booking->product->name} ({$booking->check_in_date} to {$booking->check_out_date})",
             'status' => 'new',
         ];
 
@@ -259,7 +259,7 @@ class GhlService
 
             $ghlId = $response['opportunity']['id'] ?? null;
             if ($ghlId) {
-                $reservation->update(['ghl_opportunity_id' => $ghlId]);
+                $booking->update(['ghl_opportunity_id' => $ghlId]);
             }
 
             return $ghlId;
@@ -269,9 +269,9 @@ class GhlService
         }
     }
 
-    public function updateOpportunityStage(Reservation $reservation, string $stage): void
+    public function updateOpportunityStage(Booking $booking, string $stage): void
     {
-        if (! $reservation->ghl_opportunity_id) {
+        if (! $booking->ghl_opportunity_id) {
             return;
         }
 
@@ -279,7 +279,7 @@ class GhlService
 
         try {
             $response = $this->client->put(
-                "opportunities/{$reservation->ghl_opportunity_id}",
+                "opportunities/{$booking->ghl_opportunity_id}",
                 $payload
             );
             $this->logOutbound('opportunity.stage_changed', $payload, $response);
@@ -371,7 +371,7 @@ class GhlService
         if ($contactId) {
             $customer = Customer::where('ghl_contact_id', $contactId)->first();
             if ($customer) {
-                Reservation::where('customer_id', $customer->id)
+                Booking::where('customer_id', $customer->id)
                     ->whereNull('ghl_opportunity_id')
                     ->latest()
                     ->first()
@@ -392,9 +392,9 @@ class GhlService
                 'lost' => 'cancelled',
             ];
 
-            $reservation = Reservation::where('ghl_opportunity_id', $opportunity['id'])->first();
-            if ($reservation && $status && isset($stageMap[$status])) {
-                $reservation->update(['status' => $stageMap[$status]]);
+            $booking = Booking::where('ghl_opportunity_id', $opportunity['id'])->first();
+            if ($booking && $status && isset($stageMap[$status])) {
+                $booking->update(['status' => $stageMap[$status]]);
             }
         }
     }
@@ -419,30 +419,30 @@ class GhlService
             return;
         }
 
-        $reservation = Reservation::where('ghl_invoice_id', $ghlInvoiceId)->first();
+        $booking = Booking::where('ghl_invoice_id', $ghlInvoiceId)->first();
 
-        if (! $reservation) {
+        if (! $booking) {
             return;
         }
 
-        $reservation->update(['ghl_invoice_status' => $status]);
+        $booking->update(['ghl_invoice_status' => $status]);
 
         if ($status === 'paid') {
-            $reservation->transactions()->whereNotIn('payment_status', ['paid'])->get()->each(
+            $booking->transactions()->whereNotIn('payment_status', ['paid'])->get()->each(
                 fn (Transaction $transaction) => $transaction->update([
                     'payment_status' => 'paid',
                     'invoice_status' => 'completed',
                 ])
             );
 
-            if ($reservation->status === 'requested') {
+            if ($booking->status === 'requested') {
                 try {
                     // Resolved lazily to avoid a circular constructor dependency
-                    // (ReservationService -> GhlBookingService -> GhlService).
-                    app(ReservationService::class)->autoConfirmAfterPayment($reservation);
+                    // (BookingService -> GhlBookingService -> GhlService).
+                    app(BookingService::class)->autoConfirmAfterPayment($booking);
                 } catch (\Exception $e) {
                     Log::error('Auto-confirm after Text2Pay payment failed', [
-                        'reservation_id' => $reservation->id,
+                        'booking_id' => $booking->id,
                         'error' => $e->getMessage(),
                     ]);
                 }

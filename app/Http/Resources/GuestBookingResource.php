@@ -5,8 +5,8 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** Public-safe reservation payload for guest checkout — no internal tenant/GHL ids. */
-class GuestReservationResource extends JsonResource
+/** Public-safe booking payload for guest checkout — no internal tenant/GHL ids. */
+class GuestBookingResource extends JsonResource
 {
     public function toArray(Request $request): array
     {

@@ -4,10 +4,10 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
+use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductRental;
-use App\Models\Reservation;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
@@ -37,13 +37,13 @@ class GhlBookingService
      * @param  bool  $skipPaymentEmail  When true, the invoice this call auto-generates is
      *                                  recorded as already paid instead of emailed — used when the guest already paid
      *                                  via a separate Text2Pay invoice before staff/webhook confirmed the calendar slot,
-     *                                  so they're never asked to pay twice for the same reservation.
+     *                                  so they're never asked to pay twice for the same booking.
      */
-    public function createBooking(Reservation $reservation, bool $skipPaymentEmail = false): ?string
+    public function createBooking(Booking $booking, bool $skipPaymentEmail = false): ?string
     {
-        $reservation->loadMissing(['customer', 'product', 'productRental']);
-        $product = $reservation->product;
-        $rental = $reservation->productRental;
+        $booking->loadMissing(['customer', 'product', 'productRental']);
+        $product = $booking->product;
+        $rental = $booking->productRental;
 
         if (! $rental?->ghl_id) {
             throw new \InvalidArgumentException(
@@ -64,7 +64,7 @@ class GhlBookingService
             );
         }
 
-        $customer = $reservation->customer;
+        $customer = $booking->customer;
 
         if (! $customer->ghl_contact_id) {
             $this->ghlService->syncContactToGhl($customer);
@@ -83,8 +83,8 @@ class GhlBookingService
         $timezone = $this->client->getTimezone();
         $productsPayload = [[
             'id' => $detail->paymentsProductId(),
-            'qty' => max((int) $reservation->quantity, 1),
-            'overridePrice' => round((float) $reservation->total_amount, 2),
+            'qty' => max((int) $booking->quantity, 1),
+            'overridePrice' => round((float) $booking->total_amount, 2),
         ]];
         $feesPayload = [
             'locationId' => $locationId,
@@ -100,7 +100,7 @@ class GhlBookingService
             $this->logOutbound('booking.processing-fees', $feesPayload, $feesResponse);
 
             $createPayload = $this->buildCreatePayload(
-                $reservation,
+                $booking,
                 $product,
                 $rental,
                 $detail,
@@ -125,16 +125,16 @@ class GhlBookingService
             ]);
 
             if ($updates !== []) {
-                $reservation->update($updates);
+                $booking->update($updates);
             }
 
             if ($invoiceId) {
-                $this->syncInvoiceMetadata($reservation, $invoiceId);
+                $this->syncInvoiceMetadata($booking, $invoiceId);
 
                 if ($skipPaymentEmail) {
-                    $this->recordInvoicePayment($reservation, (float) $reservation->total_amount, 'card');
+                    $this->recordInvoicePayment($booking, (float) $booking->total_amount, 'card');
                 } else {
-                    $this->sendInvoicePaymentEmail($reservation);
+                    $this->sendInvoicePaymentEmail($booking);
                 }
             }
 
@@ -146,15 +146,15 @@ class GhlBookingService
     }
 
     /**
-     * Create a standalone GHL "Text2Pay" invoice for a guest reservation and persist
+     * Create a standalone GHL "Text2Pay" invoice for a guest booking and persist
      * its hosted payment URL — no calendar booking required. Used to let a guest pay
      * immediately (e.g. via a QR code) without waiting for staff to confirm availability.
      */
-    public function createText2PayInvoice(Reservation $reservation): void
+    public function createText2PayInvoice(Booking $booking): void
     {
-        $reservation->loadMissing(['customer', 'product']);
-        $product = $reservation->product;
-        $customer = $reservation->customer;
+        $booking->loadMissing(['customer', 'product']);
+        $product = $booking->product;
+        $customer = $booking->customer;
 
         if (! $customer->ghl_contact_id) {
             $this->ghlService->syncContactToGhl($customer);
@@ -173,12 +173,12 @@ class GhlBookingService
         $payload = [
             'altId' => $locationId,
             'altType' => 'location',
-            'name' => "Reservation — {$product->name}",
+            'name' => "Booking — {$product->name}",
             'currency' => 'USD',
             'items' => [[
                 'name' => $product->name,
                 'currency' => 'USD',
-                'amount' => round((float) $reservation->total_amount, 2),
+                'amount' => round((float) $booking->total_amount, 2),
                 'qty' => 1,
             ]],
             'contactDetails' => [
@@ -205,7 +205,7 @@ class GhlBookingService
             $this->logOutbound('invoice.text2pay', $payload, $response);
 
             $invoice = $response['invoice'] ?? [];
-            $this->persistInvoiceMetadata($reservation, $invoice, $response['invoiceUrl'] ?? null);
+            $this->persistInvoiceMetadata($booking, $invoice, $response['invoiceUrl'] ?? null);
         } catch (\Exception $e) {
             $this->logOutbound('invoice.text2pay', $payload, ['error' => $e->getMessage()]);
             throw $e;
@@ -215,14 +215,14 @@ class GhlBookingService
     /**
      * Email the customer a GHL invoice with online payment link.
      */
-    public function sendInvoicePaymentEmail(Reservation $reservation): void
+    public function sendInvoicePaymentEmail(Booking $booking): void
     {
-        if (! $reservation->ghl_invoice_id) {
+        if (! $booking->ghl_invoice_id) {
             return;
         }
 
-        $reservation->loadMissing('customer');
-        $email = $reservation->customer?->email;
+        $booking->loadMissing('customer');
+        $email = $booking->customer?->email;
         if (! $email) {
             return;
         }
@@ -246,13 +246,13 @@ class GhlBookingService
 
         try {
             $response = $this->client->post(
-                "invoices/{$reservation->ghl_invoice_id}/send",
+                "invoices/{$booking->ghl_invoice_id}/send",
                 $payload,
                 [],
                 '2021-07-28',
             );
             $this->logOutbound('invoice.sent', $payload, $response);
-            $this->syncInvoiceMetadataFromResponse($reservation, $response);
+            $this->syncInvoiceMetadataFromResponse($booking, $response);
         } catch (\Exception $e) {
             $this->logOutbound('invoice.sent', $payload, ['error' => $e->getMessage()]);
         }
@@ -261,9 +261,9 @@ class GhlBookingService
     /**
      * Record a manual POS payment against the GHL invoice for this booking.
      */
-    public function recordInvoicePayment(Reservation $reservation, float $amount, string $paymentMethod = 'cash'): void
+    public function recordInvoicePayment(Booking $booking, float $amount, string $paymentMethod = 'cash'): void
     {
-        if (! $reservation->ghl_invoice_id) {
+        if (! $booking->ghl_invoice_id) {
             return;
         }
 
@@ -282,12 +282,12 @@ class GhlBookingService
 
         try {
             $response = $this->client->post(
-                "invoices/{$reservation->ghl_invoice_id}/record-payment",
+                "invoices/{$booking->ghl_invoice_id}/record-payment",
                 $payload,
             );
             $this->logOutbound('invoice.payment-recorded', $payload, $response);
 
-            $this->syncInvoiceMetadataFromResponse($reservation, $response);
+            $this->syncInvoiceMetadataFromResponse($booking, $response);
         } catch (\Exception $e) {
             $this->logOutbound('invoice.payment-recorded', $payload, ['error' => $e->getMessage()]);
             throw $e;
@@ -303,14 +303,14 @@ class GhlBookingService
         };
     }
 
-    public function updateBookingStatus(Reservation $reservation, string $localStatus): void
+    public function updateBookingStatus(Booking $booking, string $localStatus): void
     {
-        if (! $reservation->ghl_booking_id) {
+        if (! $booking->ghl_booking_id) {
             return;
         }
 
         if ($localStatus === 'cancelled') {
-            $this->cancelBooking($reservation);
+            $this->cancelBooking($booking);
 
             return;
         }
@@ -325,7 +325,7 @@ class GhlBookingService
 
         try {
             $response = $this->client->put(
-                "calendars/services/bookings/{$reservation->ghl_booking_id}",
+                "calendars/services/bookings/{$booking->ghl_booking_id}",
                 $payload,
                 [],
                 GhlClient::BOOKING_API_VERSION,
@@ -338,28 +338,28 @@ class GhlBookingService
         }
     }
 
-    public function cancelBooking(Reservation $reservation): void
+    public function cancelBooking(Booking $booking): void
     {
-        if (! $reservation->ghl_booking_id) {
+        if (! $booking->ghl_booking_id) {
             return;
         }
 
         try {
             $response = $this->client->delete(
-                "calendars/services/bookings/{$reservation->ghl_booking_id}",
+                "calendars/services/bookings/{$booking->ghl_booking_id}",
                 [],
                 GhlClient::BOOKING_API_VERSION,
             );
 
-            $this->logOutbound('booking.deleted', ['bookingId' => $reservation->ghl_booking_id], $response);
+            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], $response);
         } catch (\Exception $e) {
-            $this->logOutbound('booking.deleted', ['bookingId' => $reservation->ghl_booking_id], ['error' => $e->getMessage()]);
+            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], ['error' => $e->getMessage()]);
             throw $e;
         }
     }
 
     private function buildCreatePayload(
-        Reservation $reservation,
+        Booking $booking,
         Product $product,
         ProductRental $rental,
         GhlServiceDetail $detail,
@@ -368,7 +368,7 @@ class GhlBookingService
         string $locationId,
         string $timezone,
     ): array {
-        $securityDeposit = round((float) $reservation->security_deposit_amount, 2);
+        $securityDeposit = round((float) $booking->security_deposit_amount, 2);
         [$firstName, $lastName] = $this->splitName($customer->name);
 
         return [
@@ -377,7 +377,7 @@ class GhlBookingService
             'source' => 'rental',
             'formData' => $this->buildContactFormData($customer, $firstName, $lastName, $locationId, $timezone),
             'selectedSlotInfo' => [
-                'services' => [$this->buildSelectedService($reservation, $product, $rental, $detail, $baseDetail, $timezone)],
+                'services' => [$this->buildSelectedService($booking, $product, $rental, $detail, $baseDetail, $timezone)],
                 'subAccountId' => $locationId,
                 'timezone' => $timezone,
             ],
@@ -412,7 +412,7 @@ class GhlBookingService
     }
 
     private function buildSelectedService(
-        Reservation $reservation,
+        Booking $booking,
         Product $product,
         ProductRental $rental,
         GhlServiceDetail $detail,
@@ -420,30 +420,30 @@ class GhlBookingService
         string $timezone,
     ): array {
         $pricingRule = $detail->pricingRule() ?? [];
-        $securityDeposit = round((float) $reservation->security_deposit_amount, 2);
+        $securityDeposit = round((float) $booking->security_deposit_amount, 2);
 
         return [
             'id' => $rental->ghl_id,
             'position' => 0,
             'skipSchedulingNotice' => true,
             'startDate' => $this->buildIsoDateTime(
-                $reservation->check_in_date->format('Y-m-d'),
-                $reservation->booking_start_time ?? $detail->bookingStartTime() ?? '09:00',
+                $booking->check_in_date->format('Y-m-d'),
+                $booking->booking_start_time ?? $detail->bookingStartTime() ?? '09:00',
                 $timezone,
             ),
             'endDate' => $this->buildIsoDateTime(
-                $reservation->check_out_date->format('Y-m-d'),
-                $reservation->booking_end_time ?? $detail->bookingEndTime() ?? '17:00',
+                $booking->check_out_date->format('Y-m-d'),
+                $booking->booking_end_time ?? $detail->bookingEndTime() ?? '17:00',
                 $timezone,
             ),
-            'quantity' => max((int) $reservation->quantity, 1),
+            'quantity' => max((int) $booking->quantity, 1),
             'overrideAvailability' => true,
             'skipLookBusy' => false,
             'securityDeposit' => $securityDeposit,
             'securityDepositRefundable' => $pricingRule['security_deposit_refundable'] ?? true,
             'name' => $product->name,
             'variantName' => $rental->name ?? 'Regular',
-            'price' => round((float) $reservation->total_amount, 2),
+            'price' => round((float) $booking->total_amount, 2),
             'masterListingId' => $rental->service_id ?? $rental->ghl_id,
             'bookingPeriodType' => $baseDetail->bookingPeriodType() ?? 'date-selection',
             'isVariantsEnabled' => $baseDetail->isVariantsEnabled(),
@@ -503,14 +503,14 @@ class GhlBookingService
         return $invoiceIds[0] ?? null;
     }
 
-    public function refreshInvoiceMetadata(Reservation $reservation): void
+    public function refreshInvoiceMetadata(Booking $booking): void
     {
-        $this->syncInvoiceMetadata($reservation);
+        $this->syncInvoiceMetadata($booking);
     }
 
-    private function syncInvoiceMetadata(Reservation $reservation, ?string $invoiceId = null): void
+    private function syncInvoiceMetadata(Booking $booking, ?string $invoiceId = null): void
     {
-        $invoiceId = $invoiceId ?? $reservation->ghl_invoice_id;
+        $invoiceId = $invoiceId ?? $booking->ghl_invoice_id;
         if (! $invoiceId) {
             return;
         }
@@ -525,34 +525,34 @@ class GhlBookingService
                 'altId' => $locationId,
                 'altType' => 'location',
             ]);
-            $this->persistInvoiceMetadata($reservation, $invoice);
+            $this->persistInvoiceMetadata($booking, $invoice);
         } catch (\Exception $e) {
             $this->logOutbound('invoice.fetched', ['invoiceId' => $invoiceId], ['error' => $e->getMessage()]);
         }
     }
 
-    private function syncInvoiceMetadataFromResponse(Reservation $reservation, array $response): void
+    private function syncInvoiceMetadataFromResponse(Booking $booking, array $response): void
     {
         $invoice = $response['invoice'] ?? null;
         if (is_array($invoice)) {
-            $this->persistInvoiceMetadata($reservation, $invoice);
+            $this->persistInvoiceMetadata($booking, $invoice);
 
             return;
         }
 
-        $this->syncInvoiceMetadata($reservation);
+        $this->syncInvoiceMetadata($booking);
     }
 
-    private function persistInvoiceMetadata(Reservation $reservation, array $invoice, ?string $invoiceUrl = null): void
+    private function persistInvoiceMetadata(Booking $booking, array $invoice, ?string $invoiceUrl = null): void
     {
         $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
         $number = $invoice['invoiceNumber'] ?? null;
 
-        $reservation->update(array_filter([
-            'ghl_invoice_id' => $invoice['_id'] ?? $reservation->ghl_invoice_id,
-            'ghl_invoice_number' => $number ? $prefix.$number : $reservation->ghl_invoice_number,
-            'ghl_invoice_status' => $invoice['status'] ?? $reservation->ghl_invoice_status,
-            'ghl_invoice_url' => $invoiceUrl ?? $reservation->ghl_invoice_url,
+        $booking->update(array_filter([
+            'ghl_invoice_id' => $invoice['_id'] ?? $booking->ghl_invoice_id,
+            'ghl_invoice_number' => $number ? $prefix.$number : $booking->ghl_invoice_number,
+            'ghl_invoice_status' => $invoice['status'] ?? $booking->ghl_invoice_status,
+            'ghl_invoice_url' => $invoiceUrl ?? $booking->ghl_invoice_url,
         ], fn ($value) => $value !== null));
     }
 

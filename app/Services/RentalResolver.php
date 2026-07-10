@@ -6,7 +6,7 @@ use App\Models\Product;
 use App\Models\ProductRental;
 
 /**
- * Resolves the `product_id` the frontend sends for quotes/reservations. The
+ * Resolves the `product_id` the frontend sends for quotes/bookings. The
  * guest UI's variant dropdown emits the base listing's PRODUCT id for the
  * default variant and the PRODUCT_RENTALS id for every other variant — this
  * accepts either (ULIDs never collide across tables) and normalizes to the

@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class UpdateReservationStatusRequest extends FormRequest
+class UpdateBookingStatusRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -15,7 +15,7 @@ class UpdateReservationStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', Rule::in(['requested', 'pending', 'confirmed', 'cancelled'])],
+            'status' => ['required', Rule::in(['pending', 'confirmed', 'cancelled'])],
         ];
     }
 }

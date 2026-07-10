@@ -2,14 +2,14 @@
 
 use App\Http\Controllers\Api\V1\AmenityController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
-use App\Http\Controllers\Api\V1\Public\PublicReservationController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
-use App\Http\Controllers\Api\V1\ReservationController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\TransactionController;
@@ -36,11 +36,11 @@ Route::prefix('v1')->group(function () {
             Route::get('/services/variant/{id}', [PublicServiceController::class, 'variant']);
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
             Route::get('/categories', [PublicCategoryController::class, 'index']);
-            Route::post('/reservations/quote', [PublicReservationController::class, 'quote']);
-            Route::get('/reservations/{reservation}', [PublicReservationController::class, 'show']);
+            Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
+            Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
         });
         Route::middleware('throttle:guest-booking')->group(function () {
-            Route::post('/reservations', [PublicReservationController::class, 'store']);
+            Route::post('/bookings', [PublicBookingController::class, 'store']);
         });
     });
 
@@ -78,13 +78,14 @@ Route::prefix('v1')->group(function () {
         Route::post('/services/pull-ghl', [ServiceController::class, 'pullFromGhl']);
         Route::get('/services/{product}', [ServiceController::class, 'show']);
 
-        // Reservations (bookings)
-        Route::get('/reservations', [ReservationController::class, 'index']);
-        Route::post('/reservations/quote', [ReservationController::class, 'quote']);
-        Route::post('/reservations', [ReservationController::class, 'store']);
-        Route::get('/reservations/{reservation}', [ReservationController::class, 'show']);
-        Route::patch('/reservations/{reservation}/status', [ReservationController::class, 'updateStatus']);
-        Route::post('/reservations/{reservation}/confirm', [ReservationController::class, 'confirm']);
+        // Bookings
+        Route::get('/bookings', [BookingController::class, 'index']);
+        Route::post('/bookings/quote', [BookingController::class, 'quote']);
+        Route::post('/bookings', [BookingController::class, 'store']);
+        Route::get('/bookings/{booking}', [BookingController::class, 'show']);
+        Route::patch('/bookings/{booking}/status', [BookingController::class, 'updateStatus']);
+        Route::patch('/bookings/{booking}/check-in-out', [BookingController::class, 'updateCheckInOut']);
+        Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);
 
         // Transactions
         Route::get('/transactions', [TransactionController::class, 'index']);
