@@ -83,6 +83,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/quote', [BookingController::class, 'quote']);
         Route::post('/bookings', [BookingController::class, 'store']);
         Route::get('/bookings/{booking}', [BookingController::class, 'show']);
+        Route::get('/bookings/{booking}/invoice', [BookingController::class, 'invoice']);
         Route::patch('/bookings/{booking}/status', [BookingController::class, 'updateStatus']);
         Route::patch('/bookings/{booking}/check-in-out', [BookingController::class, 'updateCheckInOut']);
         Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);

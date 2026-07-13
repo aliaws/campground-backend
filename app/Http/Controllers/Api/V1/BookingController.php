@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateBookingStatusRequest;
 use App\Http\Resources\BookingResource;
 use App\Models\Booking;
 use App\Services\BookingService;
+use App\Services\GhlBookingService;
 use App\Services\RentalResolver;
 use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
@@ -21,6 +22,7 @@ class BookingController extends Controller
         private BookingService $bookingService,
         private TransactionService $transactionService,
         private RentalResolver $rentalResolver,
+        private GhlBookingService $ghlBookingService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -201,6 +203,26 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => 'Check-in/out updated.',
+        ]);
+    }
+
+    /**
+     * Live GHL invoice detail for this booking, rendered in our own UI — GHL's
+     * own invoice page requires a logged-in GHL session and 403s otherwise, so
+     * we don't link out to it.
+     */
+    public function invoice(Request $request, Booking $booking): JsonResponse
+    {
+        if ($booking->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
+        $invoice = $this->ghlBookingService->fetchInvoiceDetail($booking);
+
+        return response()->json([
+            'success' => true,
+            'data' => $invoice,
+            'message' => $invoice ? 'Invoice retrieved.' : 'No invoice available for this booking yet.',
         ]);
     }
 

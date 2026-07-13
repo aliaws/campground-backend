@@ -538,6 +538,55 @@ class GhlBookingService
         $this->syncInvoiceMetadata($booking);
     }
 
+    /**
+     * Live invoice detail for display — GHL's invoice page itself
+     * (msgr.../invoice/{id}) requires a logged-in GHL session and 403s for
+     * anyone else, so this is fetched and rendered inside our own UI instead
+     * of linking out to it. Returns null if there's no invoice yet or the
+     * live fetch fails (never persisted — this is read-only, for display).
+     */
+    public function fetchInvoiceDetail(Booking $booking): ?array
+    {
+        if (! $booking->ghl_invoice_id) {
+            return null;
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            return null;
+        }
+
+        try {
+            $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+                'altId' => $locationId,
+                'altType' => 'location',
+            ]);
+        } catch (\Exception $e) {
+            $this->logOutbound('invoice.fetched', ['invoiceId' => $booking->ghl_invoice_id], ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        return [
+            'invoice_number' => isset($invoice['invoiceNumber'])
+                ? ($invoice['invoiceNumberPrefix'] ?? 'INV-').$invoice['invoiceNumber']
+                : null,
+            'status' => $invoice['status'] ?? null,
+            'currency' => $invoice['currency'] ?? 'USD',
+            'total' => (float) ($invoice['invoiceTotal'] ?? $invoice['total'] ?? 0),
+            'amount_due' => (float) ($invoice['amountDue'] ?? 0),
+            'amount_paid' => (float) ($invoice['amountPaid'] ?? 0),
+            'issue_date' => $invoice['issueDate'] ?? null,
+            'due_date' => $invoice['dueDate'] ?? null,
+            'business_name' => $invoice['businessDetails']['name'] ?? null,
+            'items' => array_map(fn (array $item) => [
+                'name' => $item['name'] ?? 'Item',
+                'quantity' => $item['qty'] ?? 1,
+                'amount' => (float) ($item['amount'] ?? 0),
+            ], $invoice['invoiceItems'] ?? []),
+        ];
+    }
+
     private function syncInvoiceMetadata(Booking $booking, ?string $invoiceId = null): void
     {
         $invoiceId = $invoiceId ?? $booking->ghl_invoice_id;
