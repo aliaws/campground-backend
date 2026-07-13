@@ -203,7 +203,17 @@ class BookingService
             return $booking;
         }
 
-        $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+        // Guard against duplicate real GHL calendar bookings: this now runs from
+        // both the InvoicePaid webhook and the live invoice-status reconciliation
+        // fallback (GhlService::reconcileInvoiceStatus), so it must tolerate being
+        // called more than once for the same booking — e.g. a redelivered webhook,
+        // or a webhook and a reconciliation poll landing close together. If a real
+        // booking already exists, just correct the local status instead of
+        // creating a second one.
+        if (! $booking->ghl_booking_id) {
+            $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+        }
+
         $booking->update(['status' => 'confirmed']);
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);

@@ -9,6 +9,7 @@ use App\Http\Resources\GuestBookingResource;
 use App\Models\Booking;
 use App\Services\BookingService;
 use App\Services\CustomerService;
+use App\Services\GhlService;
 use App\Services\RentalResolver;
 use App\Services\TenantResolver;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,7 @@ class PublicBookingController extends Controller
         private BookingService $bookingService,
         private CustomerService $customerService,
         private RentalResolver $rentalResolver,
+        private GhlService $ghlService,
     ) {}
 
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
@@ -141,6 +143,14 @@ class PublicBookingController extends Controller
                 'message' => 'Booking not found.',
             ], 404);
         }
+
+        // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
+        // publicly reachable webhook URL in local dev) — the guest confirmation
+        // page polls this endpoint waiting for payment_status to flip to paid.
+        // reconcileInvoiceStatus() may return a freshly-reloaded model, so
+        // re-attach the relations the resource needs.
+        $booking = $this->ghlService->reconcileInvoiceStatus($booking)
+            ->loadMissing('customer', 'product', 'productRental');
 
         return response()->json([
             'success' => true,

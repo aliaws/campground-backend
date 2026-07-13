@@ -425,6 +425,11 @@ class GhlService
             return;
         }
 
+        $this->markInvoiceStatus($booking, $status);
+    }
+
+    private function markInvoiceStatus(Booking $booking, string $status): void
+    {
         $booking->update(['ghl_invoice_status' => $status]);
 
         if ($status === 'paid') {
@@ -448,6 +453,42 @@ class GhlService
                 }
             }
         }
+    }
+
+    /**
+     * Live-checks GHL for invoice payment when our local `ghl_invoice_status`
+     * hasn't caught up yet — self-heals the guest/staff invoice pages'
+     * paid-status gating when the inbound InvoicePaid webhook never arrives
+     * (e.g. no publicly reachable webhook URL configured for this
+     * deployment, which is the common case in local dev). Cheap no-op once
+     * already paid or when there's no invoice to check.
+     */
+    public function reconcileInvoiceStatus(Booking $booking): Booking
+    {
+        if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+            return $booking;
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            return $booking;
+        }
+
+        try {
+            $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+                'altId' => $locationId,
+                'altType' => 'location',
+            ]);
+        } catch (\Exception $e) {
+            return $booking;
+        }
+
+        $status = $invoice['status'] ?? null;
+        if ($status && $status !== $booking->ghl_invoice_status) {
+            $this->markInvoiceStatus($booking, $status);
+        }
+
+        return $booking->fresh();
     }
 
     private function resolveTenantId(): string

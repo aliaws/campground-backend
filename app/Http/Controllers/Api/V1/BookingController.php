@@ -11,6 +11,7 @@ use App\Http\Resources\BookingResource;
 use App\Models\Booking;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
+use App\Services\GhlService;
 use App\Services\RentalResolver;
 use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,7 @@ class BookingController extends Controller
         private TransactionService $transactionService,
         private RentalResolver $rentalResolver,
         private GhlBookingService $ghlBookingService,
+        private GhlService $ghlService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -148,6 +150,10 @@ class BookingController extends Controller
 
     public function show(Booking $booking): JsonResponse
     {
+        // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
+        // publicly reachable webhook URL in local dev) — the staff invoice page
+        // polls this endpoint waiting for ghl_invoice_status to flip to paid.
+        $booking = $this->ghlService->reconcileInvoiceStatus($booking);
         $booking->load(['customer', 'product', 'productRental', 'transactions']);
 
         return response()->json([
