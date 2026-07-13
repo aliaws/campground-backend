@@ -19,8 +19,12 @@ class BookingResource extends JsonResource
             'product_rental' => new ProductRentalResource($this->whenLoaded('productRental')),
             'booking_start_time' => $this->booking_start_time,
             'booking_end_time' => $this->booking_end_time,
-            'check_in_date' => $this->check_in_date,
-            'check_out_date' => $this->check_out_date,
+            // check_in_date/check_out_date are date-only fields — format explicitly,
+            // since the Eloquent 'date' cast otherwise serializes to a full ISO
+            // datetime (e.g. "2026-08-13T00:00:00.000000Z"), which breaks any
+            // frontend code that treats these as plain "YYYY-MM-DD" strings.
+            'check_in_date' => $this->check_in_date?->format('Y-m-d'),
+            'check_out_date' => $this->check_out_date?->format('Y-m-d'),
             'check_in' => $this->check_in,
             'check_out' => $this->check_out,
             'quantity' => $this->quantity,

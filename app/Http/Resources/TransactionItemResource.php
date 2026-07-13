@@ -17,8 +17,10 @@ class TransactionItemResource extends JsonResource
             'quantity' => $this->quantity,
             'unit_price' => (float) $this->unit_price,
             'total_price' => (float) ($this->unit_price * $this->quantity),
-            'rental_start' => $this->rental_start,
-            'rental_end' => $this->rental_end,
+            // Date-only fields — see BookingResource for why explicit formatting
+            // is needed (the 'date' cast otherwise serializes a full timestamp).
+            'rental_start' => $this->rental_start?->format('Y-m-d'),
+            'rental_end' => $this->rental_end?->format('Y-m-d'),
         ];
     }
 }
