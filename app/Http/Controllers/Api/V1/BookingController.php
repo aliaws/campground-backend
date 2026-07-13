@@ -87,9 +87,13 @@ class BookingController extends Controller
 
     public function store(StoreBookingRequest $request): JsonResponse
     {
+        $paymentMethod = $request->validated('payment_method');
+        $autoConfirm = $paymentMethod !== 'card';
+
         try {
             $booking = $this->bookingService->create(
-                $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+                $request->validated() + ['tenant_id' => $request->user()->tenant_id],
+                autoConfirm: $autoConfirm,
             );
         } catch (\InvalidArgumentException $e) {
             return response()->json([
@@ -99,12 +103,44 @@ class BookingController extends Controller
             ], 422);
         }
 
-        $this->transactionService->autoCreateFromBooking($booking);
+        $ghlSyncFailed = false;
+
+        if ($autoConfirm) {
+            // The autoConfirm=false ('card'/online) branch already creates its own
+            // transaction inside BookingService::create() — creating one here too
+            // would double it.
+            $transaction = $this->transactionService->autoCreateFromBooking($booking, $paymentMethod ?? 'card');
+
+            if ($paymentMethod === 'cash') {
+                $this->transactionService->updatePaymentStatus($transaction, 'paid');
+
+                // createBooking() swallows GHL failures (logged, not thrown) so the
+                // local row always gets created — but if the real GHL calendar
+                // booking never happened (e.g. GHL rejected the slot), don't also
+                // lie and mark it 'confirmed'. Cash was still collected, so the
+                // transaction stays paid; status stays 'pending' until someone
+                // resolves the GHL side and confirms it manually.
+                if ($booking->ghl_booking_id) {
+                    $booking = $this->bookingService->updateStatus($booking, 'confirmed');
+                } else {
+                    $ghlSyncFailed = true;
+                }
+            } elseif (! $booking->ghl_booking_id) {
+                $ghlSyncFailed = true;
+            }
+        } elseif (! $booking->ghl_invoice_url) {
+            // Online/'card' path: createText2PayInvoice() also swallows its own
+            // failures — if it didn't produce a payment link, the staff payment
+            // page would otherwise silently show nothing.
+            $ghlSyncFailed = true;
+        }
 
         return response()->json([
             'success' => true,
             'data' => new BookingResource($booking),
-            'message' => 'Booking created.',
+            'message' => $ghlSyncFailed
+                ? 'Booking saved, but syncing it to GHL failed (e.g. the slot may no longer be available there) — check the booking and retry via Confirm if needed.'
+                : 'Booking created.',
         ], 201);
     }
 

@@ -142,7 +142,10 @@ class BookingService
 
         if ($autoConfirm) {
             try {
-                $this->ghlBookingService->createBooking($booking);
+                $this->ghlBookingService->createBooking(
+                    $booking,
+                    skipPaymentEmail: ($data['payment_method'] ?? null) === 'cash',
+                );
             } catch (\Exception $e) {
                 Log::error('GHL booking creation failed', [
                     'booking_id' => $booking->id,
@@ -200,7 +203,7 @@ class BookingService
             return $booking;
         }
 
-        $this->ghlBookingService->createBooking($booking, skipPaymentEmail: true);
+        $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
         $booking->update(['status' => 'confirmed']);
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);

@@ -173,7 +173,7 @@ Guard: `BookingService::updateStatus()` (the generic `PATCH /bookings/{id}/statu
 ### Key shared components
 - `components/products/ProductsManager.tsx` — shared Products/Services admin CRUD (see split logic above). `mode: 'goods' | 'services'` controls filters, labels, and which "Variants" tab content renders.
 - `components/ui/AppLayout.tsx`, `Navbar.tsx`, `Sidebar.tsx` — POS/admin chrome.
-- `app/(customer)/layout.tsx` — customer site chrome (sticky header, green branding, active-pill nav, mobile hamburger).
+- `app/(customer)/layout.tsx` — customer site chrome (sticky header, active-pill nav, mobile hamburger, deep-green multi-column footer). Whole frontend restyled 2026-07-11 to the Travl template design system (red `#E23428` primary / green `#135846` secondary, Roboto, CSS-variable tokens in `app/globals.css` — see frontend CLAUDE.md "Design system" note).
 
 ### Booking flow (guest)
 ```

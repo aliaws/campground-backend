@@ -29,6 +29,7 @@ class GhlAuthService
         'calendars.write',
         'calendars/events.readonly',
         'calendars/events.write',
+        'calendars/resources.readonly'
     ];
 
     public function getAuthorizationUrl(EngageSetting $setting, string $redirectUri): string

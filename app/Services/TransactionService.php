@@ -86,14 +86,14 @@ class TransactionService
         });
     }
 
-    public function autoCreateFromBooking(Booking $booking): Transaction
+    public function autoCreateFromBooking(Booking $booking, string $paymentMethod = 'card'): Transaction
     {
-        return DB::transaction(function () use ($booking) {
+        return DB::transaction(function () use ($booking, $paymentMethod) {
             $transaction = Transaction::create([
                 'customer_id' => $booking->customer_id,
                 'booking_id' => $booking->id,
                 'total_amount' => $booking->total_amount,
-                'payment_method' => 'card',
+                'payment_method' => $paymentMethod,
                 'payment_status' => 'pending',
                 'invoice_status' => 'invoicing',
                 'transaction_date' => now(),

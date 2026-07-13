@@ -34,12 +34,16 @@ class GhlBookingService
     ) {}
 
     /**
-     * @param  bool  $skipPaymentEmail  When true, the invoice this call auto-generates is
-     *                                  recorded as already paid instead of emailed — used when the guest already paid
-     *                                  via a separate Text2Pay invoice before staff/webhook confirmed the calendar slot,
-     *                                  so they're never asked to pay twice for the same booking.
+     * @param  bool  $skipPaymentEmail  When true, no payment-link email is sent for the invoice
+     *                                  this call auto-generates (e.g. cash collected in person — the local
+     *                                  transaction is marked paid separately by the caller).
+     * @param  string|null  $recordPaymentAs  When set, the invoice this call auto-generates is immediately
+     *                                        recorded as paid (via this mode) instead of emailed — used when the guest
+     *                                        already paid via a separate Text2Pay invoice before staff/webhook confirmed
+     *                                        the calendar slot, so they're never asked to pay twice for the same booking.
+     *                                        Implies skipping the email regardless of $skipPaymentEmail.
      */
-    public function createBooking(Booking $booking, bool $skipPaymentEmail = false): ?string
+    public function createBooking(Booking $booking, bool $skipPaymentEmail = false, ?string $recordPaymentAs = null): ?string
     {
         $booking->loadMissing(['customer', 'product', 'productRental']);
         $product = $booking->product;
@@ -131,9 +135,9 @@ class GhlBookingService
             if ($invoiceId) {
                 $this->syncInvoiceMetadata($booking, $invoiceId);
 
-                if ($skipPaymentEmail) {
-                    $this->recordInvoicePayment($booking, (float) $booking->total_amount, 'card');
-                } else {
+                if ($recordPaymentAs !== null) {
+                    $this->recordInvoicePayment($booking, (float) $booking->total_amount, $recordPaymentAs);
+                } elseif (! $skipPaymentEmail) {
                     $this->sendInvoicePaymentEmail($booking);
                 }
             }
@@ -184,7 +188,7 @@ class GhlBookingService
             'contactDetails' => [
                 'id' => $customer->ghl_contact_id,
                 'name' => $customer->name,
-                'phoneNo' => $customer->phone ?? '',
+                'phoneNo' => $this->normalizePhoneForGhl($customer->phone) ?? '',
                 'email' => $customer->email ?? '',
             ],
             'issueDate' => now()->format('Y-m-d'),
@@ -397,7 +401,7 @@ class GhlBookingService
         return [
             'first_name' => $firstName,
             'last_name' => $lastName,
-            'phone' => $customer->phone ?? '',
+            'phone' => $this->normalizePhoneForGhl($customer->phone) ?? '',
             'email' => $customer->email ?? '',
             'location_id' => $locationId,
             'sessionId' => (string) Str::uuid(),
@@ -456,6 +460,32 @@ class GhlBookingService
         $normalizedTime = strlen($time) === 5 ? "{$time}:00" : $time;
 
         return Carbon::parse("{$date} {$normalizedTime}", $timezone)->utc()->format('Y-m-d\TH:i:s.000\Z');
+    }
+
+    /**
+     * GHL's invoice/booking APIs reject any phone number that isn't strict E.164
+     * (e.g. "Phone number must be in E.164 format") — a single bad value 422s the
+     * whole invoice/booking call. Numbers already stored with a country code
+     * (leading "+" or "00") are normalized; anything else has no reliable country
+     * code to assume, so it's dropped rather than sent as a guaranteed-invalid value.
+     */
+    private function normalizePhoneForGhl(?string $phone): ?string
+    {
+        $trimmed = trim($phone ?? '');
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (str_starts_with($trimmed, '+')) {
+            $digits = preg_replace('/\D/', '', substr($trimmed, 1));
+        } elseif (str_starts_with($trimmed, '00')) {
+            $digits = preg_replace('/\D/', '', substr($trimmed, 2));
+        } else {
+            return null;
+        }
+
+        return $digits !== '' ? '+'.$digits : null;
     }
 
     /** @return array{0: string, 1: string} */

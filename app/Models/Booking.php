@@ -22,6 +22,7 @@ class Booking extends Model
         'booking_start_time',
         'booking_end_time',
         'quantity',
+        'notes',
         'base_amount',
         'discount_amount',
         'total_amount',
