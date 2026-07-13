@@ -89,4 +89,30 @@ class Booking extends Model
     {
         return $this->status === 'cancelled';
     }
+
+    /**
+     * Public GHL-hosted invoice view page (not gated behind a GHL login,
+     * unlike the GHL dashboard invoice URL) — e.g.
+     * https://msgr.accuratedigitalsolutions.com/invoice/{ghl_invoice_id}.
+     * GHL's invoice API doesn't return this URL directly, so it's derived
+     * from the same white-label domain already present on the booking's own
+     * `ghl_invoice_url` (the Text2Pay payment link, e.g. .../l/{code}) —
+     * this keeps it correct per-tenant without hardcoding any one account's
+     * domain.
+     */
+    public function ghlInvoiceViewUrl(): ?string
+    {
+        if (! $this->ghl_invoice_id || ! $this->ghl_invoice_url) {
+            return null;
+        }
+
+        $host = parse_url($this->ghl_invoice_url, PHP_URL_HOST);
+        $scheme = parse_url($this->ghl_invoice_url, PHP_URL_SCHEME) ?? 'https';
+
+        if (! $host) {
+            return null;
+        }
+
+        return "{$scheme}://{$host}/invoice/{$this->ghl_invoice_id}";
+    }
 }

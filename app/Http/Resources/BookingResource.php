@@ -41,6 +41,7 @@ class BookingResource extends JsonResource
             'ghl_invoice_number' => $this->ghl_invoice_number,
             'ghl_invoice_status' => $this->ghl_invoice_status,
             'ghl_invoice_url' => $this->ghl_invoice_url,
+            'ghl_invoice_view_url' => $this->ghlInvoiceViewUrl(),
             'transactions' => TransactionResource::collection($this->whenLoaded('transactions')),
             'tenant_id' => $this->tenant_id,
             'created_at' => $this->created_at,

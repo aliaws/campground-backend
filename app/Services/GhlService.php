@@ -465,7 +465,28 @@ class GhlService
      */
     public function reconcileInvoiceStatus(Booking $booking): Booking
     {
-        if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+        if (! $booking->ghl_invoice_id) {
+            return $booking;
+        }
+
+        // The invoice is already known paid locally, but the booking is still
+        // stuck 'requested' — autoConfirmAfterPayment() must have failed or
+        // never ran to completion (e.g. GHL was briefly unreachable when the
+        // webhook/first reconciliation fired). Retry it here too, not just the
+        // first time we learn about payment, or a paid booking can be stuck
+        // showing "requested" forever.
+        if ($booking->ghl_invoice_status === 'paid') {
+            if ($booking->status === 'requested') {
+                try {
+                    return app(BookingService::class)->autoConfirmAfterPayment($booking);
+                } catch (\Exception $e) {
+                    Log::error('Auto-confirm retry during invoice reconciliation failed', [
+                        'booking_id' => $booking->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             return $booking;
         }
 

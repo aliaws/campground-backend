@@ -24,6 +24,7 @@ class GuestBookingResource extends JsonResource
             'status' => $this->status,
             'payment_url' => $this->ghl_invoice_url,
             'payment_status' => $this->ghl_invoice_status,
+            'invoice_view_url' => $this->ghlInvoiceViewUrl(),
             'created_at' => $this->created_at,
         ];
     }
