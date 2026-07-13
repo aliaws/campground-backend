@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
+use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\TransactionController;
@@ -87,6 +88,9 @@ Route::prefix('v1')->group(function () {
         Route::patch('/bookings/{booking}/status', [BookingController::class, 'updateStatus']);
         Route::patch('/bookings/{booking}/check-in-out', [BookingController::class, 'updateCheckInOut']);
         Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);
+
+        // Reports
+        Route::get('/reports/summary', [ReportController::class, 'summary']);
 
         // Transactions
         Route::get('/transactions', [TransactionController::class, 'index']);
