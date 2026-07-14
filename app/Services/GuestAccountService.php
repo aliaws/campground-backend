@@ -64,6 +64,24 @@ class GuestAccountService
         });
     }
 
+    /**
+     * Hook for customer deletion: wipe the linked guest login entirely (revoking its
+     * tokens first), so that if the same email is used again it's treated as a brand
+     * new signup — a fresh User row, a fresh verification email — rather than silently
+     * re-linking to the old (already-verified) account.
+     */
+    public function deleteGuestAccount(Customer $customer): void
+    {
+        $guestUser = $customer->guestUser;
+
+        if (! $guestUser) {
+            return;
+        }
+
+        $guestUser->tokens()->delete();
+        $guestUser->delete();
+    }
+
     public function initiateVerification(User $guestUser): void
     {
         if (! $guestUser->email) {

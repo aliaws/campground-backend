@@ -9,6 +9,7 @@ use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
 use App\Services\CustomerService;
 use App\Services\GhlService;
+use App\Services\GuestAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -18,11 +19,12 @@ class CustomerController extends Controller
     public function __construct(
         private GhlService $ghlService,
         private CustomerService $customerService,
+        private GuestAccountService $guestAccountService,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
-        $query = Customer::where('tenant_id', $request->user()->tenant_id);
+        $query = Customer::with('guestUser')->where('tenant_id', $request->user()->tenant_id);
 
         if ($request->search) {
             $query->where(function ($q) use ($request) {
@@ -60,6 +62,11 @@ class CustomerController extends Controller
                 'error' => $e->getMessage(),
             ]);
         }
+
+        // Mirrors PublicBookingController::store() so a customer created by staff
+        // (Customers page, or the New Booking cart's CustomerPanel) also gets a
+        // guest portal login + verification email, same as a guest self-booking.
+        $this->guestAccountService->ensureGuestAccount($customer, $request->validated());
 
         return response()->json([
             'success' => true,
@@ -99,6 +106,8 @@ class CustomerController extends Controller
 
     public function destroy(Customer $customer): JsonResponse
     {
+        $this->ghlService->deleteContactFromGhl($customer);
+        $this->guestAccountService->deleteGuestAccount($customer);
         $customer->delete();
 
         return response()->json(['success' => true, 'message' => 'Customer deleted.']);

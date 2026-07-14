@@ -234,6 +234,24 @@ class GhlService
         return $results;
     }
 
+    /** Delete the linked GHL contact. Non-blocking: failures are logged, never thrown, so the local delete always proceeds. */
+    public function deleteContactFromGhl(Customer $customer): void
+    {
+        if (! $customer->ghl_contact_id) {
+            return;
+        }
+
+        try {
+            $this->client->delete("contacts/{$customer->ghl_contact_id}");
+        } catch (\Exception $e) {
+            Log::error('GHL contact delete failed', [
+                'customer_id' => $customer->id,
+                'ghl_contact_id' => $customer->ghl_contact_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function createOpportunity(Booking $booking): ?string
     {
         $customer = $booking->customer;

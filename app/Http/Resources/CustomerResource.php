@@ -18,6 +18,8 @@ class CustomerResource extends JsonResource
             'ghl_contact_id' => $this->ghl_contact_id,
             'ghl_sync_status' => $this->ghl_sync_status,
             'ghl_last_synced_at' => $this->ghl_last_synced_at,
+            'user_role' => $this->guestUser?->role,
+            'user_status' => $this->guestUser?->guest_status,
             'tenant_id' => $this->tenant_id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

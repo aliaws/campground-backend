@@ -20,7 +20,7 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => $request->password,
-            'role' => $request->input('role', 'staff'),
+            'role' => $request->input('role', 'guest'),
             'tenant_id' => Str::ulid()->toBase32(),
         ]);
 
