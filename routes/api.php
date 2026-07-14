@@ -6,6 +6,9 @@ use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
+use App\Http\Controllers\Api\V1\Guest\GuestPasswordController;
+use App\Http\Controllers\Api\V1\Guest\GuestPortalController;
+use App\Http\Controllers\Api\V1\Guest\GuestVerificationController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
@@ -18,7 +21,7 @@ use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
-    // Auth
+    // Auth — login/register open; logout/me for any authenticated role (staff or guest)
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
@@ -45,8 +48,33 @@ Route::prefix('v1')->group(function () {
         });
     });
 
-    // Protected routes
-    Route::middleware(['auth:sanctum'])->group(function () {
+    // Guest verification / password (unauthenticated) + portal (role:guest)
+    Route::prefix('guest')->group(function () {
+        Route::post('/verify-code', [GuestVerificationController::class, 'verifyCode'])
+            ->middleware('throttle:guest-verify');
+        Route::post('/resend-verification', [GuestVerificationController::class, 'resend'])
+            ->middleware('throttle:guest-resend-verification');
+        Route::post('/create-password', [GuestPasswordController::class, 'createPassword'])
+            ->middleware('throttle:guest-verify');
+        Route::post('/forgot-password', [GuestPasswordController::class, 'forgotPassword'])
+            ->middleware('throttle:guest-forgot-password');
+        Route::post('/reset-password', [GuestPasswordController::class, 'resetPassword'])
+            ->middleware('throttle:guest-forgot-password');
+
+        Route::middleware(['auth:sanctum', 'role:guest'])->group(function () {
+            Route::post('/change-password', [GuestPasswordController::class, 'changePassword'])
+                ->middleware('throttle:guest-change-password');
+
+            Route::get('/bookings', [GuestPortalController::class, 'bookings']);
+            Route::get('/bookings/{booking}', [GuestPortalController::class, 'bookingShow']);
+            Route::post('/bookings/{booking}/cancel', [GuestPortalController::class, 'cancelBooking']);
+            Route::get('/bookings/{booking}/invoice', [GuestPortalController::class, 'invoice']);
+            Route::put('/profile', [GuestPortalController::class, 'updateProfile']);
+        });
+    });
+
+    // Staff-protected routes
+    Route::middleware(['auth:sanctum', 'role:admin,staff,cashier'])->group(function () {
         // Products (unified - campsites + inventory)
         Route::get('/products', [ProductController::class, 'index']);
         Route::post('/products', [ProductController::class, 'store']);

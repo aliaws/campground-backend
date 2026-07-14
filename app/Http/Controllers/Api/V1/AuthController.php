@@ -40,7 +40,7 @@ class AuthController extends Controller
     {
         $user = User::where('email', $request->email)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (! $user || ! $user->password || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Invalid credentials.',
@@ -71,9 +71,12 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $user->loadMissing('customer');
+
         return response()->json([
             'success' => true,
-            'data' => new UserResource($request->user()),
+            'data' => new UserResource($user),
             'message' => 'Authenticated user.',
         ]);
     }

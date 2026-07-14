@@ -90,6 +90,13 @@ class Booking extends Model
         return $this->status === 'cancelled';
     }
 
+    public function isPaid(): bool
+    {
+        $this->loadMissing('transactions');
+
+        return $this->transactions->contains(fn ($t) => $t->isPaid());
+    }
+
     /**
      * Public GHL-hosted invoice view page (not gated behind a GHL login,
      * unlike the GHL dashboard invoice URL) — e.g.

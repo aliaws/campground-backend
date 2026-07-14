@@ -249,10 +249,7 @@ class BookingService
             throw new \InvalidArgumentException('Check-in/out can only be updated for confirmed bookings.');
         }
 
-        $booking->loadMissing('transactions');
-
-        $isPaid = $booking->transactions->contains(fn ($t) => $t->payment_status === 'paid');
-        if (! $isPaid) {
+        if (! $booking->isPaid()) {
             throw new \InvalidArgumentException('Check-in/out can only be updated after payment is received.');
         }
 

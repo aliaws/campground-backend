@@ -25,6 +25,7 @@ class CustomerService
 
         if ($customer) {
             $patch = array_filter([
+                'email' => $customer->email ?: ($data['email'] ?? null),
                 'phone' => $customer->phone ?: ($data['phone'] ?? null),
                 'address' => $customer->address ?: ($data['address'] ?? null),
             ]);

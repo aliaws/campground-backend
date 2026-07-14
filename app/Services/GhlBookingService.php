@@ -309,13 +309,22 @@ class GhlBookingService
 
     public function updateBookingStatus(Booking $booking, string $localStatus): void
     {
-        if (! $booking->ghl_booking_id) {
+        if ($localStatus === 'cancelled') {
+            // Real calendar booking exists → DELETE calendars/services/bookings/{id}
+            // (GHL Delete Service Booking). Guest Text2Pay rows often have only an
+            // invoice until paid, so also void that unpaid invoice so pay links die.
+            if ($booking->ghl_booking_id) {
+                $this->cancelBooking($booking);
+            }
+
+            if ($booking->ghl_invoice_id && $booking->ghl_invoice_status !== 'paid') {
+                $this->voidInvoice($booking);
+            }
+
             return;
         }
 
-        if ($localStatus === 'cancelled') {
-            $this->cancelBooking($booking);
-
+        if (! $booking->ghl_booking_id) {
             return;
         }
 
@@ -358,6 +367,45 @@ class GhlBookingService
             $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], $response);
         } catch (\Exception $e) {
             $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], ['error' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Void an unpaid GHL invoice so Text2Pay/payment links stop accepting payment.
+     * POST /invoices/{id}/void
+     */
+    public function voidInvoice(Booking $booking): void
+    {
+        if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+            return;
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        $payload = [
+            'altId' => $locationId,
+            'altType' => 'location',
+        ];
+
+        try {
+            $response = $this->client->post(
+                "invoices/{$booking->ghl_invoice_id}/void",
+                $payload,
+                [],
+                '2021-07-28',
+            );
+            $this->logOutbound('invoice.voided', $payload, $response);
+
+            $booking->update([
+                'ghl_invoice_status' => 'void',
+                'ghl_invoice_url' => null,
+            ]);
+        } catch (\Exception $e) {
+            $this->logOutbound('invoice.voided', $payload, ['error' => $e->getMessage()]);
             throw $e;
         }
     }

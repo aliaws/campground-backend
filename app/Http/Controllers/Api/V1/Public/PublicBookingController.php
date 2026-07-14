@@ -10,6 +10,7 @@ use App\Models\Booking;
 use App\Services\BookingService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
+use App\Services\GuestAccountService;
 use App\Services\RentalResolver;
 use App\Services\TenantResolver;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,7 @@ class PublicBookingController extends Controller
     public function __construct(
         private BookingService $bookingService,
         private CustomerService $customerService,
+        private GuestAccountService $guestAccountService,
         private RentalResolver $rentalResolver,
         private GhlService $ghlService,
     ) {}
@@ -104,6 +106,11 @@ class PublicBookingController extends Controller
         $customer = $this->customerService->findOrCreate(
             $request->only(['name', 'email', 'phone']),
             $tenantId
+        );
+
+        $this->guestAccountService->ensureGuestAccount(
+            $customer,
+            $request->only(['name', 'email', 'phone'])
         );
 
         try {

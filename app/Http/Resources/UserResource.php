@@ -15,6 +15,16 @@ class UserResource extends JsonResource
             'email' => $this->email,
             'role' => $this->role,
             'tenant_id' => $this->tenant_id,
+            'customer_id' => $this->customer_id,
+            'guest_status' => $this->guest_status,
+            'phone' => $this->when(
+                $this->relationLoaded('customer'),
+                fn () => $this->customer?->phone
+            ),
+            'address' => $this->when(
+                $this->relationLoaded('customer'),
+                fn () => $this->customer?->address
+            ),
             'created_at' => $this->created_at,
         ];
     }
