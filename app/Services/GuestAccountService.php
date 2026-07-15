@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Mail\GuestPasswordResetMail;
+use App\Mail\GuestRegistrationMail;
 use App\Mail\GuestVerificationMail;
 use App\Models\Customer;
 use App\Models\User;
@@ -15,6 +16,70 @@ use Illuminate\Validation\ValidationException;
 
 class GuestAccountService
 {
+    public function __construct(
+        private CustomerService $customerService,
+        private GhlService $ghlService,
+    ) {}
+
+    /**
+     * Explicit self-registration (the guest portal's "Register" form) — unlike
+     * ensureGuestAccount() below (a silent side-effect of booking), this always
+     * surfaces a clear error for an email that's already taken, rather than
+     * quietly no-oping. Always creates the account as role=guest.
+     *
+     * @return User the (possibly pre-existing, re-sent) guest user
+     */
+    public function register(array $data): User
+    {
+        $email = strtolower(trim((string) ($data['email'] ?? '')));
+
+        if ($email === '') {
+            throw new \InvalidArgumentException('An email address is required to register.');
+        }
+
+        $existing = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+        if ($existing) {
+            if ($existing->role !== 'guest') {
+                throw new \InvalidArgumentException('An account already exists for this email.');
+            }
+
+            if ($existing->guest_status === 'active') {
+                throw new \InvalidArgumentException('An account already exists for this email. Please log in or use Forgot Password.');
+            }
+
+            // Pending/verified but never finished registering — let them retry cleanly.
+            $this->initiateVerification($existing, GuestRegistrationMail::class);
+
+            return $existing->fresh();
+        }
+
+        $tenantId = TenantResolver::resolveDefault();
+        $customer = $this->customerService->findOrCreate($data, $tenantId);
+
+        try {
+            $this->ghlService->syncContactToGhl($customer);
+        } catch (\Exception $e) {
+            Log::error('GHL sync failed for guest registration', [
+                'customer_id' => $customer->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $guest = new User;
+        $guest->name = $data['name'] ?? $customer->name;
+        $guest->email = $data['email'];
+        $guest->role = 'guest';
+        $guest->tenant_id = $tenantId;
+        $guest->customer_id = $customer->id;
+        $guest->password = null;
+        $guest->save();
+
+        $this->initiateVerification($guest, GuestRegistrationMail::class);
+
+        return $guest->fresh();
+    }
+
     /**
      * Hook for public booking: create a guest User linked to the Customer, or no-op.
      *
@@ -82,7 +147,12 @@ class GuestAccountService
         $guestUser->delete();
     }
 
-    public function initiateVerification(User $guestUser): void
+    /**
+     * @param  class-string  $mailableClass  GuestVerificationMail (default — booking/contact-created path)
+     *                                       or GuestRegistrationMail (direct self-registration via /guest/register).
+     *                                       Both share the same (User, code, token) constructor signature.
+     */
+    public function initiateVerification(User $guestUser, string $mailableClass = GuestVerificationMail::class): void
     {
         if (! $guestUser->email) {
             throw new \InvalidArgumentException('An email address is required to create a guest account.');
@@ -101,7 +171,7 @@ class GuestAccountService
         $guestUser->save();
 
         try {
-            Mail::to($guestUser->email)->send(new GuestVerificationMail($guestUser, $code, $token));
+            Mail::to($guestUser->email)->send(new $mailableClass($guestUser, $code, $token));
         } catch (\Throwable $e) {
             Log::error('Guest verification email failed', [
                 'user_id' => $guestUser->id,
