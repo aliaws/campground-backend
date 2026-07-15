@@ -116,6 +116,7 @@ Route::prefix('v1')->group(function () {
         Route::patch('/bookings/{booking}/status', [BookingController::class, 'updateStatus']);
         Route::patch('/bookings/{booking}/check-in-out', [BookingController::class, 'updateCheckInOut']);
         Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);
+        Route::post('/bookings/{booking}/pay-cash', [BookingController::class, 'payCash']);
 
         // Reports
         Route::get('/reports/summary', [ReportController::class, 'summary']);

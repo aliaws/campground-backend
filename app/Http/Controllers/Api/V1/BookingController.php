@@ -116,20 +116,15 @@ class BookingController extends Controller
             $transaction = $this->transactionService->autoCreateFromBooking($booking, $paymentMethod ?? 'card');
 
             if ($paymentMethod === 'cash') {
-                $this->transactionService->updatePaymentStatus($transaction, 'paid');
-
+                // Always created local-only (see BookingService::create()'s
+                // $deferGhl) — ghl_booking_id being null here isn't a failure,
+                // it's expected until staff record the payment from the
+                // Bookings list (BookingService::payCash()).
+            } elseif (! $booking->ghl_booking_id) {
                 // createBooking() swallows GHL failures (logged, not thrown) so the
                 // local row always gets created — but if the real GHL calendar
                 // booking never happened (e.g. GHL rejected the slot), don't also
-                // lie and mark it 'confirmed'. Cash was still collected, so the
-                // transaction stays paid; status stays 'pending' until someone
-                // resolves the GHL side and confirms it manually.
-                if ($booking->ghl_booking_id) {
-                    $booking = $this->bookingService->updateStatus($booking, 'confirmed');
-                } else {
-                    $ghlSyncFailed = true;
-                }
-            } elseif (! $booking->ghl_booking_id) {
+                // lie and mark it 'confirmed'.
                 $ghlSyncFailed = true;
             }
         } elseif (! $booking->ghl_invoice_url) {
@@ -144,7 +139,9 @@ class BookingController extends Controller
             'data' => new BookingResource($booking),
             'message' => $ghlSyncFailed
                 ? 'Booking saved, but syncing it to GHL failed (e.g. the slot may no longer be available there) — check the booking and retry via Confirm if needed.'
-                : 'Booking created.',
+                : ($paymentMethod === 'cash'
+                    ? 'Booking saved locally. It will sync to GHL once you record the cash payment from the Bookings list.'
+                    : 'Booking created.'),
         ], 201);
     }
 
@@ -160,6 +157,24 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => 'Booking retrieved.',
+        ]);
+    }
+
+    /** Marks a cash "pay later" reservation as paid; self-heals a missing GHL calendar booking first (see BookingService::payCash()). */
+    public function payCash(Request $request, Booking $booking): JsonResponse
+    {
+        if ($booking->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
+        $booking = $this->bookingService->payCash($booking);
+
+        return response()->json([
+            'success' => true,
+            'data' => new BookingResource($booking),
+            'message' => $booking->ghl_booking_id
+                ? 'Payment recorded and booking confirmed.'
+                : 'Payment recorded, but the GHL calendar booking still failed to sync — check availability in GHL and try again.',
         ]);
     }
 

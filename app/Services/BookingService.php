@@ -103,8 +103,9 @@ class BookingService
      * plus a snapshot of the GHL booking times taken at creation.
      *
      * @param  bool  $autoConfirm  When true (staff-created, default), the booking is
-     *                             immediately synced to GHL. When false (guest-submitted), it's created as a
-     *                             'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
+     *                             immediately synced to GHL — except 'cash' payments, which are always created
+     *                             local-only (see $deferGhl below). When false (guest-submitted), it's created as
+     *                             a 'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
      */
     public function create(array $data, bool $autoConfirm = true): Booking
     {
@@ -140,12 +141,16 @@ class BookingService
             'status' => $autoConfirm ? 'pending' : 'requested',
         ]));
 
-        if ($autoConfirm) {
+        // 'cash' bookings are always created local-only — GHL only learns about
+        // them once the cash payment is actually recorded (see payCash()), never
+        // at creation time.
+        $deferGhl = $autoConfirm && ($data['payment_method'] ?? null) === 'cash';
+
+        if ($deferGhl) {
+            // Intentionally left unsynced.
+        } elseif ($autoConfirm) {
             try {
-                $this->ghlBookingService->createBooking(
-                    $booking,
-                    skipPaymentEmail: ($data['payment_method'] ?? null) === 'cash',
-                );
+                $this->ghlBookingService->createBooking($booking);
             } catch (\Exception $e) {
                 Log::error('GHL booking creation failed', [
                     'booking_id' => $booking->id,
@@ -215,6 +220,45 @@ class BookingService
         }
 
         $booking->update(['status' => 'confirmed']);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Marks a cash reservation as paid, triggered from the Bookings list's Pay
+     * action. Every cash booking is created local-only (see $deferGhl in
+     * create()), so this is also what actually syncs it to GHL for the first
+     * time: creates the real GHL calendar booking now, then confirms. Also
+     * self-healing if a *retry* is needed — e.g. GHL rejected the slot on a
+     * previous Pay attempt (createBooking() swallows that failure so the local
+     * row stays as-is) — same spirit as
+     * GhlService::reconcileInvoiceStatus()/autoConfirmAfterPayment() for the
+     * online/card path. Only marks 'confirmed' once a real ghl_booking_id
+     * exists, so a still-failing GHL sync can't be silently hidden behind a
+     * "confirmed" badge.
+     */
+    public function payCash(Booking $booking): Booking
+    {
+        if (! $booking->ghl_booking_id) {
+            try {
+                $this->ghlBookingService->createBooking($booking, skipPaymentEmail: true);
+            } catch (\Exception $e) {
+                Log::error('GHL booking creation failed (cash pay retry)', [
+                    'booking_id' => $booking->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            $booking = $booking->fresh();
+        }
+
+        $transaction = $booking->transactions()->latest()->first();
+        if ($transaction && $transaction->payment_status !== 'paid') {
+            $this->transactionService->updatePaymentStatus($transaction, 'paid');
+        }
+
+        if ($booking->ghl_booking_id) {
+            $booking = $this->updateStatus($booking, 'confirmed');
+        }
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
     }
