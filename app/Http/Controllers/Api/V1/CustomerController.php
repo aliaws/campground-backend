@@ -7,6 +7,7 @@ use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
+use App\Models\User;
 use App\Services\CustomerService;
 use App\Services\GhlService;
 use App\Services\GuestAccountService;
@@ -51,7 +52,8 @@ class CustomerController extends Controller
     {
         $customer = $this->customerService->findOrCreate(
             $request->validated(),
-            $request->user()->tenant_id
+            $request->user()->tenant_id,
+            User::createdByLabel($request->user(), $request->validated('name'))
         );
 
         try {
@@ -63,10 +65,12 @@ class CustomerController extends Controller
             ]);
         }
 
-        // Mirrors PublicBookingController::store() so a customer created by staff
-        // (Customers page, or the New Booking cart's CustomerPanel) also gets a
-        // guest portal login + verification email, same as a guest self-booking.
-        $this->guestAccountService->ensureGuestAccount($customer, $request->validated());
+        // Still creates the linked guest portal account (so the Customers list's
+        // Role column shows "Guest (pending)", same as the public booking widget)
+        // but never emails it — a customer entered by staff hasn't opted into an
+        // online account, so an unsolicited "verify your email" message would be
+        // unwanted. They can still verify later (e.g. via Forgot Password).
+        $this->guestAccountService->ensureGuestAccount($customer, $request->validated(), sendEmail: false);
 
         return response()->json([
             'success' => true,

@@ -36,6 +36,7 @@ class Booking extends Model
         'ghl_invoice_status',
         'ghl_invoice_url',
         'tenant_id',
+        'created_by',
     ];
 
     protected function casts(): array

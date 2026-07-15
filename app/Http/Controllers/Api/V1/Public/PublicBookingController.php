@@ -7,6 +7,7 @@ use App\Http\Requests\Public\StoreGuestBookingRequest;
 use App\Http\Requests\QuoteBookingRequest;
 use App\Http\Resources\GuestBookingResource;
 use App\Models\Booking;
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
@@ -103,9 +104,12 @@ class PublicBookingController extends Controller
             ], 422);
         }
 
+        $createdBy = User::createdByLabel(null, $request->input('name', ''));
+
         $customer = $this->customerService->findOrCreate(
             $request->only(['name', 'email', 'phone']),
-            $tenantId
+            $tenantId,
+            $createdBy
         );
 
         $this->guestAccountService->ensureGuestAccount(
@@ -121,6 +125,7 @@ class PublicBookingController extends Controller
                 'check_out_date' => $request->validated('check_out_date'),
                 'quantity' => $request->validated('quantity'),
                 'tenant_id' => $tenantId,
+                'created_by' => $createdBy,
             ], autoConfirm: false);
         } catch (\InvalidArgumentException $e) {
             return response()->json([
