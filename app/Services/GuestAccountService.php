@@ -55,7 +55,7 @@ class GuestAccountService
         }
 
         $tenantId = TenantResolver::resolveDefault();
-        $customer = $this->customerService->findOrCreate($data, $tenantId);
+        $customer = $this->customerService->findOrCreate($data, $tenantId, User::createdByLabel(null, $data['name'] ?? ''));
 
         try {
             $this->ghlService->syncContactToGhl($customer);
@@ -81,14 +81,20 @@ class GuestAccountService
     }
 
     /**
-     * Hook for public booking: create a guest User linked to the Customer, or no-op.
+     * Hook for public booking (and staff/admin customer creation): create a guest
+     * User linked to the Customer, or no-op.
      *
      * Outcomes:
-     * 1. No matching User email → create role=guest User and send verification
+     * 1. No matching User email → create role=guest User; sends verification unless $sendEmail is false
      * 2. Existing role=guest → sync customer_id, do not resend email
      * 3. Existing staff/admin/cashier email → conservative no-op (never touch staff login)
+     *
+     * @param  bool  $sendEmail  false for staff/admin-created customers (CustomerController::store()) —
+     *                           the account (and its "Guest" role badge) is still created, just without
+     *                           emailing an unsolicited "verify your account" message to someone who didn't
+     *                           ask for one. The public booking widget always leaves this true.
      */
-    public function ensureGuestAccount(Customer $customer, array $contactData = []): void
+    public function ensureGuestAccount(Customer $customer, array $contactData = [], bool $sendEmail = true): void
     {
         $email = strtolower(trim((string) ($contactData['email'] ?? $customer->email ?? '')));
 
@@ -96,7 +102,7 @@ class GuestAccountService
             return;
         }
 
-        DB::transaction(function () use ($customer, $contactData, $email) {
+        DB::transaction(function () use ($customer, $contactData, $email, $sendEmail) {
             $existing = User::whereRaw('LOWER(email) = ?', [$email])
                 ->lockForUpdate()
                 ->first();
@@ -111,7 +117,7 @@ class GuestAccountService
                 $guest->password = null;
                 $guest->save();
 
-                $this->initiateVerification($guest);
+                $this->initiateVerification($guest, GuestVerificationMail::class, $sendEmail);
 
                 return;
             }
@@ -151,8 +157,10 @@ class GuestAccountService
      * @param  class-string  $mailableClass  GuestVerificationMail (default — booking/contact-created path)
      *                                       or GuestRegistrationMail (direct self-registration via /guest/register).
      *                                       Both share the same (User, code, token) constructor signature.
+     * @param  bool  $sendEmail  Always generates and stores a fresh code/token regardless — false only
+     *                           skips actually emailing it (see ensureGuestAccount()'s $sendEmail doc).
      */
-    public function initiateVerification(User $guestUser, string $mailableClass = GuestVerificationMail::class): void
+    public function initiateVerification(User $guestUser, string $mailableClass = GuestVerificationMail::class, bool $sendEmail = true): void
     {
         if (! $guestUser->email) {
             throw new \InvalidArgumentException('An email address is required to create a guest account.');
@@ -169,6 +177,10 @@ class GuestAccountService
         $guestUser->guest_verification_code_hash = Hash::make($code);
         $guestUser->guest_verification_attempts = 0;
         $guestUser->save();
+
+        if (! $sendEmail) {
+            return;
+        }
 
         try {
             Mail::to($guestUser->email)->send(new $mailableClass($guestUser, $code, $token));

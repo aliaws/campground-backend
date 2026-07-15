@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateBookingCheckInOutRequest;
 use App\Http\Requests\UpdateBookingStatusRequest;
 use App\Http\Resources\BookingResource;
 use App\Models\Booking;
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
 use App\Services\GhlService;
@@ -96,7 +97,10 @@ class BookingController extends Controller
 
         try {
             $booking = $this->bookingService->create(
-                $request->validated() + ['tenant_id' => $request->user()->tenant_id],
+                $request->validated() + [
+                    'tenant_id' => $request->user()->tenant_id,
+                    'created_by' => User::createdByLabel($request->user(), ''),
+                ],
                 autoConfirm: $autoConfirm,
             );
         } catch (\InvalidArgumentException $e) {

@@ -55,6 +55,24 @@ class User extends Authenticatable
     }
 
     /**
+     * Point-in-time "Created By" label for Customer/Booking audit tracking —
+     * snapshotted as a plain string at creation, not recomputed later, so a
+     * name change afterward doesn't rewrite history. Only 3 buckets exist:
+     * Admin, Staff (also covers cashier — there's no separate Cashier bucket),
+     * and Customer (the public/guest booking widget, no authenticated user).
+     */
+    public static function createdByLabel(?self $user, string $fallbackName): string
+    {
+        if (! $user) {
+            return "Customer - {$fallbackName}";
+        }
+
+        $bucket = $user->role === 'admin' ? 'Admin' : 'Staff';
+
+        return "{$bucket} - {$user->name}";
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

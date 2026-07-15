@@ -24,6 +24,7 @@ class Customer extends Model
         'ghl_sync_status',
         'ghl_last_synced_at',
         'tenant_id',
+        'created_by',
     ];
 
     protected function casts(): array

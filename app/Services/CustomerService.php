@@ -6,8 +6,14 @@ use App\Models\Customer;
 
 class CustomerService
 {
-    /** Match an existing customer by email, then phone, before creating a new one. */
-    public function findOrCreate(array $data, string $tenantId): Customer
+    /**
+     * Match an existing customer by email, then phone, before creating a new one.
+     *
+     * @param  ?string  $createdBy  Only applied when actually creating a new row (see
+     *                              User::createdByLabel()) — never overwrites an existing
+     *                              customer's original creator on a dedup match.
+     */
+    public function findOrCreate(array $data, string $tenantId, ?string $createdBy = null): Customer
     {
         $customer = null;
 
@@ -37,6 +43,6 @@ class CustomerService
             return $customer;
         }
 
-        return Customer::create($data + ['tenant_id' => $tenantId]);
+        return Customer::create($data + ['tenant_id' => $tenantId, 'created_by' => $createdBy]);
     }
 }
