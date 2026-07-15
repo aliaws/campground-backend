@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Guest;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Guest\RegisterGuestRequest;
 use App\Http\Requests\Guest\ResendVerificationRequest;
 use App\Http\Requests\Guest\VerifyCodeRequest;
 use App\Http\Resources\UserResource;
@@ -12,6 +13,25 @@ use Illuminate\Http\JsonResponse;
 class GuestVerificationController extends Controller
 {
     public function __construct(private GuestAccountService $guestAccounts) {}
+
+    public function register(RegisterGuestRequest $request): JsonResponse
+    {
+        try {
+            $this->guestAccounts->register($request->validated());
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => null,
+            'message' => 'Check your email for a verification code to continue.',
+        ], 201);
+    }
 
     public function verifyCode(VerifyCodeRequest $request): JsonResponse
     {

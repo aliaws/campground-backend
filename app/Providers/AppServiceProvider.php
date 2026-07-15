@@ -30,6 +30,12 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('guest-verify', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
 
+        RateLimiter::for('guest-register', function (Request $request) {
+            $email = strtolower((string) $request->input('email'));
+
+            return Limit::perHour(5)->by($request->ip().'|'.$email);
+        });
+
         RateLimiter::for('guest-resend-verification', function (Request $request) {
             $email = strtolower((string) $request->input('email'));
 

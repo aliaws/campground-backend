@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
+use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
@@ -50,6 +51,8 @@ Route::prefix('v1')->group(function () {
 
     // Guest verification / password (unauthenticated) + portal (role:guest)
     Route::prefix('guest')->group(function () {
+        Route::post('/register', [GuestVerificationController::class, 'register'])
+            ->middleware('throttle:guest-register');
         Route::post('/verify-code', [GuestVerificationController::class, 'verifyCode'])
             ->middleware('throttle:guest-verify');
         Route::post('/resend-verification', [GuestVerificationController::class, 'resend'])
@@ -148,6 +151,12 @@ Route::prefix('v1')->group(function () {
         Route::post('/features', [FeatureController::class, 'store']);
         Route::put('/features/{feature}', [FeatureController::class, 'update']);
         Route::delete('/features/{feature}', [FeatureController::class, 'destroy']);
+
+        // Staff management — admin-only: staff accounts are created here, not via public /auth/register
+        Route::middleware('role:admin')->group(function () {
+            Route::get('/staff', [StaffController::class, 'index']);
+            Route::post('/staff', [StaffController::class, 'store']);
+        });
 
         // Settings
         Route::get('/settings/engage', [SettingsController::class, 'getEngage']);
