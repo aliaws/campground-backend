@@ -13,9 +13,12 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
+use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
+use App\Http\Controllers\Api\V1\SiteMapController;
+use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -43,6 +46,10 @@ Route::prefix('v1')->group(function () {
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
+
+            // Interactive site map (guest viewer)
+            Route::get('/site-maps', [PublicSiteMapController::class, 'index']);
+            Route::get('/site-maps/{siteMap}', [PublicSiteMapController::class, 'show']);
         });
         Route::middleware('throttle:guest-booking')->group(function () {
             Route::post('/bookings', [PublicBookingController::class, 'store']);
@@ -156,6 +163,19 @@ Route::prefix('v1')->group(function () {
         Route::middleware('role:admin')->group(function () {
             Route::get('/staff', [StaffController::class, 'index']);
             Route::post('/staff', [StaffController::class, 'store']);
+        });
+
+        // Site maps: viewing is open to any staff role, editing (the map builder) is admin-only
+        Route::get('/site-maps', [SiteMapController::class, 'index']);
+        Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
+        Route::middleware('role:admin')->group(function () {
+            Route::post('/site-maps', [SiteMapController::class, 'store']);
+            Route::put('/site-maps/{siteMap}', [SiteMapController::class, 'update']);
+            Route::delete('/site-maps/{siteMap}', [SiteMapController::class, 'destroy']);
+            Route::post('/site-maps/{siteMap}/image', [SiteMapController::class, 'uploadImage']);
+            Route::post('/site-maps/{siteMap}/elements', [SiteMapElementController::class, 'store']);
+            Route::patch('/site-map-elements/{element}', [SiteMapElementController::class, 'update']);
+            Route::delete('/site-map-elements/{element}', [SiteMapElementController::class, 'destroy']);
         });
 
         // Settings
