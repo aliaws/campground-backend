@@ -30,7 +30,7 @@ class SiteMapElementController extends Controller
         // fields that actually have sensible defaults.
         return response()->json([
             'success' => true,
-            'data' => new SiteMapElementResource($element->fresh()->load('productRental.product')),
+            'data' => new SiteMapElementResource($element->fresh()->load('productRental.product', 'iconType')),
             'message' => 'Element added.',
         ], 201);
     }
@@ -45,7 +45,7 @@ class SiteMapElementController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new SiteMapElementResource($element->fresh()->load('productRental.product')),
+            'data' => new SiteMapElementResource($element->fresh()->load('productRental.product', 'iconType')),
             'message' => 'Element updated.',
         ]);
     }

@@ -31,7 +31,7 @@ class PublicSiteMapController extends Controller
 
         $siteMap->load(['elements' => function ($query) {
             $query->where('is_visible', true);
-        }, 'elements.productRental.product']);
+        }, 'elements.productRental.product', 'elements.iconType']);
 
         return response()->json([
             'success' => true,

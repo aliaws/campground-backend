@@ -11,6 +11,7 @@ class SiteMapElementResource extends JsonResource
     {
         $rental = $this->productRental;
         $product = $rental?->product;
+        $iconType = $this->iconType;
 
         return [
             'id' => $this->id,
@@ -18,6 +19,7 @@ class SiteMapElementResource extends JsonResource
             'type' => $this->type,
             'product_rental_id' => $this->product_rental_id,
             'icon_key' => $this->icon_key,
+            'icon_type_id' => $this->icon_type_id,
             'shape' => $this->shape,
             'icon_style' => $this->icon_style,
             'label' => $this->label ?: $product?->name,
@@ -26,15 +28,12 @@ class SiteMapElementResource extends JsonResource
             'y' => $this->y,
             'width' => $this->width,
             'height' => $this->height,
-            'points' => $this->points,
             'rotation' => $this->rotation,
             'color' => $this->color,
-            'stroke_width' => $this->stroke_width,
             'opacity' => $this->opacity,
             'z_index' => $this->z_index,
             'is_visible' => $this->is_visible,
             'category' => $this->category,
-            'metadata' => $this->metadata,
             // Rental-only display fields — resolved live from Product/ProductRental,
             // never persisted here, same "compute from the source" spirit as the
             // rest of the app's rental-detail handling.
@@ -44,6 +43,11 @@ class SiteMapElementResource extends JsonResource
                 'image' => $product?->image,
                 'price' => $product?->price,
                 'status' => $product?->status,
+            ] : null,
+            'icon_type' => $iconType ? [
+                'id' => $iconType->id,
+                'name' => $iconType->name,
+                'image_url' => $iconType->image_url,
             ] : null,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
