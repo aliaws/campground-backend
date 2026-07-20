@@ -42,7 +42,7 @@ class SiteMapController extends Controller
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
-        $siteMap->load('elements.productRental.product');
+        $siteMap->load('elements.productRental.product', 'elements.iconType');
 
         return response()->json([
             'success' => true,
@@ -92,6 +92,21 @@ class SiteMapController extends Controller
             'success' => true,
             'data' => new SiteMapResource($siteMap->fresh()),
             'message' => 'Map image updated.',
+        ]);
+    }
+
+    public function deleteImage(Request $request, SiteMap $siteMap): JsonResponse
+    {
+        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
+        }
+
+        $siteMap->update(['image_url' => null]);
+
+        return response()->json([
+            'success' => true,
+            'data' => new SiteMapResource($siteMap->fresh()),
+            'message' => 'Map photo removed.',
         ]);
     }
 }

@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\SiteMapController;
 use App\Http\Controllers\Api\V1\SiteMapElementController;
+use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -168,14 +169,18 @@ Route::prefix('v1')->group(function () {
         // Site maps: viewing is open to any staff role, editing (the map builder) is admin-only
         Route::get('/site-maps', [SiteMapController::class, 'index']);
         Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
+        Route::get('/site-map-icon-types', [SiteMapIconTypeController::class, 'index']);
         Route::middleware('role:admin')->group(function () {
             Route::post('/site-maps', [SiteMapController::class, 'store']);
             Route::put('/site-maps/{siteMap}', [SiteMapController::class, 'update']);
             Route::delete('/site-maps/{siteMap}', [SiteMapController::class, 'destroy']);
             Route::post('/site-maps/{siteMap}/image', [SiteMapController::class, 'uploadImage']);
+            Route::delete('/site-maps/{siteMap}/image', [SiteMapController::class, 'deleteImage']);
             Route::post('/site-maps/{siteMap}/elements', [SiteMapElementController::class, 'store']);
             Route::patch('/site-map-elements/{element}', [SiteMapElementController::class, 'update']);
             Route::delete('/site-map-elements/{element}', [SiteMapElementController::class, 'destroy']);
+            Route::post('/site-map-icon-types', [SiteMapIconTypeController::class, 'store']);
+            Route::delete('/site-map-icon-types/{iconType}', [SiteMapIconTypeController::class, 'destroy']);
         });
 
         // Settings

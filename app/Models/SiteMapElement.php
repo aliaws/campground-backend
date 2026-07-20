@@ -15,6 +15,7 @@ class SiteMapElement extends Model
         'type',
         'product_rental_id',
         'icon_key',
+        'icon_type_id',
         'shape',
         'icon_style',
         'label',
@@ -23,15 +24,12 @@ class SiteMapElement extends Model
         'y',
         'width',
         'height',
-        'points',
         'rotation',
         'color',
-        'stroke_width',
         'opacity',
         'z_index',
         'is_visible',
         'category',
-        'metadata',
         'tenant_id',
     ];
 
@@ -44,11 +42,8 @@ class SiteMapElement extends Model
             'height' => 'float',
             'rotation' => 'float',
             'opacity' => 'float',
-            'stroke_width' => 'float',
             'z_index' => 'integer',
             'is_visible' => 'boolean',
-            'points' => 'json',
-            'metadata' => 'json',
         ];
     }
 
@@ -60,5 +55,10 @@ class SiteMapElement extends Model
     public function productRental(): BelongsTo
     {
         return $this->belongsTo(ProductRental::class);
+    }
+
+    public function iconType(): BelongsTo
+    {
+        return $this->belongsTo(SiteMapIconType::class);
     }
 }
