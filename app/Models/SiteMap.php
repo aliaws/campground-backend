@@ -13,7 +13,6 @@ class SiteMap extends Model
     protected $fillable = [
         'name',
         'image_url',
-        'icon_theme',
         'is_default',
         'tenant_id',
     ];
