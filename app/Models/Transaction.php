@@ -21,6 +21,10 @@ class Transaction extends Model
         'invoice_status',
         'transaction_date',
         'tenant_id',
+        'ghl_invoice_id',
+        'ghl_invoice_number',
+        'ghl_invoice_status',
+        'ghl_invoice_url',
     ];
 
     protected function casts(): array

@@ -93,6 +93,7 @@ Route::prefix('v1')->group(function () {
         Route::put('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
         Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
+        Route::get('/products/{product}/ghl-stock', [ProductController::class, 'ghlStock']);
 
         // Product categories
         Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
@@ -147,6 +148,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
         Route::post('/categories/{category}/sync-ghl', [CategoryController::class, 'syncToGhl']);
         Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
+        Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
 
         // Amenities
         Route::get('/amenities', [AmenityController::class, 'index']);

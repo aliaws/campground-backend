@@ -8,6 +8,7 @@ use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductRental;
+use App\Models\Transaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
@@ -214,6 +215,137 @@ class GhlBookingService
             $this->logOutbound('invoice.text2pay', $payload, ['error' => $e->getMessage()]);
             throw $e;
         }
+    }
+
+    /**
+     * Create a GHL invoice for a booking-less Transaction — a direct POS
+     * product sale. Branches exactly like the booking flow's cash/card split
+     * (createBooking()'s $skipPaymentEmail/$recordPaymentAs):
+     *   - cash: paid in person already — invoice created as 'draft' (no
+     *     email) and immediately recorded as paid via record-payment.
+     *   - card: mirrors the booking "Online" flow — invoice created with
+     *     action:'send' (emails the customer a real payment link) and left
+     *     unpaid; the sale's local payment_status was already set to
+     *     'pending' by TransactionService::create() for this case, and only
+     *     flips to 'paid' later via the InvoicePaid webhook or
+     *     GhlService::reconcileTransactionInvoiceStatus()'s self-heal.
+     * Persists ghl_invoice_* onto the Transaction row (not a Booking — this
+     * is the Transaction-typed sibling of createText2PayInvoice()/
+     * recordInvoicePayment(), kept separate so those Booking-typed methods
+     * and their signatures stay untouched).
+     *
+     * @param  array<int, array{name:string, currency:string, amount:float, qty:int, product_id:?string, price_id:?string}>  $lineItems
+     */
+    public function createProductSaleInvoice(Transaction $transaction, array $lineItems): void
+    {
+        if (empty($lineItems)) {
+            return;
+        }
+
+        $isCash = $transaction->payment_method === 'cash';
+
+        $transaction->loadMissing('customer');
+        $customer = $transaction->customer;
+
+        if (! $customer) {
+            return;
+        }
+
+        if (! $customer->ghl_contact_id) {
+            $this->ghlService->syncContactToGhl($customer);
+            $customer = $customer->fresh();
+        }
+
+        if (! $customer->ghl_contact_id) {
+            throw new \RuntimeException('Unable to sync customer to GHL before creating product sale invoice.');
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        $currency = $lineItems[0]['currency'] ?? 'USD';
+
+        $payload = [
+            'altId' => $locationId,
+            'altType' => 'location',
+            'name' => 'POS Product Sale',
+            'currency' => $currency,
+            'items' => array_map(fn (array $item) => array_filter([
+                'name' => $item['name'],
+                'currency' => $item['currency'],
+                'amount' => round((float) $item['amount'], 2),
+                'qty' => $item['qty'],
+                'productId' => $item['product_id'] ?? null,
+                'priceId' => $item['price_id'] ?? null,
+            ], fn ($value) => $value !== null), $lineItems),
+            'contactDetails' => [
+                'id' => $customer->ghl_contact_id,
+                'name' => $customer->name,
+                'phoneNo' => $this->normalizePhoneForGhl($customer->phone) ?? '',
+                'email' => $customer->email ?? '',
+            ],
+            'issueDate' => now()->format('Y-m-d'),
+            'sentTo' => [
+                'email' => [$customer->email],
+            ],
+            'liveMode' => false,
+            // Cash: 'draft', no email — already paid in person, a "please
+            // pay" email would be wrong. Card: 'send' — emails the customer
+            // a real payment link, exactly like the booking Online flow.
+            'action' => $isCash ? 'draft' : 'send',
+            'userId' => $this->client->getSetting()?->user_id,
+        ];
+
+        $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
+        $this->logOutbound('product-sale.invoice-created', $payload, $response);
+
+        $invoice = $response['invoice'] ?? [];
+        $invoiceId = $invoice['_id'] ?? null;
+
+        $this->persistTransactionInvoiceMetadata($transaction, $invoice, $response['invoiceUrl'] ?? null);
+
+        if ($isCash && $invoiceId) {
+            $this->recordProductSaleInvoicePayment($transaction, $invoiceId, (float) $transaction->total_amount);
+        }
+    }
+
+    private function recordProductSaleInvoicePayment(Transaction $transaction, string $invoiceId, float $amount): void
+    {
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            return;
+        }
+
+        $payload = [
+            'altId' => $locationId,
+            'altType' => 'location',
+            'mode' => $this->mapPaymentMode($transaction->payment_method),
+            'amount' => round($amount, 2),
+            'notes' => 'Recorded from Campground POS (Product Sale)',
+        ];
+
+        $response = $this->client->post("invoices/{$invoiceId}/record-payment", $payload);
+        $this->logOutbound('product-sale.invoice-payment-recorded', $payload, $response);
+
+        $invoice = $response['invoice'] ?? null;
+        if (is_array($invoice)) {
+            $this->persistTransactionInvoiceMetadata($transaction, $invoice);
+        }
+    }
+
+    private function persistTransactionInvoiceMetadata(Transaction $transaction, array $invoice, ?string $invoiceUrl = null): void
+    {
+        $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
+        $number = $invoice['invoiceNumber'] ?? null;
+
+        $transaction->update(array_filter([
+            'ghl_invoice_id' => $invoice['_id'] ?? $transaction->ghl_invoice_id,
+            'ghl_invoice_number' => $number ? $prefix.$number : $transaction->ghl_invoice_number,
+            'ghl_invoice_status' => $invoice['status'] ?? $transaction->ghl_invoice_status,
+            'ghl_invoice_url' => $invoiceUrl ?? $transaction->ghl_invoice_url,
+        ], fn ($value) => $value !== null));
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Requests\UpdateTransactionPaymentStatusRequest;
 use App\Http\Resources\TransactionResource;
 use App\Models\Transaction;
+use App\Services\GhlService;
 use App\Services\TransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ class TransactionController extends Controller
 {
     public function __construct(
         private TransactionService $transactionService,
+        private GhlService $ghlService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -34,9 +36,23 @@ class TransactionController extends Controller
 
     public function store(StoreTransactionRequest $request): JsonResponse
     {
-        $transaction = $this->transactionService->create(
-            $request->validated() + ['tenant_id' => $request->user()->tenant_id]
-        );
+        try {
+            $transaction = $this->transactionService->create(
+                $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Live stock check is temporarily unavailable. Please try again.',
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,
@@ -47,6 +63,12 @@ class TransactionController extends Controller
 
     public function show(Transaction $transaction): JsonResponse
     {
+        // Self-heals a pending "card" product sale when GHL's InvoicePaid
+        // webhook never reaches us (e.g. no publicly reachable webhook URL
+        // in local dev) — the staff pay-link page polls this endpoint
+        // waiting for payment_status to flip to paid. Same pattern as
+        // BookingController::show()'s reconcileInvoiceStatus() call.
+        $transaction = $this->ghlService->reconcileTransactionInvoiceStatus($transaction);
         $transaction->load(['customer', 'items.product', 'booking']);
 
         return response()->json([
@@ -77,7 +99,19 @@ class TransactionController extends Controller
         $booking = $transaction->booking;
         $ghlInvoice = null;
 
-        if ($booking?->ghl_invoice_id) {
+        // A booking-less product sale carries its own ghl_invoice_* fields
+        // (set by GhlBookingService::createProductSaleInvoice()); prefer
+        // those, falling back to the linked booking's for the pre-existing
+        // rental/booking transaction case (where the transaction's own
+        // fields are simply null).
+        if ($transaction->ghl_invoice_id) {
+            $ghlInvoice = [
+                'id' => $transaction->ghl_invoice_id,
+                'number' => $transaction->ghl_invoice_number,
+                'status' => $transaction->ghl_invoice_status,
+                'ghl_booking_id' => $booking?->ghl_booking_id,
+            ];
+        } elseif ($booking?->ghl_invoice_id) {
             $ghlInvoice = [
                 'id' => $booking->ghl_invoice_id,
                 'number' => $booking->ghl_invoice_number,
@@ -88,7 +122,8 @@ class TransactionController extends Controller
 
         $invoice = [
             'transaction' => new TransactionResource($transaction),
-            'invoice_number' => $booking?->ghl_invoice_number
+            'invoice_number' => $transaction->ghl_invoice_number
+                ?? $booking?->ghl_invoice_number
                 ?? "INV-{$transaction->created_at->format('Ymd')}-{$transaction->id}",
             'ghl_invoice' => $ghlInvoice,
             'items' => $transaction->items->map(fn ($item) => [

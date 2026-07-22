@@ -439,11 +439,21 @@ class GhlService
 
         $booking = Booking::where('ghl_invoice_id', $ghlInvoiceId)->first();
 
-        if (! $booking) {
+        if ($booking) {
+            $this->markInvoiceStatus($booking, $status);
+
             return;
         }
 
-        $this->markInvoiceStatus($booking, $status);
+        // Booking-less invoice — a POS Product Sales "card" sale
+        // (GhlBookingService::createProductSaleInvoice()). Only these ever
+        // have their own ghl_invoice_id with no booking_id; a booking-linked
+        // transaction's invoice always belongs to the booking instead.
+        $transaction = Transaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
+
+        if ($transaction) {
+            $this->markTransactionInvoiceStatus($transaction, $status);
+        }
     }
 
     private function markInvoiceStatus(Booking $booking, string $status): void
@@ -470,6 +480,19 @@ class GhlService
                     ]);
                 }
             }
+        }
+    }
+
+    /** Transaction-typed sibling of markInvoiceStatus() — a booking-less "card" product sale has no booking/status to auto-confirm, just its own payment_status/invoice_status to flip. */
+    private function markTransactionInvoiceStatus(Transaction $transaction, string $status): void
+    {
+        $transaction->update(['ghl_invoice_status' => $status]);
+
+        if ($status === 'paid' && $transaction->payment_status !== 'paid') {
+            $transaction->update([
+                'payment_status' => 'paid',
+                'invoice_status' => 'completed',
+            ]);
         }
     }
 
@@ -528,6 +551,42 @@ class GhlService
         }
 
         return $booking->fresh();
+    }
+
+    /**
+     * Transaction-typed sibling of reconcileInvoiceStatus() — self-heals a
+     * pending "card" POS product sale when the InvoicePaid webhook never
+     * arrives, same rationale as the booking version. No autoConfirm
+     * equivalent needed here (a Transaction has no separate status/calendar
+     * booking to advance — payment_status/invoice_status are the whole
+     * story). Cheap no-op once already paid or when there's no invoice.
+     */
+    public function reconcileTransactionInvoiceStatus(Transaction $transaction): Transaction
+    {
+        if (! $transaction->ghl_invoice_id || $transaction->payment_status === 'paid') {
+            return $transaction;
+        }
+
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            return $transaction;
+        }
+
+        try {
+            $invoice = $this->client->get("invoices/{$transaction->ghl_invoice_id}", [
+                'altId' => $locationId,
+                'altType' => 'location',
+            ]);
+        } catch (\Exception $e) {
+            return $transaction;
+        }
+
+        $status = $invoice['status'] ?? null;
+        if ($status && $status !== $transaction->ghl_invoice_status) {
+            $this->markTransactionInvoiceStatus($transaction, $status);
+        }
+
+        return $transaction->fresh();
     }
 
     private function resolveTenantId(): string
