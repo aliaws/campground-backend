@@ -22,6 +22,7 @@ class SiteMapElementResource extends JsonResource
             'icon_type_id' => $this->icon_type_id,
             'shape' => $this->shape,
             'icon_style' => $this->icon_style,
+            'font_size' => $this->font_size,
             'label' => $this->label ?: $product?->name,
             'description' => $this->description,
             'x' => $this->x,
