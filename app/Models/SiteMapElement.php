@@ -18,6 +18,7 @@ class SiteMapElement extends Model
         'icon_type_id',
         'shape',
         'icon_style',
+        'font_size',
         'label',
         'description',
         'x',
@@ -44,6 +45,7 @@ class SiteMapElement extends Model
             'opacity' => 'float',
             'z_index' => 'integer',
             'is_visible' => 'boolean',
+            'font_size' => 'integer',
         ];
     }
 

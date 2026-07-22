@@ -12,9 +12,16 @@ class PublicSiteMapController extends Controller
 {
     public function index(): JsonResponse
     {
-        $maps = SiteMap::where('tenant_id', TenantResolver::resolveDefault())
-            ->orderBy('name')
-            ->get();
+        $tenantId = TenantResolver::resolveDefault();
+
+        // Guests only ever see ONE map — whichever the staff builder has
+        // marked as default. Falls back to the oldest map for tenants that
+        // haven't explicitly picked a default yet (e.g. before this feature
+        // existed), so the guest page never shows a blank state by default.
+        $map = SiteMap::where('tenant_id', $tenantId)->where('is_default', true)->first()
+            ?? SiteMap::where('tenant_id', $tenantId)->oldest()->first();
+
+        $maps = $map ? collect([$map]) : collect();
 
         return response()->json([
             'success' => true,

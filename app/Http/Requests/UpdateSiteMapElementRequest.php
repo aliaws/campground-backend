@@ -20,6 +20,7 @@ class UpdateSiteMapElementRequest extends FormRequest
             'icon_type_id' => ['sometimes', 'nullable', 'string', 'exists:site_map_icon_types,id'],
             'shape' => ['sometimes', 'string', Rule::in(['circle', 'rectangle'])],
             'icon_style' => ['sometimes', 'string', Rule::in(['filled', 'line', 'color'])],
+            'font_size' => ['sometimes', 'nullable', 'integer', 'min:6', 'max:48'],
             'label' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'x' => ['sometimes', 'numeric', 'min:0', 'max:100'],

@@ -28,7 +28,18 @@ class SiteMapController extends Controller
 
     public function store(StoreSiteMapRequest $request): JsonResponse
     {
-        $map = SiteMap::create($request->validated() + ['tenant_id' => $request->user()->tenant_id]);
+        $tenantId = $request->user()->tenant_id;
+        $data = $request->validated() + ['tenant_id' => $tenantId];
+
+        $map = DB::transaction(function () use ($data, $tenantId) {
+            // Only one map per tenant can be the default guests see — unset
+            // any existing default before creating this one as the new default.
+            if (! empty($data['is_default'])) {
+                SiteMap::where('tenant_id', $tenantId)->where('is_default', true)->update(['is_default' => false]);
+            }
+
+            return SiteMap::create($data);
+        });
 
         return response()->json([
             'success' => true,
@@ -58,7 +69,21 @@ class SiteMapController extends Controller
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
-        $siteMap->update($request->validated());
+        $data = $request->validated();
+
+        DB::transaction(function () use ($data, $siteMap) {
+            // Enforce a single default per tenant — marking this map as
+            // default unsets it on every sibling first, so guests always see
+            // exactly one map (never zero, never more than one).
+            if (! empty($data['is_default'])) {
+                SiteMap::where('tenant_id', $siteMap->tenant_id)
+                    ->where('id', '!=', $siteMap->id)
+                    ->where('is_default', true)
+                    ->update(['is_default' => false]);
+            }
+
+            $siteMap->update($data);
+        });
 
         return response()->json([
             'success' => true,
