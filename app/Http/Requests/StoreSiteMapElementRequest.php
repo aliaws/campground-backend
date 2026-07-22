@@ -21,6 +21,7 @@ class StoreSiteMapElementRequest extends FormRequest
             'icon_type_id' => ['nullable', 'string', 'exists:site_map_icon_types,id'],
             'shape' => ['sometimes', 'string', Rule::in(['circle', 'rectangle'])],
             'icon_style' => ['sometimes', 'string', Rule::in(['filled', 'line', 'color'])],
+            'font_size' => ['nullable', 'integer', 'min:6', 'max:48'],
             'label' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:2000'],
             'x' => ['required', 'numeric', 'min:0', 'max:100'],
