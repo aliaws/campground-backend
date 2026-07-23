@@ -131,9 +131,42 @@ class GhlProductSyncService
             'engage_last_synced_at' => now(),
         ]);
 
+        $this->syncCategoriesFromGhl($product, $productData);
+
         $this->pullDefaultPriceFromGhl($product, $query);
 
         return $product->fresh()->load(['categories']);
+    }
+
+    /**
+     * Maps GHL's `collectionIds` (the same field name syncProductToGhl()
+     * sends when pushing, confirmed against GHL's Products OpenAPI spec —
+     * a plain array of collection id strings) back onto the local
+     * product_categories pivot via each Category's engage_collection_id.
+     * A GHL collection id with no matching local Category is skipped (that
+     * category hasn't been pulled locally yet — see pullCategoriesFromGhl()).
+     * If the key is missing entirely (some GHL payloads omit it) we leave
+     * existing associations untouched rather than wiping them; an explicit
+     * empty array is treated as "GHL says no categories" and clears the pivot.
+     */
+    private function syncCategoriesFromGhl(Product $product, array $ghlProduct): void
+    {
+        $collectionIds = $ghlProduct['collectionIds'] ?? null;
+
+        if (! is_array($collectionIds)) {
+            return;
+        }
+
+        $ghlIds = collect($collectionIds)
+            ->map(fn ($c) => is_array($c) ? ($c['id'] ?? $c['_id'] ?? null) : $c)
+            ->filter()
+            ->values();
+
+        $localCategoryIds = Category::where('tenant_id', $product->tenant_id)
+            ->whereIn('engage_collection_id', $ghlIds)
+            ->pluck('id');
+
+        $product->categories()->sync($localCategoryIds);
     }
 
     public function deleteProductFromGhl(Product $product): void
@@ -494,7 +527,7 @@ class GhlProductSyncService
 
         $type = strtoupper($ghlProduct['productType'] ?? '');
 
-        Product::create([
+        $product = Product::create([
             'name' => $ghlProduct['name'] ?? 'Untitled',
             'product_type' => in_array($type, ['PHYSICAL', 'DIGITAL', 'SERVICE']) ? $type : 'PHYSICAL',
             'description' => $ghlProduct['description'] ?? null,
@@ -505,6 +538,8 @@ class GhlProductSyncService
             'engage_sync_status' => 'pending',
             'tenant_id' => $tenantId,
         ]);
+
+        $this->syncCategoriesFromGhl($product, $ghlProduct);
 
         return true;
     }

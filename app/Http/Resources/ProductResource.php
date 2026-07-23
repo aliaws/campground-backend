@@ -21,6 +21,7 @@ class ProductResource extends JsonResource
             'is_taxes_enabled' => $this->is_taxes_enabled,
             'track_product_inventory' => $this->track_product_inventory,
             'slug' => $this->slug,
+            'sku' => $this->sku,
             'quantity' => $this->quantity,
             'price' => $this->price !== null ? (float) $this->price : null,
             'product_rental_id' => $this->product_rental_id,

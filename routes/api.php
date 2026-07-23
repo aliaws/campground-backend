@@ -89,6 +89,10 @@ Route::prefix('v1')->group(function () {
         // Products (unified - campsites + inventory)
         Route::get('/products', [ProductController::class, 'index']);
         Route::post('/products', [ProductController::class, 'store']);
+        // Must precede /products/{product} — otherwise implicit route-model
+        // binding treats "lookup-by-sku" as a {product} id and 404s before
+        // this route is ever matched.
+        Route::get('/products/lookup-by-sku', [ProductController::class, 'lookupBySku']);
         Route::get('/products/{product}', [ProductController::class, 'show']);
         Route::put('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);

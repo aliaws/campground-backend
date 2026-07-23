@@ -40,6 +40,14 @@ class TransactionService
             $query->where('customer_id', $filters['customer_id']);
         }
 
+        // Scopes the list to POS Product Sales orders only (booking-linked
+        // "extras" transactions and rental transactions always carry a
+        // booking_id) — powers the dedicated Product Orders page, kept
+        // separate from the general Transactions page's full unfiltered list.
+        if (! empty($filters['product_sale_only'])) {
+            $query->whereNull('booking_id');
+        }
+
         if (! empty($filters['date_from'])) {
             $query->where('transaction_date', '>=', $filters['date_from']);
         }
@@ -293,8 +301,21 @@ class TransactionService
         });
     }
 
+    /**
+     * Once a transaction is 'paid', that's a terminal state — no caller may
+     * flip it back to 'pending'/'draft' (or re-run the 'paid' side effects
+     * a second time). BookingService::payCash() already guards its own call
+     * site against this (never calls in with an already-paid transaction);
+     * this is the authoritative check for every other caller, including the
+     * PATCH endpoint (no frontend currently calls it, but it's still public
+     * API surface).
+     */
     public function updatePaymentStatus(Transaction $transaction, string $status): Transaction
     {
+        if ($transaction->payment_status === 'paid') {
+            throw new \InvalidArgumentException('This order is already paid — payment status cannot be changed.');
+        }
+
         $transaction->update(['payment_status' => $status]);
 
         if ($status === 'paid') {

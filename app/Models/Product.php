@@ -25,6 +25,7 @@ class Product extends Model
         'is_taxes_enabled',
         'tenant_id',
         'slug',
+        'sku',
         'quantity',
         'price',
         'product_rental_id',

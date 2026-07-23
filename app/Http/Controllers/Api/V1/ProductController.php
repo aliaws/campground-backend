@@ -42,6 +42,25 @@ class ProductController extends Controller
         ]);
     }
 
+    /**
+     * Exact-match SKU lookup for the Product Sales page's barcode scanner
+     * (a scanned code is looked up verbatim, not fuzzy-searched). Route must
+     * be registered before GET /products/{product} in routes/api.php, or
+     * Laravel's implicit route-model-binding would swallow this path as a
+     * {product} id lookup and 404 before this method is ever reached.
+     */
+    public function lookupBySku(Request $request): JsonResponse
+    {
+        $sku = $request->query('sku');
+        $product = $sku ? $this->productService->findBySku($request->user()->tenant_id, $sku) : null;
+
+        return response()->json([
+            'success' => true,
+            'data' => $product ? new ProductResource($product) : null,
+            'message' => $product ? 'Product found.' : 'No product found for that barcode.',
+        ]);
+    }
+
     public function store(StoreProductRequest $request): JsonResponse
     {
         $product = $this->productService->create(

@@ -27,6 +27,26 @@ class TransactionController extends Controller
 
         $transactions = $this->transactionService->list($filters);
 
+        // Self-heals a stale payment_status the same way show() already does
+        // for a single transaction — otherwise a product sale's GHL invoice
+        // can get paid (customer pays the emailed Text2Pay link) and this
+        // list would still show "pending" forever unless someone happens to
+        // open that one order's pay page. reconcileTransactionInvoiceStatus()
+        // is a cheap no-op for anything already paid or without a
+        // ghl_invoice_id (i.e. every booking-linked transaction), so this
+        // only makes a live GHL call for the typically-few still-pending
+        // product-sale rows on the current page. Only reload relations when
+        // the row actually changed (fresh() drops them) — the common
+        // already-paid/no-invoice case returns the same instance untouched,
+        // so no extra queries are added for the rest of the page.
+        $transactions->getCollection()->transform(function (Transaction $transaction) {
+            $reconciled = $this->ghlService->reconcileTransactionInvoiceStatus($transaction);
+
+            return $reconciled->relationLoaded('customer')
+                ? $reconciled
+                : $reconciled->load(['customer', 'items.product', 'booking']);
+        });
+
         return response()->json([
             'success' => true,
             'data' => TransactionResource::collection($transactions),
@@ -80,10 +100,18 @@ class TransactionController extends Controller
 
     public function updatePaymentStatus(UpdateTransactionPaymentStatusRequest $request, Transaction $transaction): JsonResponse
     {
-        $transaction = $this->transactionService->updatePaymentStatus(
-            $transaction,
-            $request->validated('payment_status')
-        );
+        try {
+            $transaction = $this->transactionService->updatePaymentStatus(
+                $transaction,
+                $request->validated('payment_status')
+            );
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,
