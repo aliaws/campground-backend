@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Booking;
+use App\Models\Product;
 use App\Models\Transaction;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +13,7 @@ class TransactionService
 {
     public function __construct(
         private GhlBookingService $ghlBookingService,
+        private GhlProductGateway $productGateway,
     ) {}
 
     public function list(array $filters = []): LengthAwarePaginator
@@ -38,6 +40,14 @@ class TransactionService
             $query->where('customer_id', $filters['customer_id']);
         }
 
+        // Scopes the list to POS Product Sales orders only (booking-linked
+        // "extras" transactions and rental transactions always carry a
+        // booking_id) — powers the dedicated Product Orders page, kept
+        // separate from the general Transactions page's full unfiltered list.
+        if (! empty($filters['product_sale_only'])) {
+            $query->whereNull('booking_id');
+        }
+
         if (! empty($filters['date_from'])) {
             $query->where('transaction_date', '>=', $filters['date_from']);
         }
@@ -53,7 +63,30 @@ class TransactionService
 
     public function create(array $data): Transaction
     {
-        return DB::transaction(function () use ($data) {
+        // Only a booking-less sale (the POS Product Sales page) gets live
+        // GHL price/stock resolution — a booking-linked "extras" transaction
+        // is already covered by the booking's own invoice, so it's left
+        // untouched to avoid double-invoicing the same charge in GHL.
+        $isProductSale = empty($data['booking_id']);
+        $resolvedPrices = $isProductSale ? $this->resolveLivePricingAndValidateStock($data['items']) : [];
+
+        if ($isProductSale) {
+            // The service derives payment_status itself rather than trusting
+            // whatever the client submitted — same principle as
+            // BookingController computing $autoConfirm itself. Mirrors the
+            // booking flow's cash/card split: cash is paid in person right
+            // now; card defers to a real GHL invoice payment link, exactly
+            // like a booking's "Online" option — but only when there's
+            // actually a GHL-linked item to invoice. A card sale of purely
+            // local (never-synced) products has no invoice/payment-link
+            // mechanism at all, so it falls back to paid-immediately too.
+            $hasGhlInvoiceableItem = collect($resolvedPrices)->contains(fn (array $r) => $r['ghl_product_id'] !== null);
+            $data['payment_status'] = ($data['payment_method'] === 'cash' || ! $hasGhlInvoiceableItem)
+                ? 'paid'
+                : 'pending';
+        }
+
+        $transaction = DB::transaction(function () use ($data, $resolvedPrices) {
             $transaction = Transaction::create([
                 'customer_id' => $data['customer_id'],
                 'booking_id' => $data['booking_id'] ?? null,
@@ -68,11 +101,14 @@ class TransactionService
             $total = 0;
 
             foreach ($data['items'] as $item) {
+                $resolved = $resolvedPrices[$item['product_id']] ?? null;
+                $unitPrice = $resolved['unit_price'] ?? $item['unit_price'];
+
                 $transactionItem = $transaction->items()->create([
                     'product_id' => $item['product_id'],
                     'product_type' => $item['product_type'],
                     'quantity' => $item['quantity'],
-                    'unit_price' => $item['unit_price'],
+                    'unit_price' => $unitPrice,
                     'rental_start' => $item['rental_start'] ?? null,
                     'rental_end' => $item['rental_end'] ?? null,
                 ]);
@@ -84,6 +120,156 @@ class TransactionService
 
             return $transaction->load(['customer', 'items.product', 'booking']);
         });
+
+        if ($isProductSale) {
+            $this->syncProductSaleToGhl($transaction, $resolvedPrices);
+        }
+
+        return $transaction;
+    }
+
+    /**
+     * Live GHL price + stock resolution for a booking-less sale's physical
+     * items, done BEFORE the local rows are created — mirrors
+     * BookingService::create()'s re-quote-at-creation-time philosophy
+     * (never trust a possibly-stale client-submitted price) and its
+     * "insufficient stock" -> InvalidArgumentException convention. A
+     * RuntimeException from the gateway (GHL unreachable) is allowed to
+     * propagate — same as BookingService::quote()'s existing behavior for
+     * rentals, turned into a friendly 422 by the controller.
+     *
+     * @param  array<int, array{product_id:string, product_type:string, quantity:int, unit_price:float}>  $items
+     * @return array<string, array{unit_price:float, currency:string, ghl_product_id:?string, price_id:?string, track_inventory:bool, allow_out_of_stock_purchases:bool, available_quantity:?int, product_name:string}>
+     */
+    private function resolveLivePricingAndValidateStock(array $items): array
+    {
+        $resolved = [];
+
+        foreach ($items as $item) {
+            if (($item['product_type'] ?? null) !== 'physical') {
+                continue;
+            }
+
+            $product = Product::find($item['product_id']);
+            if (! $product) {
+                continue;
+            }
+
+            if ($product->ghl_product_id) {
+                $detail = $this->productGateway->fetchFreshDefaultPriceDetail($product);
+
+                if ($detail === null) {
+                    // No live price on record for this product yet — fall
+                    // back to the client-submitted price, nothing to validate.
+                    continue;
+                }
+
+                if ($detail['track_inventory'] && ! $detail['allow_out_of_stock_purchases']) {
+                    $available = $detail['available_quantity'] ?? 0;
+
+                    if ($available < $item['quantity']) {
+                        throw new \InvalidArgumentException(
+                            "Insufficient stock for '{$product->name}': {$available} available, {$item['quantity']} requested."
+                        );
+                    }
+                }
+
+                $resolved[$item['product_id']] = [
+                    'unit_price' => $detail['amount'],
+                    'currency' => $detail['currency'],
+                    'ghl_product_id' => $product->ghl_product_id,
+                    'price_id' => $detail['price_id'],
+                    'track_inventory' => $detail['track_inventory'],
+                    'allow_out_of_stock_purchases' => $detail['allow_out_of_stock_purchases'],
+                    'available_quantity' => $detail['available_quantity'],
+                    'product_name' => $product->name,
+                ];
+
+                continue;
+            }
+
+            // Never synced to GHL — fall back to the existing local fields
+            // (already present on Product, no new columns added) so
+            // un-synced products aren't left with zero stock protection.
+            if ($product->track_product_inventory && $product->quantity < $item['quantity']) {
+                throw new \InvalidArgumentException(
+                    "Insufficient stock for '{$product->name}': {$product->quantity} available, {$item['quantity']} requested."
+                );
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * Best-effort, post-commit GHL sync for a booking-less product sale:
+     * decrements live inventory and creates a paid (no email — the sale is
+     * already complete in person) GHL invoice. Failures are logged, never
+     * thrown — the local sale has already committed and must not be rolled
+     * back over a GHL sync hiccup, matching this codebase's "GHL sync
+     * failures are caught and logged but don't block the main operation"
+     * convention used everywhere else (customer sync, opportunity sync...).
+     *
+     * @param  array<string, array<string, mixed>>  $resolvedPrices
+     */
+    private function syncProductSaleToGhl(Transaction $transaction, array $resolvedPrices): void
+    {
+        $ghlItems = array_filter($resolvedPrices, fn ($r) => $r['ghl_product_id'] !== null);
+
+        if (empty($ghlItems)) {
+            return;
+        }
+
+        foreach ($transaction->items as $transactionItem) {
+            $resolved = $resolvedPrices[$transactionItem->product_id] ?? null;
+
+            if (! $resolved || ! $resolved['track_inventory']) {
+                continue;
+            }
+
+            try {
+                $newQuantity = ($resolved['available_quantity'] ?? 0) - $transactionItem->quantity;
+                $this->productGateway->updateInventory(
+                    $resolved['price_id'],
+                    $newQuantity,
+                    $resolved['allow_out_of_stock_purchases'],
+                );
+            } catch (\Exception $e) {
+                Log::error('GHL inventory update failed after product sale', [
+                    'transaction_id' => $transaction->id,
+                    'product_id' => $transactionItem->product_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        try {
+            $lineItems = [];
+
+            foreach ($transaction->items as $transactionItem) {
+                $resolved = $resolvedPrices[$transactionItem->product_id] ?? null;
+
+                if (! $resolved) {
+                    continue;
+                }
+
+                $lineItems[] = [
+                    'name' => $resolved['product_name'],
+                    'currency' => $resolved['currency'],
+                    'amount' => $resolved['unit_price'],
+                    'qty' => $transactionItem->quantity,
+                    'product_id' => $resolved['ghl_product_id'],
+                    'price_id' => $resolved['price_id'],
+                ];
+            }
+
+            $this->ghlBookingService->createProductSaleInvoice($transaction, $lineItems);
+        } catch (\Exception $e) {
+            Log::error('GHL invoice creation failed for product sale', [
+                'transaction_id' => $transaction->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function autoCreateFromBooking(Booking $booking, string $paymentMethod = 'card'): Transaction
@@ -115,8 +301,21 @@ class TransactionService
         });
     }
 
+    /**
+     * Once a transaction is 'paid', that's a terminal state — no caller may
+     * flip it back to 'pending'/'draft' (or re-run the 'paid' side effects
+     * a second time). BookingService::payCash() already guards its own call
+     * site against this (never calls in with an already-paid transaction);
+     * this is the authoritative check for every other caller, including the
+     * PATCH endpoint (no frontend currently calls it, but it's still public
+     * API surface).
+     */
     public function updatePaymentStatus(Transaction $transaction, string $status): Transaction
     {
+        if ($transaction->payment_status === 'paid') {
+            throw new \InvalidArgumentException('This order is already paid — payment status cannot be changed.');
+        }
+
         $transaction->update(['payment_status' => $status]);
 
         if ($status === 'paid') {

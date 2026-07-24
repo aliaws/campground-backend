@@ -13,6 +13,7 @@ class TransactionItemResource extends JsonResource
             'id' => $this->id,
             'transaction_id' => $this->transaction_id,
             'product_id' => $this->product_id,
+            'product_name' => $this->whenLoaded('product', fn () => $this->product?->name),
             'product_type' => $this->product_type,
             'quantity' => $this->quantity,
             'unit_price' => (float) $this->unit_price,

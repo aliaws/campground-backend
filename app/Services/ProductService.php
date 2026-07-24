@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProductService
 {
@@ -63,6 +64,10 @@ class ProductService
         $categoryIds = $data['category_ids'] ?? [];
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
 
+        if (empty($data['sku'])) {
+            $data['sku'] = $this->generateUniqueSku($data['tenant_id'], $data['name'] ?? '');
+        }
+
         $product = Product::create($data);
 
         if (! empty($categoryIds)) {
@@ -89,6 +94,36 @@ class ProductService
     public function delete(Product $product): bool
     {
         return $product->delete();
+    }
+
+    /**
+     * Auto-generates a SKU when one isn't explicitly provided on create —
+     * an uppercase-alnum-and-dash-only string, since this feeds directly
+     * into a Code 39 barcode (rendered client-side), which doesn't support
+     * lowercase letters or most punctuation. Retries on the rare per-tenant
+     * collision rather than trusting randomness alone.
+     */
+    private function generateUniqueSku(string $tenantId, string $name): string
+    {
+        $base = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name));
+        $base = substr($base, 0, 6) ?: 'SKU';
+
+        do {
+            $candidate = $base.'-'.strtoupper(Str::random(4));
+            $exists = Product::where('tenant_id', $tenantId)->where('sku', $candidate)->exists();
+        } while ($exists);
+
+        return $candidate;
+    }
+
+    /** Exact-match SKU lookup for the Product Sales page's barcode scanner. */
+    public function findBySku(string $tenantId, string $sku): ?Product
+    {
+        return Product::byTenant($tenantId)
+            ->whereNull('product_rental_id')
+            ->where('sku', $sku)
+            ->with(self::EAGER)
+            ->first();
     }
 
     public function uploadImage(Product $product, UploadedFile $image): Product

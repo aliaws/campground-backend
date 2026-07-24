@@ -89,10 +89,15 @@ Route::prefix('v1')->group(function () {
         // Products (unified - campsites + inventory)
         Route::get('/products', [ProductController::class, 'index']);
         Route::post('/products', [ProductController::class, 'store']);
+        // Must precede /products/{product} — otherwise implicit route-model
+        // binding treats "lookup-by-sku" as a {product} id and 404s before
+        // this route is ever matched.
+        Route::get('/products/lookup-by-sku', [ProductController::class, 'lookupBySku']);
         Route::get('/products/{product}', [ProductController::class, 'show']);
         Route::put('/products/{product}', [ProductController::class, 'update']);
         Route::delete('/products/{product}', [ProductController::class, 'destroy']);
         Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
+        Route::get('/products/{product}/ghl-stock', [ProductController::class, 'ghlStock']);
 
         // Product categories
         Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
@@ -147,6 +152,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
         Route::post('/categories/{category}/sync-ghl', [CategoryController::class, 'syncToGhl']);
         Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
+        Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
 
         // Amenities
         Route::get('/amenities', [AmenityController::class, 'index']);

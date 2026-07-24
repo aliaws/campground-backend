@@ -99,7 +99,7 @@ class CategoryController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Sync failed: ' . $e->getMessage(),
+                'message' => 'Sync failed: '.$e->getMessage(),
             ], 422);
         }
     }
@@ -112,6 +112,17 @@ class CategoryController extends Controller
             'success' => true,
             'data' => $results,
             'message' => "Synced {$results['synced']} categories, {$results['errors']} errors.",
+        ]);
+    }
+
+    public function pullFromGhl(Request $request): JsonResponse
+    {
+        $results = $this->ghlProductSyncService->pullCategoriesFromGhl($request->user()->tenant_id);
+
+        return response()->json([
+            'success' => true,
+            'data' => $results,
+            'message' => "Pulled {$results['pulled']} categories from GHL ({$results['created']} new), {$results['errors']} errors.",
         ]);
     }
 }

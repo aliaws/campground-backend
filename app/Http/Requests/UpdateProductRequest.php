@@ -25,6 +25,12 @@ class UpdateProductRequest extends FormRequest
             'is_taxes_enabled' => ['nullable', 'boolean'],
             'track_product_inventory' => ['nullable', 'boolean'],
             'slug' => ['nullable', 'string', 'max:255'],
+            'sku' => [
+                'nullable', 'string', 'max:32', 'regex:/^[A-Z0-9\-]+$/',
+                Rule::unique('products', 'sku')
+                    ->where('tenant_id', $this->user()->tenant_id)
+                    ->ignore($this->route('product')),
+            ],
             'price' => ['nullable', 'numeric', 'min:0'],
             'quantity' => ['nullable', 'integer', 'min:0'],
             'category_ids' => ['nullable', 'array'],

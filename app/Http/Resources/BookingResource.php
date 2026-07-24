@@ -9,6 +9,10 @@ class BookingResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        if (is_null($this->resource)) {
+            return [];
+        }
+
         return [
             'id' => $this->id,
             'customer' => new CustomerResource($this->whenLoaded('customer')),

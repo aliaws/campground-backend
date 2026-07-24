@@ -7,6 +7,7 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Services\GhlProductGateway;
 use App\Services\GhlProductSyncService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class ProductController extends Controller
     public function __construct(
         private ProductService $productService,
         private GhlProductSyncService $ghlProductSyncService,
+        private GhlProductGateway $ghlProductGateway,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -37,6 +39,25 @@ class ProductController extends Controller
                 'prev_page_url' => $products->previousPageUrl(),
             ],
             'message' => 'Products retrieved.',
+        ]);
+    }
+
+    /**
+     * Exact-match SKU lookup for the Product Sales page's barcode scanner
+     * (a scanned code is looked up verbatim, not fuzzy-searched). Route must
+     * be registered before GET /products/{product} in routes/api.php, or
+     * Laravel's implicit route-model-binding would swallow this path as a
+     * {product} id lookup and 404 before this method is ever reached.
+     */
+    public function lookupBySku(Request $request): JsonResponse
+    {
+        $sku = $request->query('sku');
+        $product = $sku ? $this->productService->findBySku($request->user()->tenant_id, $sku) : null;
+
+        return response()->json([
+            'success' => true,
+            'data' => $product ? new ProductResource($product) : null,
+            'message' => $product ? 'Product found.' : 'No product found for that barcode.',
         ]);
     }
 
@@ -165,6 +186,32 @@ class ProductController extends Controller
             'success' => true,
             'data' => $results,
             'message' => "Pulled {$results['pulled']} products from GHL ({$results['created']} new), {$results['errors']} errors.",
+        ]);
+    }
+
+    /**
+     * Live GHL price + stock for a product's default price — used by the
+     * POS Product Sales page to show real-time availability before a sale.
+     * Never persisted locally (same "compute live, don't store" pattern as
+     * GhlRentalGateway). Returns null data when the product isn't linked to
+     * a GHL product yet.
+     */
+    public function ghlStock(Product $product): JsonResponse
+    {
+        try {
+            $detail = $this->ghlProductGateway->fetchDefaultPriceDetail($product);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Live stock check is temporarily unavailable. Please try again.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $detail,
+            'message' => $detail ? 'Live stock retrieved.' : 'Product is not linked to a GHL product yet.',
         ]);
     }
 }
