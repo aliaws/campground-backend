@@ -4,11 +4,11 @@ use App\Http\Controllers\Api\V1\AmenityController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\Customer\CustomerPasswordController;
+use App\Http\Controllers\Api\V1\Customer\CustomerPortalController;
+use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
-use App\Http\Controllers\Api\V1\Guest\GuestPasswordController;
-use App\Http\Controllers\Api\V1\Guest\GuestPortalController;
-use App\Http\Controllers\Api\V1\Guest\GuestVerificationController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
@@ -26,7 +26,7 @@ use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
-    // Auth — login/register open; logout/me for any authenticated role (staff or guest)
+    // Auth — login/register open; logout/me for any authenticated role (staff or customer)
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
@@ -38,9 +38,9 @@ Route::prefix('v1')->group(function () {
     // GHL OAuth callback (no auth - browser redirect from GHL)
     Route::get('/settings/engage/callback', [SettingsController::class, 'handleCallback']);
 
-    // Public guest booking (no auth) — customer-facing booking site
+    // Public customer booking (no auth) — customer-facing booking site
     Route::prefix('public')->group(function () {
-        Route::middleware('throttle:guest-browse')->group(function () {
+        Route::middleware('throttle:customer-browse')->group(function () {
             Route::get('/services', [PublicServiceController::class, 'index']);
             Route::get('/services/variant/{id}', [PublicServiceController::class, 'variant']);
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
@@ -48,39 +48,39 @@ Route::prefix('v1')->group(function () {
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
 
-            // Interactive site map (guest viewer)
+            // Interactive site map (customer/visitor viewer)
             Route::get('/site-maps', [PublicSiteMapController::class, 'index']);
             Route::get('/site-maps/{siteMap}', [PublicSiteMapController::class, 'show']);
         });
-        Route::middleware('throttle:guest-booking')->group(function () {
+        Route::middleware('throttle:customer-booking')->group(function () {
             Route::post('/bookings', [PublicBookingController::class, 'store']);
         });
     });
 
-    // Guest verification / password (unauthenticated) + portal (role:guest)
-    Route::prefix('guest')->group(function () {
-        Route::post('/register', [GuestVerificationController::class, 'register'])
-            ->middleware('throttle:guest-register');
-        Route::post('/verify-code', [GuestVerificationController::class, 'verifyCode'])
-            ->middleware('throttle:guest-verify');
-        Route::post('/resend-verification', [GuestVerificationController::class, 'resend'])
-            ->middleware('throttle:guest-resend-verification');
-        Route::post('/create-password', [GuestPasswordController::class, 'createPassword'])
-            ->middleware('throttle:guest-verify');
-        Route::post('/forgot-password', [GuestPasswordController::class, 'forgotPassword'])
-            ->middleware('throttle:guest-forgot-password');
-        Route::post('/reset-password', [GuestPasswordController::class, 'resetPassword'])
-            ->middleware('throttle:guest-forgot-password');
+    // Customer verification / password (unauthenticated) + portal (role:customer)
+    Route::prefix('customer')->group(function () {
+        Route::post('/register', [CustomerVerificationController::class, 'register'])
+            ->middleware('throttle:customer-register');
+        Route::post('/verify-code', [CustomerVerificationController::class, 'verifyCode'])
+            ->middleware('throttle:customer-verify');
+        Route::post('/resend-verification', [CustomerVerificationController::class, 'resend'])
+            ->middleware('throttle:customer-resend-verification');
+        Route::post('/create-password', [CustomerPasswordController::class, 'createPassword'])
+            ->middleware('throttle:customer-verify');
+        Route::post('/forgot-password', [CustomerPasswordController::class, 'forgotPassword'])
+            ->middleware('throttle:customer-forgot-password');
+        Route::post('/reset-password', [CustomerPasswordController::class, 'resetPassword'])
+            ->middleware('throttle:customer-forgot-password');
 
-        Route::middleware(['auth:sanctum', 'role:guest'])->group(function () {
-            Route::post('/change-password', [GuestPasswordController::class, 'changePassword'])
-                ->middleware('throttle:guest-change-password');
+        Route::middleware(['auth:sanctum', 'role:customer'])->group(function () {
+            Route::post('/change-password', [CustomerPasswordController::class, 'changePassword'])
+                ->middleware('throttle:customer-change-password');
 
-            Route::get('/bookings', [GuestPortalController::class, 'bookings']);
-            Route::get('/bookings/{booking}', [GuestPortalController::class, 'bookingShow']);
-            Route::post('/bookings/{booking}/cancel', [GuestPortalController::class, 'cancelBooking']);
-            Route::get('/bookings/{booking}/invoice', [GuestPortalController::class, 'invoice']);
-            Route::put('/profile', [GuestPortalController::class, 'updateProfile']);
+            Route::get('/bookings', [CustomerPortalController::class, 'bookings']);
+            Route::get('/bookings/{booking}', [CustomerPortalController::class, 'bookingShow']);
+            Route::post('/bookings/{booking}/cancel', [CustomerPortalController::class, 'cancelBooking']);
+            Route::get('/bookings/{booking}/invoice', [CustomerPortalController::class, 'invoice']);
+            Route::put('/profile', [CustomerPortalController::class, 'updateProfile']);
         });
     });
 

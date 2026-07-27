@@ -251,7 +251,7 @@ class BookingController extends Controller
         ]);
     }
 
-    /** Staff confirms a guest-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
+    /** Staff confirms a customer-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
     public function confirm(Booking $booking): JsonResponse
     {
         try {

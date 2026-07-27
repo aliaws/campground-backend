@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 class FindDuplicateCustomerEmails extends Command
 {
-    protected $signature = 'guest:find-duplicate-customer-emails';
+    protected $signature = 'customers:find-duplicate-emails';
 
     protected $description = 'Detect (tenant_id, LOWER(email)) duplicates that would block the customers unique email index (read-only).';
 

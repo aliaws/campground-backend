@@ -32,7 +32,7 @@ class SiteMapController extends Controller
         $data = $request->validated() + ['tenant_id' => $tenantId];
 
         $map = DB::transaction(function () use ($data, $tenantId) {
-            // Only one map per tenant can be the default guests see — unset
+            // Only one map per tenant can be the default customers see — unset
             // any existing default before creating this one as the new default.
             if (! empty($data['is_default'])) {
                 SiteMap::where('tenant_id', $tenantId)->where('is_default', true)->update(['is_default' => false]);
@@ -73,7 +73,7 @@ class SiteMapController extends Controller
 
         DB::transaction(function () use ($data, $siteMap) {
             // Enforce a single default per tenant — marking this map as
-            // default unsets it on every sibling first, so guests always see
+            // default unsets it on every sibling first, so customers always see
             // exactly one map (never zero, never more than one).
             if (! empty($data['is_default'])) {
                 SiteMap::where('tenant_id', $siteMap->tenant_id)

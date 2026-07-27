@@ -16,8 +16,8 @@ use Laravel\Sanctum\HasApiTokens;
 #[Hidden([
     'password',
     'remember_token',
-    'guest_action_token_hash',
-    'guest_verification_code_hash',
+    'customer_account_token_hash',
+    'customer_verification_code_hash',
 ])]
 class User extends Authenticatable
 {
@@ -44,14 +44,14 @@ class User extends Authenticatable
         return $this->role === 'cashier';
     }
 
-    public function isGuest(): bool
+    public function isCustomer(): bool
     {
-        return $this->role === 'guest';
+        return $this->role === 'customer';
     }
 
-    public function isActiveGuestAccount(): bool
+    public function isActiveCustomerAccount(): bool
     {
-        return $this->role === 'guest' && $this->guest_status === 'active';
+        return $this->role === 'customer' && $this->customer_status === 'active';
     }
 
     /**
@@ -59,7 +59,7 @@ class User extends Authenticatable
      * snapshotted as a plain string at creation, not recomputed later, so a
      * name change afterward doesn't rewrite history. Only 3 buckets exist:
      * Admin, Staff (also covers cashier — there's no separate Cashier bucket),
-     * and Customer (the public/guest booking widget, no authenticated user).
+     * and Customer (the public-facing booking widget, no authenticated user).
      */
     public static function createdByLabel(?self $user, string $fallbackName): string
     {
@@ -82,9 +82,9 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'guest_verified_at' => 'datetime',
-            'guest_registered_at' => 'datetime',
-            'guest_action_expires_at' => 'datetime',
+            'customer_verified_at' => 'datetime',
+            'customer_registered_at' => 'datetime',
+            'customer_account_expires_at' => 'datetime',
         ];
     }
 }

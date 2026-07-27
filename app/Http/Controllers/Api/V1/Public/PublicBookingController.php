@@ -3,15 +3,15 @@
 namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Public\StoreGuestBookingRequest;
+use App\Http\Requests\Public\StoreCustomerBookingRequest;
 use App\Http\Requests\QuoteBookingRequest;
-use App\Http\Resources\GuestBookingResource;
+use App\Http\Resources\CustomerBookingResource;
 use App\Models\Booking;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
-use App\Services\GuestAccountService;
 use App\Services\RentalResolver;
 use App\Services\TenantResolver;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +22,7 @@ class PublicBookingController extends Controller
     public function __construct(
         private BookingService $bookingService,
         private CustomerService $customerService,
-        private GuestAccountService $guestAccountService,
+        private CustomerAccountService $customerAccountService,
         private RentalResolver $rentalResolver,
         private GhlService $ghlService,
     ) {}
@@ -80,7 +80,7 @@ class PublicBookingController extends Controller
         ]);
     }
 
-    public function store(StoreGuestBookingRequest $request): JsonResponse
+    public function store(StoreCustomerBookingRequest $request): JsonResponse
     {
         $tenantId = TenantResolver::resolveDefault();
 
@@ -112,7 +112,7 @@ class PublicBookingController extends Controller
             $createdBy
         );
 
-        $this->guestAccountService->ensureGuestAccount(
+        $this->customerAccountService->ensureCustomerAccount(
             $customer,
             $request->only(['name', 'email', 'phone'])
         );
@@ -137,12 +137,12 @@ class PublicBookingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new GuestBookingResource($booking),
+            'data' => new CustomerBookingResource($booking),
             'message' => 'Your booking request has been received. Our team will contact you shortly to confirm and arrange payment.',
         ], 201);
     }
 
-    /** Guest confirmation lookup — requires the booking email as a cheap ownership check. */
+    /** Customer confirmation lookup — requires the booking email as a cheap ownership check. */
     public function show(Request $request, Booking $booking): JsonResponse
     {
         $email = strtolower((string) $request->query('email'));
@@ -157,7 +157,7 @@ class PublicBookingController extends Controller
         }
 
         // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
-        // publicly reachable webhook URL in local dev) — the guest confirmation
+        // publicly reachable webhook URL in local dev) — the customer confirmation
         // page polls this endpoint waiting for payment_status to flip to paid.
         // reconcileInvoiceStatus() may return a freshly-reloaded model, so
         // re-attach the relations the resource needs.
@@ -166,7 +166,7 @@ class PublicBookingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new GuestBookingResource($booking),
+            'data' => new CustomerBookingResource($booking),
             'message' => 'Booking retrieved.',
         ]);
     }

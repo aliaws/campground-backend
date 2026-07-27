@@ -1,6 +1,8 @@
 # Laravel
 /vendor/
 /node_modules/
+/docs/
+/tests/
 /public/build/
 /public/hot
 /public/storage

@@ -9,30 +9,30 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class GuestPasswordResetMail extends Mailable
+class CustomerPasswordResetMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public function __construct(
-        public User $guestUser,
+        public User $customerUser,
         public string $token,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Reset your guest account password',
+            subject: 'Reset your account password',
         );
     }
 
     public function content(): Content
     {
-        $resetUrl = rtrim((string) config('app.frontend_url'), '/').'/guest/reset-password?token='.urlencode($this->token);
+        $resetUrl = rtrim((string) config('app.frontend_url'), '/').'/customer-auth/reset-password?token='.urlencode($this->token);
 
         return new Content(
-            view: 'emails.guest.password-reset',
+            view: 'emails.customer.password-reset',
             with: [
-                'customerName' => $this->guestUser->name,
+                'customerName' => $this->customerUser->name,
                 'resetUrl' => $resetUrl,
             ],
         );

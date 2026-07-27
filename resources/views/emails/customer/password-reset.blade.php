@@ -6,7 +6,7 @@
 </head>
 <body style="font-family: sans-serif; line-height: 1.5; color: #222;">
     <p>Hi {{ $customerName }},</p>
-    <p>We received a request to reset the password for your guest account.</p>
+    <p>We received a request to reset the password for your customer account.</p>
     <p>
         <a href="{{ $resetUrl }}" style="display: inline-block; padding: 10px 16px; background: #135846; color: #fff; text-decoration: none; border-radius: 6px;">
             Reset password
