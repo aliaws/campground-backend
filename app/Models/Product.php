@@ -84,6 +84,18 @@ class Product extends Model
         return $this->belongsToMany(Category::class, 'product_categories');
     }
 
+    /** Amenities assigned to this service listing (Services module concept — see service_amenities). */
+    public function amenities(): BelongsToMany
+    {
+        return $this->belongsToMany(Amenity::class, 'service_amenities');
+    }
+
+    /** Features assigned to this service listing (Services module concept — see service_features). */
+    public function features(): BelongsToMany
+    {
+        return $this->belongsToMany(Feature::class, 'service_features');
+    }
+
     /** All rental variants of this listing (the default/base row included). */
     public function rentals(): HasMany
     {

@@ -190,6 +190,26 @@ class ProductController extends Controller
     }
 
     /**
+     * Backfills a SKU (and therefore a printable Code 39 barcode) onto every
+     * non-rental goods product in the tenant that doesn't have one yet —
+     * covers products created before SKU auto-generation existed, or via any
+     * path that bypassed it. Rentals/services have no SKU concept and are
+     * never touched (see ProductService::generateMissingSkus()).
+     */
+    public function generateSkus(Request $request): JsonResponse
+    {
+        $results = $this->productService->generateMissingSkus($request->user()->tenant_id);
+
+        return response()->json([
+            'success' => true,
+            'data' => $results,
+            'message' => $results['updated'] > 0
+                ? "Generated barcodes for {$results['updated']} product(s)."
+                : 'Every product already has a barcode.',
+        ]);
+    }
+
+    /**
      * Live GHL price + stock for a product's default price — used by the
      * POS Product Sales page to show real-time availability before a sale.
      * Never persisted locally (same "compute live, don't store" pattern as

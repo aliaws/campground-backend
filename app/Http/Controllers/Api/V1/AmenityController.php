@@ -8,6 +8,7 @@ use App\Http\Resources\AmenityResource;
 use App\Models\Amenity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class AmenityController extends Controller
 {
@@ -50,9 +51,29 @@ class AmenityController extends Controller
 
     public function destroy(Amenity $amenity): JsonResponse
     {
-        $amenity->products()->detach();
+        $amenity->services()->detach();
         $amenity->delete();
 
         return response()->json(['success' => true, 'message' => 'Amenity deleted.']);
+    }
+
+    /**
+     * Uploads a custom icon image, storing its URL onto the same `icon`
+     * column a built-in icon key would use — the frontend tells the two
+     * apart by shape (a `/storage/...` path vs a short key), same convention
+     * as SiteMapIconType's image_url vs Product Rental's icon_key.
+     */
+    public function uploadIcon(Request $request, Amenity $amenity): JsonResponse
+    {
+        $request->validate(['icon' => ['required', 'image', 'max:2048']]);
+
+        $path = $request->file('icon')->store('amenity-icons', 'public');
+        $amenity->update(['icon' => Storage::url($path)]);
+
+        return response()->json([
+            'success' => true,
+            'data' => new AmenityResource($amenity->fresh()),
+            'message' => 'Amenity icon updated.',
+        ]);
     }
 }

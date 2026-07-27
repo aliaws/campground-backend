@@ -31,6 +31,8 @@ class ProductResource extends JsonResource
             'engage_sync_status' => $this->engage_sync_status,
             'engage_last_synced_at' => $this->engage_last_synced_at,
             'categories' => CategoryResource::collection($this->whenLoaded('categories')),
+            'amenities' => AmenityResource::collection($this->whenLoaded('amenities')),
+            'features' => FeatureResource::collection($this->whenLoaded('features')),
             'rentals' => ProductRentalResource::collection($this->whenLoaded('rentals')),
             'default_rental' => new ProductRentalResource($this->whenLoaded('defaultRental')),
             'tenant_id' => $this->tenant_id,

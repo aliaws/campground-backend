@@ -8,6 +8,7 @@ use App\Http\Resources\FeatureResource;
 use App\Models\Feature;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class FeatureController extends Controller
 {
@@ -50,9 +51,27 @@ class FeatureController extends Controller
 
     public function destroy(Feature $feature): JsonResponse
     {
-        $feature->products()->detach();
+        $feature->services()->detach();
         $feature->delete();
 
         return response()->json(['success' => true, 'message' => 'Feature deleted.']);
+    }
+
+    /**
+     * Uploads a custom icon image — see AmenityController::uploadIcon() for
+     * the icon-key-vs-uploaded-path convention this mirrors exactly.
+     */
+    public function uploadIcon(Request $request, Feature $feature): JsonResponse
+    {
+        $request->validate(['icon' => ['required', 'image', 'max:2048']]);
+
+        $path = $request->file('icon')->store('feature-icons', 'public');
+        $feature->update(['icon' => Storage::url($path)]);
+
+        return response()->json([
+            'success' => true,
+            'data' => new FeatureResource($feature->fresh()),
+            'message' => 'Feature icon updated.',
+        ]);
     }
 }

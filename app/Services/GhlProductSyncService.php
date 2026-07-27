@@ -17,6 +17,7 @@ class GhlProductSyncService
     public function __construct(
         private GhlClient $client,
         private GhlServiceSyncService $serviceSync,
+        private ProductService $productService,
     ) {}
 
     public function syncProductToGhl(Product $product): Product
@@ -526,9 +527,15 @@ class GhlProductSyncService
         }
 
         $type = strtoupper($ghlProduct['productType'] ?? '');
+        $name = $ghlProduct['name'] ?? 'Untitled';
 
+        // This method only ever runs for non-rental catalog goods (rentals
+        // are filtered out by the caller via fetchRentalProductIds()), so a
+        // SKU/barcode is always appropriate here — same auto-generation
+        // ProductService::create() applies to a manually-added product,
+        // kept in sync so a GHL-pulled product is never left without one.
         $product = Product::create([
-            'name' => $ghlProduct['name'] ?? 'Untitled',
+            'name' => $name,
             'product_type' => in_array($type, ['PHYSICAL', 'DIGITAL', 'SERVICE']) ? $type : 'PHYSICAL',
             'description' => $ghlProduct['description'] ?? null,
             'status' => 'active',
@@ -537,6 +544,7 @@ class GhlProductSyncService
             'ghl_product_id' => $ghlId,
             'engage_sync_status' => 'pending',
             'tenant_id' => $tenantId,
+            'sku' => $this->productService->generateUniqueSku($tenantId, $name),
         ]);
 
         $this->syncCategoriesFromGhl($product, $ghlProduct);

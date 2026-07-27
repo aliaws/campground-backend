@@ -107,6 +107,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/products/{product}/pull-ghl', [ProductController::class, 'pullFromGhl']);
         Route::post('/products/bulk-sync-ghl', [ProductController::class, 'bulkSync']);
         Route::post('/products/bulk-pull-ghl', [ProductController::class, 'bulkPull']);
+        Route::post('/products/generate-skus', [ProductController::class, 'generateSkus']);
 
         // Customers
         Route::get('/customers', [CustomerController::class, 'index']);
@@ -154,16 +155,18 @@ Route::prefix('v1')->group(function () {
         Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
         Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
 
-        // Amenities
+        // Amenities (Services module — assigned to service listings via service_amenities)
         Route::get('/amenities', [AmenityController::class, 'index']);
         Route::post('/amenities', [AmenityController::class, 'store']);
         Route::put('/amenities/{amenity}', [AmenityController::class, 'update']);
+        Route::post('/amenities/{amenity}/icon', [AmenityController::class, 'uploadIcon']);
         Route::delete('/amenities/{amenity}', [AmenityController::class, 'destroy']);
 
-        // Features
+        // Features (Services module — assigned to service listings via service_features)
         Route::get('/features', [FeatureController::class, 'index']);
         Route::post('/features', [FeatureController::class, 'store']);
         Route::put('/features/{feature}', [FeatureController::class, 'update']);
+        Route::post('/features/{feature}/icon', [FeatureController::class, 'uploadIcon']);
         Route::delete('/features/{feature}', [FeatureController::class, 'destroy']);
 
         // Staff management — admin-only: staff accounts are created here, not via public /auth/register
