@@ -34,6 +34,7 @@ class CustomerPasswordResetMail extends Mailable
             with: [
                 'customerName' => $this->customerUser->name,
                 'resetUrl' => $resetUrl,
+                'ttlMinutes' => (int) config('customer.password_reset_ttl_minutes', 60),
             ],
         );
     }

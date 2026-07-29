@@ -37,6 +37,18 @@ class CustomerPortalController extends Controller
             'tenant_id' => $request->user()->tenant_id,
         ]);
 
+        // Same self-heal as bookingShow()/BookingController::index() — without
+        // this, "My bookings" can show a paid invoice next to a status that's
+        // still stuck "requested" until the customer happens to open that one
+        // booking's own detail page.
+        $bookings->getCollection()->transform(function (Booking $booking) {
+            $reconciled = $this->ghlService->reconcileInvoiceStatus($booking);
+
+            return $reconciled->relationLoaded('customer')
+                ? $reconciled
+                : $reconciled->load(['customer', 'product', 'productRental', 'transactions']);
+        });
+
         return response()->json([
             'success' => true,
             'data' => CustomerPortalBookingResource::collection($bookings),
@@ -50,6 +62,12 @@ class CustomerPortalController extends Controller
             return $response;
         }
 
+        // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
+        // publicly reachable webhook URL in local dev) — same pattern as
+        // BookingController::show() for the staff side. Without this, a
+        // customer who pays via the GHL-hosted invoice page can come back to
+        // their own booking card and still see "Unpaid" indefinitely.
+        $booking = $this->ghlService->reconcileInvoiceStatus($booking);
         $booking->loadMissing('customer', 'product', 'productRental', 'transactions');
 
         return response()->json([
