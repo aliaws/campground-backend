@@ -44,7 +44,7 @@ class TransactionController extends Controller
 
             return $reconciled->relationLoaded('customer')
                 ? $reconciled
-                : $reconciled->load(['customer', 'items.product', 'booking']);
+                : $reconciled->load(['customer.customerAccount', 'items.product.rentals', 'booking']);
         });
 
         return response()->json([
@@ -89,7 +89,7 @@ class TransactionController extends Controller
         // waiting for payment_status to flip to paid. Same pattern as
         // BookingController::show()'s reconcileInvoiceStatus() call.
         $transaction = $this->ghlService->reconcileTransactionInvoiceStatus($transaction);
-        $transaction->load(['customer', 'items.product', 'booking']);
+        $transaction->load(['customer.customerAccount', 'items.product.rentals', 'booking']);
 
         return response()->json([
             'success' => true,

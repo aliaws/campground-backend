@@ -4,6 +4,7 @@ namespace App\Integrations\GHL;
 
 use App\Models\EngageSetting;
 use App\Services\GhlAuthService;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 class GhlClient
@@ -13,6 +14,19 @@ class GhlClient
     public const SERVICES_BASE_URL = 'https://services.leadconnectorhq.com/';
 
     public const BACKEND_BASE_URL = 'https://backend.leadconnectorhq.com/';
+
+    /**
+     * Connect/read timeouts (seconds) for outbound GHL calls. None of these
+     * existed before — an unresponsive GHL endpoint could hang a web worker
+     * indefinitely. GHL sync failures are already caught/logged and never
+     * block the main operation everywhere this client is used, so turning a
+     * hang into a timeout exception after a generous window is a pure
+     * reliability/performance fix, not a behavior change for any request
+     * that would have succeeded anyway.
+     */
+    private const CONNECT_TIMEOUT = 10;
+
+    private const REQUEST_TIMEOUT = 30;
 
     private ?string $baseUrl = null;
 
@@ -90,7 +104,7 @@ class GhlClient
      *
      * @param  array<string, array{endpoint: string, query?: array}>  $requests  keyed by caller-chosen id
      * @return array<string, array|\Throwable> same keys as $requests; each value is the decoded
-     *                                          JSON body, or a Throwable if that request ultimately failed
+     *                                         JSON body, or a Throwable if that request ultimately failed
      */
     public function poolGet(array $requests, ?string $version = null): array
     {
@@ -110,7 +124,7 @@ class GhlClient
 
         $retryKeys = array_keys(array_filter(
             $results,
-            fn ($result) => $result instanceof \Illuminate\Http\Client\Response && $result->status() === 401
+            fn ($result) => $result instanceof Response && $result->status() === 401
         ));
 
         if (! empty($retryKeys) && $this->setting?->refresh_token) {
@@ -120,7 +134,7 @@ class GhlClient
         }
 
         return array_map(function ($result) {
-            if ($result instanceof \Illuminate\Http\Client\Response) {
+            if ($result instanceof Response) {
                 return $result->failed()
                     ? new \RuntimeException("GHL API error: {$result->status()} - {$result->body()}")
                     : ($result->json() ?? []);
@@ -132,7 +146,7 @@ class GhlClient
         }, $results);
     }
 
-    /** @return array<string, \Illuminate\Http\Client\Response|\Throwable> */
+    /** @return array<string, Response|\Throwable> */
     private function firePool(array $requests, ?string $version): array
     {
         $headers = $this->buildHeaders($version);
@@ -141,6 +155,8 @@ class GhlClient
         return Http::pool(fn ($pool) => collect($requests)->map(
             fn (array $req, string $key) => $pool->as($key)
                 ->withHeaders($headers)
+                ->connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::REQUEST_TIMEOUT)
                 ->get($baseUrl.'/'.ltrim($req['endpoint'], '/'), $req['query'] ?? [])
         )->all());
     }
@@ -184,7 +200,7 @@ class GhlClient
             $url .= '?'.http_build_query($query);
         }
 
-        $http = Http::withHeaders($headers);
+        $http = Http::withHeaders($headers)->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT);
         $response = match ($method) {
             'get' => $http->get($url, $data),
             'delete' => $http->delete($url),
@@ -193,7 +209,7 @@ class GhlClient
 
         if ($response->status() === 401 && $this->setting?->refresh_token) {
             $this->refreshToken();
-            $http = Http::withHeaders($this->buildHeaders($version));
+            $http = Http::withHeaders($this->buildHeaders($version))->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT);
             $response = match ($method) {
                 'get' => $http->get($url, $data),
                 'delete' => $http->delete($url),
@@ -239,6 +255,8 @@ class GhlClient
         ];
 
         $response = Http::withHeaders($headers)
+            ->connectTimeout(self::CONNECT_TIMEOUT)
+            ->timeout(self::REQUEST_TIMEOUT)
             ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
             ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
 
@@ -246,6 +264,8 @@ class GhlClient
             $this->refreshToken();
             $headers['Authorization'] = "Bearer {$this->accessToken}";
             $response = Http::withHeaders($headers)
+                ->connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::REQUEST_TIMEOUT)
                 ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
                 ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
         }

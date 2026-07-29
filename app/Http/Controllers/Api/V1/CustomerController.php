@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
+use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\User;
 use App\Services\CustomerAccountService;
@@ -108,13 +109,53 @@ class CustomerController extends Controller
         ]);
     }
 
+    /**
+     * Read-only lookup the frontend calls before showing a delete
+     * confirmation, so the popup can say the right thing (and, for upcoming
+     * bookings, warn that they'll also be removed from GHL) without the
+     * staff member having to already know the customer's booking history.
+     */
+    public function deletionPreview(Customer $customer): JsonResponse
+    {
+        $classification = $this->customerService->classifyBookingsForDeletion($customer);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'has_bookings' => $classification['total'] > 0,
+                'completed_count' => $classification['completed']->count(),
+                'upcoming_count' => $classification['upcoming']->count(),
+                'cancelled_count' => $classification['cancelled']->count(),
+                'upcoming_bookings' => $classification['upcoming']->map(fn (Booking $b) => [
+                    'id' => $b->id,
+                    'product_name' => $b->product?->name,
+                    'check_in_date' => $b->check_in_date?->format('Y-m-d'),
+                    'check_out_date' => $b->check_out_date?->format('Y-m-d'),
+                ])->values(),
+            ],
+            'message' => 'Deletion preview retrieved.',
+        ]);
+    }
+
+    /**
+     * Permanently deletes the customer (see CustomerService::hardDelete() for
+     * the full GHL-first, all-or-nothing sequencing). The frontend is
+     * expected to have already called deletionPreview() and shown the
+     * appropriate confirmation before this is ever hit.
+     */
     public function destroy(Customer $customer): JsonResponse
     {
-        $this->ghlService->deleteContactFromGhl($customer);
-        $this->customerAccountService->deleteCustomerAccount($customer);
-        $customer->delete();
+        try {
+            $this->customerService->hardDelete($customer);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
 
-        return response()->json(['success' => true, 'message' => 'Customer deleted.']);
+        return response()->json(['success' => true, 'message' => 'Customer permanently deleted.']);
     }
 
     public function syncToGhl(Customer $customer): JsonResponse

@@ -56,7 +56,7 @@ class TransactionService
             $query->where('transaction_date', '<=', $filters['date_to']);
         }
 
-        return $query->with(['customer', 'items.product', 'booking'])
+        return $query->with(['customer.customerAccount', 'items.product.rentals', 'booking'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
