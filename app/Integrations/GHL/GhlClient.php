@@ -3,7 +3,9 @@
 namespace App\Integrations\GHL;
 
 use App\Models\EngageSetting;
+use App\Models\EngageToken;
 use App\Services\GhlAuthService;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 class GhlClient
@@ -20,13 +22,19 @@ class GhlClient
 
     private ?EngageSetting $setting = null;
 
+    private ?EngageToken $token = null;
+
     public function __construct(?string $tenantId = null)
     {
-        $this->setting = EngageSetting::when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))->first();
+        $this->setting = EngageSetting::with('token')
+            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
+            ->first();
 
         if ($this->setting) {
             $this->baseUrl = $this->setting->api_base_url ?: self::SERVICES_BASE_URL;
-            $this->accessToken = $this->setting->access_token;
+            $this->token = $this->setting->token
+                ?? EngageToken::query()->where('tenant_id', $this->setting->tenant_id)->first();
+            $this->accessToken = $this->token?->access_token;
         }
     }
 
@@ -62,7 +70,12 @@ class GhlClient
 
     public function getLocationId(): ?string
     {
-        return $this->setting?->location_id;
+        return $this->token?->location_id;
+    }
+
+    public function getUserId(): ?string
+    {
+        return $this->token?->user_id;
     }
 
     public function getTimezone(): string
@@ -73,6 +86,11 @@ class GhlClient
     public function getSetting(): ?EngageSetting
     {
         return $this->setting;
+    }
+
+    public function getToken(): ?EngageToken
+    {
+        return $this->token;
     }
 
     /**
@@ -90,7 +108,7 @@ class GhlClient
      *
      * @param  array<string, array{endpoint: string, query?: array}>  $requests  keyed by caller-chosen id
      * @return array<string, array|\Throwable> same keys as $requests; each value is the decoded
-     *                                          JSON body, or a Throwable if that request ultimately failed
+     *                                         JSON body, or a Throwable if that request ultimately failed
      */
     public function poolGet(array $requests, ?string $version = null): array
     {
@@ -102,7 +120,7 @@ class GhlClient
             return [];
         }
 
-        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+        if ($this->token?->isTokenExpired() && $this->token->refresh_token) {
             $this->refreshToken();
         }
 
@@ -110,17 +128,17 @@ class GhlClient
 
         $retryKeys = array_keys(array_filter(
             $results,
-            fn ($result) => $result instanceof \Illuminate\Http\Client\Response && $result->status() === 401
+            fn ($result) => $result instanceof Response && $result->status() === 401
         ));
 
-        if (! empty($retryKeys) && $this->setting?->refresh_token) {
+        if (! empty($retryKeys) && $this->token?->refresh_token) {
             $this->refreshToken();
             $retryResults = $this->firePool(array_intersect_key($requests, array_flip($retryKeys)), $version);
             $results = array_replace($results, $retryResults);
         }
 
         return array_map(function ($result) {
-            if ($result instanceof \Illuminate\Http\Client\Response) {
+            if ($result instanceof Response) {
                 return $result->failed()
                     ? new \RuntimeException("GHL API error: {$result->status()} - {$result->body()}")
                     : ($result->json() ?? []);
@@ -132,7 +150,7 @@ class GhlClient
         }, $results);
     }
 
-    /** @return array<string, \Illuminate\Http\Client\Response|\Throwable> */
+    /** @return array<string, Response|\Throwable> */
     private function firePool(array $requests, ?string $version): array
     {
         $headers = $this->buildHeaders($version);
@@ -173,7 +191,7 @@ class GhlClient
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
 
-        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+        if ($this->token?->isTokenExpired() && $this->token->refresh_token) {
             $this->refreshToken();
         }
 
@@ -191,7 +209,7 @@ class GhlClient
             default => $http->{$method}($url, $data),
         };
 
-        if ($response->status() === 401 && $this->setting?->refresh_token) {
+        if ($response->status() === 401 && $this->token?->refresh_token) {
             $this->refreshToken();
             $http = Http::withHeaders($this->buildHeaders($version));
             $response = match ($method) {
@@ -220,7 +238,7 @@ class GhlClient
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
 
-        if ($this->setting?->isTokenExpired() && $this->setting->refresh_token) {
+        if ($this->token?->isTokenExpired() && $this->token->refresh_token) {
             $this->refreshToken();
         }
 
@@ -242,7 +260,7 @@ class GhlClient
             ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
             ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
 
-        if ($response->status() === 401 && $this->setting?->refresh_token) {
+        if ($response->status() === 401 && $this->token?->refresh_token) {
             $this->refreshToken();
             $headers['Authorization'] = "Bearer {$this->accessToken}";
             $response = Http::withHeaders($headers)
@@ -264,7 +282,8 @@ class GhlClient
         try {
             $authService = app(GhlAuthService::class);
             $this->setting = $authService->refreshAccessToken($this->setting);
-            $this->accessToken = $this->setting->access_token;
+            $this->token = $this->setting->token;
+            $this->accessToken = $this->token?->access_token;
         } catch (\Exception $e) {
             throw new \RuntimeException('GHL token refresh failed: '.$e->getMessage());
         }

@@ -202,7 +202,7 @@ class GhlBookingService
             // Text2Pay invoice will fail at checkout with "No valid payment method available."
             'liveMode' => false,
             'action' => 'send',
-            'userId' => $this->client->getSetting()?->user_id,
+            'userId' => $this->client->getUserId(),
         ];
 
         try {
@@ -295,7 +295,7 @@ class GhlBookingService
             // pay" email would be wrong. Card: 'send' — emails the customer
             // a real payment link, exactly like the booking Online flow.
             'action' => $isCash ? 'draft' : 'send',
-            'userId' => $this->client->getSetting()?->user_id,
+            'userId' => $this->client->getUserId(),
         ];
 
         $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
@@ -364,7 +364,7 @@ class GhlBookingService
         }
 
         $locationId = $this->client->getLocationId();
-        $userId = $this->client->getSetting()?->user_id;
+        $userId = $this->client->getUserId();
         if (! $locationId || ! $userId) {
             return;
         }

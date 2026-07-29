@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class EngageSetting extends Model
 {
@@ -11,42 +12,27 @@ class EngageSetting extends Model
 
     protected $fillable = [
         'tenant_id',
-        'location_id',
         'client_id',
         'client_secret',
         'api_version',
         'api_base_url',
         'timezone',
-        'user_id',
-        'company_id',
-        'api_key',
-        'authorization_code',
-        'access_token',
-        'refresh_token',
-        'token_expiry',
+        'scopes',
     ];
 
     protected $hidden = [
         'client_secret',
-        'api_key',
-        'access_token',
-        'refresh_token',
-        'authorization_code',
     ];
 
     protected function casts(): array
     {
         return [
-            'token_expiry' => 'datetime',
+            'scopes' => 'array',
         ];
     }
 
-    public function isTokenExpired(): bool
+    public function token(): HasOne
     {
-        if (! $this->token_expiry) {
-            return true;
-        }
-
-        return $this->token_expiry->isPast();
+        return $this->hasOne(EngageToken::class, 'engage_setting_id');
     }
 }
