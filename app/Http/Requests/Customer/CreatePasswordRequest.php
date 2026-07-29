@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Requests\Guest;
+namespace App\Http\Requests\Customer;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Password;
 
-class ChangePasswordRequest extends FormRequest
+class CreatePasswordRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -15,7 +15,7 @@ class ChangePasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'current_password' => ['required', 'string'],
+            'token' => ['required', 'string'],
             'password' => ['required', 'confirmed', Password::min(8)],
         ];
     }

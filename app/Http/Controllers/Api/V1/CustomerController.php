@@ -8,9 +8,9 @@ use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
-use App\Services\GuestAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -20,12 +20,12 @@ class CustomerController extends Controller
     public function __construct(
         private GhlService $ghlService,
         private CustomerService $customerService,
-        private GuestAccountService $guestAccountService,
+        private CustomerAccountService $customerAccountService,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
-        $query = Customer::with('guestUser')->where('tenant_id', $request->user()->tenant_id);
+        $query = Customer::with('customerAccount')->where('tenant_id', $request->user()->tenant_id);
 
         if ($request->search) {
             $query->where(function ($q) use ($request) {
@@ -65,12 +65,12 @@ class CustomerController extends Controller
             ]);
         }
 
-        // Still creates the linked guest portal account (so the Customers list's
-        // Role column shows "Guest (pending)", same as the public booking widget)
+        // Still creates the linked customer portal account (so the Customers list's
+        // Role column shows "Customer (pending)", same as the public booking widget)
         // but never emails it — a customer entered by staff hasn't opted into an
         // online account, so an unsolicited "verify your email" message would be
         // unwanted. They can still verify later (e.g. via Forgot Password).
-        $this->guestAccountService->ensureGuestAccount($customer, $request->validated(), sendEmail: false);
+        $this->customerAccountService->ensureCustomerAccount($customer, $request->validated(), sendEmail: false);
 
         return response()->json([
             'success' => true,
@@ -111,7 +111,7 @@ class CustomerController extends Controller
     public function destroy(Customer $customer): JsonResponse
     {
         $this->ghlService->deleteContactFromGhl($customer);
-        $this->guestAccountService->deleteGuestAccount($customer);
+        $this->customerAccountService->deleteCustomerAccount($customer);
         $customer->delete();
 
         return response()->json(['success' => true, 'message' => 'Customer deleted.']);

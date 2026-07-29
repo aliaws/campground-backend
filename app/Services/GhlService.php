@@ -498,7 +498,7 @@ class GhlService
 
     /**
      * Live-checks GHL for invoice payment when our local `ghl_invoice_status`
-     * hasn't caught up yet — self-heals the guest/staff invoice pages'
+     * hasn't caught up yet — self-heals the customer/staff invoice pages'
      * paid-status gating when the inbound InvoicePaid webhook never arrives
      * (e.g. no publicly reachable webhook URL configured for this
      * deployment, which is the common case in local dev). Cheap no-op once

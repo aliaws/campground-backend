@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify your account</title>
+    <title>Reset your password</title>
 </head>
 <body style="margin:0; padding:0; background-color:#f2f4f3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f2f4f3;">
@@ -22,28 +22,19 @@
                     <!-- Body -->
                     <tr>
                         <td style="padding:36px 32px 8px;">
-                            <h1 style="margin:0 0 16px; font-size:22px; line-height:1.3; color:#111827;">Your booking is confirmed &mdash; verify your email</h1>
+                            <p style="margin:0 0 4px; font-size:13px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#c97a2b;">Password reset</p>
+                            <h1 style="margin:0 0 16px; font-size:22px; line-height:1.3; color:#111827;">Reset your password</h1>
                             <p style="margin:0 0 20px; font-size:15px; color:#4b5563;">Hi {{ $customerName }},</p>
                             <p style="margin:0 0 24px; font-size:15px; color:#4b5563;">
-                                Your booking is confirmed in our system. Create a guest account so you can view your bookings, invoices, and manage your stay any time.
+                                We received a request to reset the password for your customer account. Click the button below to choose a new one.
                             </p>
-
-                            <!-- Code box -->
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
-                                <tr>
-                                    <td align="center" style="background-color:#f0f7f4; border:1px solid #d7e8e0; border-radius:12px; padding:20px;">
-                                        <p style="margin:0 0 8px; font-size:12px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#135846;">Your verification code</p>
-                                        <p style="margin:0; font-size:32px; font-weight:700; letter-spacing:0.3em; color:#111827; font-family: 'Courier New', monospace;">{{ $code }}</p>
-                                    </td>
-                                </tr>
-                            </table>
 
                             <!-- CTA button -->
                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
                                 <tr>
                                     <td align="center">
-                                        <a href="{{ $verifyUrl }}" style="display:inline-block; padding:13px 28px; background-color:#135846; color:#ffffff; text-decoration:none; border-radius:8px; font-size:15px; font-weight:600;">
-                                            Verify email &amp; continue
+                                        <a href="{{ $resetUrl }}" style="display:inline-block; padding:13px 28px; background-color:#135846; color:#ffffff; text-decoration:none; border-radius:8px; font-size:15px; font-weight:600;">
+                                            Reset password
                                         </a>
                                     </td>
                                 </tr>
@@ -51,19 +42,19 @@
 
                             <p style="margin:0 0 24px; font-size:13px; color:#9ca3af; text-align:center; word-break:break-all;">
                                 Or paste this link into your browser:<br>
-                                <a href="{{ $verifyUrl }}" style="color:#135846;">{{ $verifyUrl }}</a>
+                                <a href="{{ $resetUrl }}" style="color:#135846;">{{ $resetUrl }}</a>
                             </p>
 
-                            <!-- Steps -->
+                            <!-- Security note -->
                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb; border-radius:12px; margin:0 0 8px;">
                                 <tr>
                                     <td style="padding:20px 24px;">
-                                        <p style="margin:0 0 12px; font-size:13px; font-weight:600; color:#374151;">Next steps</p>
-                                        <ol style="margin:0; padding-left:18px; font-size:14px; color:#4b5563; line-height:1.8;">
-                                            <li>Open the link above (or paste it into your browser).</li>
-                                            <li>Enter the 6-digit verification code.</li>
-                                            <li>Create a password to activate your guest portal.</li>
-                                        </ol>
+                                        <p style="margin:0 0 12px; font-size:13px; font-weight:600; color:#374151;">For your security</p>
+                                        <ul style="margin:0; padding-left:18px; font-size:14px; color:#4b5563; line-height:1.8;">
+                                            <li>This link expires in {{ $ttlMinutes }} minutes.</li>
+                                            <li>It can only be used once.</li>
+                                            <li>If you didn't request this, no action is needed &mdash; your password stays unchanged.</li>
+                                        </ul>
                                     </td>
                                 </tr>
                             </table>
@@ -75,7 +66,7 @@
                         <td style="padding:24px 32px 32px;">
                             <hr style="border:none; border-top:1px solid #e5e7eb; margin:0 0 20px;">
                             <p style="margin:0; font-size:12px; color:#9ca3af; line-height:1.6;">
-                                If you did not make a booking, you can safely ignore this email.
+                                If you did not request a password reset, you can safely ignore this email.
                             </p>
                         </td>
                     </tr>

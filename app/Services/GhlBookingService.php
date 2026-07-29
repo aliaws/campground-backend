@@ -39,7 +39,7 @@ class GhlBookingService
      *                                  this call auto-generates (e.g. cash collected in person — the local
      *                                  transaction is marked paid separately by the caller).
      * @param  string|null  $recordPaymentAs  When set, the invoice this call auto-generates is immediately
-     *                                        recorded as paid (via this mode) instead of emailed — used when the guest
+     *                                        recorded as paid (via this mode) instead of emailed — used when the customer
      *                                        already paid via a separate Text2Pay invoice before staff/webhook confirmed
      *                                        the calendar slot, so they're never asked to pay twice for the same booking.
      *                                        Implies skipping the email regardless of $skipPaymentEmail.
@@ -151,8 +151,8 @@ class GhlBookingService
     }
 
     /**
-     * Create a standalone GHL "Text2Pay" invoice for a guest booking and persist
-     * its hosted payment URL — no calendar booking required. Used to let a guest pay
+     * Create a standalone GHL "Text2Pay" invoice for a customer booking and persist
+     * its hosted payment URL — no calendar booking required. Used to let a customer pay
      * immediately (e.g. via a QR code) without waiting for staff to confirm availability.
      */
     public function createText2PayInvoice(Booking $booking): void
@@ -443,7 +443,7 @@ class GhlBookingService
     {
         if ($localStatus === 'cancelled') {
             // Real calendar booking exists → DELETE calendars/services/bookings/{id}
-            // (GHL Delete Service Booking). Guest Text2Pay rows often have only an
+            // (GHL Delete Service Booking). Customer Text2Pay rows often have only an
             // invoice until paid, so also void that unpaid invoice so pay links die.
             if ($booking->ghl_booking_id) {
                 $this->cancelBooking($booking);
@@ -673,7 +673,7 @@ class GhlBookingService
     {
         $name = trim($name ?? '');
         if ($name === '') {
-            return ['Guest', ''];
+            return ['Customer', ''];
         }
 
         $parts = preg_split('/\s+/', $name, 2);

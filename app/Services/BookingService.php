@@ -104,7 +104,7 @@ class BookingService
      *
      * @param  bool  $autoConfirm  When true (staff-created, default), the booking is
      *                             immediately synced to GHL — except 'cash' payments, which are always created
-     *                             local-only (see $deferGhl below). When false (guest-submitted), it's created as
+     *                             local-only (see $deferGhl below). When false (customer-submitted), it's created as
      *                             a 'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
      */
     public function create(array $data, bool $autoConfirm = true): Booking
@@ -173,7 +173,7 @@ class BookingService
     }
 
     /**
-     * Turns a guest-submitted 'requested' booking into a real one: syncs the
+     * Turns a customer-submitted 'requested' booking into a real one: syncs the
      * contact to GHL, creates the GHL booking + invoice (which emails the payment
      * link), marks it confirmed, and creates the local transaction record. This is
      * the ONLY path that should ever move a booking out of 'requested'.
@@ -192,11 +192,11 @@ class BookingService
     }
 
     /**
-     * Auto-confirm a guest booking whose Text2Pay invoice was just paid (called from
+     * Auto-confirm a customer booking whose Text2Pay invoice was just paid (called from
      * the GHL webhook handler, `GhlService::applyInvoiceStatus()`). Creates the real GHL
      * calendar booking — same as confirm() — but records the already-collected payment on
      * the booking's auto-generated invoice instead of emailing a duplicate payment request,
-     * and does NOT create a second Transaction (the one from guest submission was already
+     * and does NOT create a second Transaction (the one from customer submission was already
      * marked paid by the webhook handler before this runs).
      *
      * No-op if the booking isn't 'requested' anymore — keeps this safe to call from a

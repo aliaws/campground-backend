@@ -1,11 +1,10 @@
 <?php
 
-namespace App\Http\Requests\Guest;
+namespace App\Http\Requests\Customer;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rules\Password;
 
-class CreatePasswordRequest extends FormRequest
+class VerifyCodeRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -16,7 +15,7 @@ class CreatePasswordRequest extends FormRequest
     {
         return [
             'token' => ['required', 'string'],
-            'password' => ['required', 'confirmed', Password::min(8)],
+            'code' => ['required', 'string', 'size:6'],
         ];
     }
 }

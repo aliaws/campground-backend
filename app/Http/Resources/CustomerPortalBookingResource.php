@@ -5,8 +5,8 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** Authenticated guest portal booking payload. */
-class GuestPortalBookingResource extends JsonResource
+/** Authenticated customer portal booking payload. */
+class CustomerPortalBookingResource extends JsonResource
 {
     public function toArray(Request $request): array
     {

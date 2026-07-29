@@ -35,6 +35,10 @@ class UpdateProductRequest extends FormRequest
             'quantity' => ['nullable', 'integer', 'min:0'],
             'category_ids' => ['nullable', 'array'],
             'category_ids.*' => ['string', 'exists:categories,id'],
+            'amenity_ids' => ['nullable', 'array'],
+            'amenity_ids.*' => ['string', 'exists:amenities,id'],
+            'feature_ids' => ['nullable', 'array'],
+            'feature_ids.*' => ['string', 'exists:features,id'],
         ];
     }
 }

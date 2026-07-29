@@ -59,7 +59,7 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['rentals', 'defaultRental', 'categories']);
+        $product->load(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
 
         try {
             $details = $this->gateway->fetchListingBundle($product);

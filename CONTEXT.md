@@ -33,7 +33,7 @@ A campground vacation booking POS with GoHighLevel (GHL) CRM integration. Everyt
 ```
 app/
 ├── Http/
-│   ├── Controllers/Api/V1/          → Thin controllers (+ Public/ for guest-facing endpoints)
+│   ├── Controllers/Api/V1/          → Thin controllers (+ Public/ for customer-facing endpoints)
 │   ├── Requests/                     → FormRequest validation
 │   └── Resources/                    → API Resources (JSON shape)
 ├── Integrations/GHL/
@@ -81,7 +81,7 @@ app/
 }
 ```
 
-**Important gotcha — two "price" systems that look related but aren't**: `ProductPrice` (`product_prices` table, the admin form's generic "Pricing" tab, `productsApi.addPrice/updatePrice`) is a **separate, independent** field from `RentalPricingRule`. `BookingPriceCalculator::quote()` reads `$product->pricing_rule` (→ `RentalPricingRule`) **first**, and only falls back to `ProductPrice.amount` when no pricing rule exists at all. Editing the generic "Pricing" tab for an **already GHL-synced** rental has **zero effect** on what a guest is actually charged — it only affects the GHL payments-catalog display price. The admin form (`ProductsManager.tsx`) now has a distinct "Rental Base Price" control in the Campsite Details tab, bound to `pricing_rule.base_price`, which is what actually needs editing to change a booking's price.
+**Important gotcha — two "price" systems that look related but aren't**: `ProductPrice` (`product_prices` table, the admin form's generic "Pricing" tab, `productsApi.addPrice/updatePrice`) is a **separate, independent** field from `RentalPricingRule`. `BookingPriceCalculator::quote()` reads `$product->pricing_rule` (→ `RentalPricingRule`) **first**, and only falls back to `ProductPrice.amount` when no pricing rule exists at all. Editing the generic "Pricing" tab for an **already GHL-synced** rental has **zero effect** on what a customer is actually charged — it only affects the GHL payments-catalog display price. The admin form (`ProductsManager.tsx`) now has a distinct "Rental Base Price" control in the Campsite Details tab, bound to `pricing_rule.base_price`, which is what actually needs editing to change a booking's price.
 
 **Same pattern, "categories"**: our own `Category` model (`categories` table, `product_categories` pivot, `engage_collection_id` synced to GHL "collections" via `GhlProductSyncService`) is a **completely separate, disconnected** system from `Rental.ghl_service_category_id` (GHL's own calendar-side "service category," pulled passively, never linked to our `Category` table, never synced anywhere). As of this writing, **0 of 38 rentals have a local Category assigned** — the admin Category picker has simply never been used for rentals. Known, deliberately not reconciled (would need more GHL API work); flagged as a real gap, not fixed.
 
@@ -98,7 +98,7 @@ app/
 // base_listings_only=1: additionally excludes rows where rentals.parent_product_id is set
 //   (i.e. hides variants from the top-level list — they're shown nested instead)
 ```
-`ProductService::listServices()` (customer storefront) additionally requires `whereNotNull('ghl_service_id')` on top of this — a real calendar link is required there since a guest booking a local-only unsynced rental would fail at invoice time.
+`ProductService::listServices()` (customer storefront) additionally requires `whereNotNull('ghl_service_id')` on top of this — a real calendar link is required there since a customer booking a local-only unsynced rental would fail at invoice time.
 
 **Rejected alternative — do not reintroduce this**: at one point the rule became "`industry_type='rental'` **OR** `ghl_service_id IS NOT NULL`", to include "300 - Forest Edge Tent" (a real bookable campsite GHL happens to tag `industryType="service"`, confirmed live) without hand-correcting its data. This was reverted: it's the wrong lever to pull for a one-item edge case, because the *real* problem it caused was scope creep in the other direction — a separate backfill (see below) had tagged 25 unrelated local-only demo products as `industry_type='rental'` too, and the `ghl_service_id`-OR-clause did nothing to address that; the two issues got tangled together across several turns before being untangled. **The correct fix for a GHL-mistagged item is to correct that item's own `industry_type` value directly** (a one-time, explicit, reviewable data correction — same pattern as any other backfill in this file), never to loosen the query for everything.
 
@@ -122,7 +122,7 @@ Frontend: `ProductsManager.tsx` (shared component, `mode: 'goods' | 'services'`)
   - `quote()` — **never throws on insufficient stock**, just adds `remaining_quantity`/`is_available: bool` to its returned array, so the UI can show live status ("2 of 3 available" / "Fully booked") instead of a hard error while previewing.
 - `assertDurationAllowed()` — still throws in `quote()` for min/max stay violations (unrelated to availability, always a hard validation).
 
-Frontend: `usePublicServiceQuote`/`useServiceQuote` responses (typed via `BookingQuote` in `types/booking.ts`) now include `remaining_quantity`/`is_available`. Both the customer rental page (`app/(customer)/rentals/[id]/page.tsx`) and the POS booking modal (`app/pos/services/[id]/page.tsx`) show an inline "✓ N of M available" / "✕ Fully booked for these dates" message and cap the quantity stepper by the live `remaining_quantity` (falling back to the product's static `maxQuantity` before a quote exists), and disable the booking button when `is_available === false`. Check-in/check-out times (`booking_start_time`/`booking_end_time`) are displayed (not enforced) on both booking pages and the guest confirmation page (`app/(customer)/rentals/confirmation/[bookingId]/page.tsx`), via `GuestBookingResource`.
+Frontend: `usePublicServiceQuote`/`useServiceQuote` responses (typed via `BookingQuote` in `types/booking.ts`) now include `remaining_quantity`/`is_available`. Both the customer rental page (`app/(customer)/rentals/[id]/page.tsx`) and the POS booking modal (`app/pos/services/[id]/page.tsx`) show an inline "✓ N of M available" / "✕ Fully booked for these dates" message and cap the quantity stepper by the live `remaining_quantity` (falling back to the product's static `maxQuantity` before a quote exists), and disable the booking button when `is_available === false`. Check-in/check-out times (`booking_start_time`/`booking_end_time`) are displayed (not enforced) on both booking pages and the customer confirmation page (`app/(customer)/rentals/confirmation/[bookingId]/page.tsx`), via `CustomerBookingResource`.
 
 **Deliberately not built** (discussed and declined for now): pooled stock across variants (each variant keeps its own independent `available_quantity` — a "Regular" booking never affects "Premium"'s count) and a full blocked-dates calendar picker (current UX is a live message after picking plain dates, not a calendar with greyed-out days).
 
@@ -130,17 +130,17 @@ Frontend: `usePublicServiceQuote`/`useServiceQuote` responses (typed via `Bookin
 
 Two distinct creation paths through `BookingService::create(array $data, bool $autoConfirm = true)`:
 - **Staff-created** (internal POS, `autoConfirm: true`, default): immediately synced to GHL — `status: 'pending'` then a real `GhlBookingService::createBooking()` call (contact sync, calendar booking, invoice, payment email) happens inline. Unchanged, original behavior.
-- **Guest-submitted** (public booking form, `autoConfirm: false`): created as `status: 'requested'`, purely local for the *booking* itself (no GHL calendar slot yet) — but **payment is available immediately**: `GhlBookingService::createText2PayInvoice()` + `TransactionService::autoCreateFromBooking()` run right at submission time (wrapped in try/catch — a GHL hiccup logs and never blocks the booking request from being recorded).
+- **Customer-submitted** (public booking form, `autoConfirm: false`): created as `status: 'requested'`, purely local for the *booking* itself (no GHL calendar slot yet) — but **payment is available immediately**: `GhlBookingService::createText2PayInvoice()` + `TransactionService::autoCreateFromBooking()` run right at submission time (wrapped in try/catch — a GHL hiccup logs and never blocks the booking request from being recorded).
 
-**Guest payment via QR (Text2Pay).** GHL's `POST invoices/text2pay` endpoint (see `github.com/GoHighLevel/highlevel-api-docs`, `apps/invoices.json`) creates/sends a standalone invoice and returns `invoiceUrl` — a hosted payment page — without needing any calendar booking. `GhlBookingService::createText2PayInvoice()` calls it (only needs `name`/`currency`/`amount`/`qty` per item, no `ghlPaymentsProductId()`/`ghlBookingServiceId()` linkage) and persists `ghl_invoice_id` / `ghl_invoice_number` / `ghl_invoice_status` / `ghl_invoice_url` onto the `Booking`. `GuestBookingResource` exposes these as `payment_url` / `payment_status`; the customer confirmation page renders `payment_url` as a QR code (`qrcode.react`) plus a "Pay Now" link. `useGuestBooking` polls every 5s until `payment_status === 'paid'`.
+**Customer payment via QR (Text2Pay).** GHL's `POST invoices/text2pay` endpoint (see `github.com/GoHighLevel/highlevel-api-docs`, `apps/invoices.json`) creates/sends a standalone invoice and returns `invoiceUrl` — a hosted payment page — without needing any calendar booking. `GhlBookingService::createText2PayInvoice()` calls it (only needs `name`/`currency`/`amount`/`qty` per item, no `ghlPaymentsProductId()`/`ghlBookingServiceId()` linkage) and persists `ghl_invoice_id` / `ghl_invoice_number` / `ghl_invoice_status` / `ghl_invoice_url` onto the `Booking`. `CustomerBookingResource` exposes these as `payment_url` / `payment_status`; the customer confirmation page renders `payment_url` as a QR code (`qrcode.react`) plus a "Pay Now" link. `useCustomerBooking` polls every 5s until `payment_status === 'paid'`.
 
-**Update — paying now auto-confirms the booking too (confirmed with the user; this reverses the "don't auto-confirm" note that used to be here).** `GhlService::applyInvoiceStatus()` — after flipping the booking's `Transaction`(s) to `paid` — now also calls `BookingService::autoConfirmAfterPayment($booking)` (resolved lazily via `app(BookingService::class)` inside the method, **not** constructor-injected, to avoid a circular dependency: `GhlService` ← `GhlBookingService` ← `BookingService`) whenever the booking is still `requested`. That method is a no-op if the booking was already confirmed/cancelled (webhook-retry safe), otherwise it calls `GhlBookingService::createBooking($booking, skipPaymentEmail: true)` (creates the real GHL calendar booking, same as manual `confirm()`) and sets `status: 'confirmed'` — but does **not** call `TransactionService::autoCreateFromBooking()` again, since the Transaction from guest submission already exists and was just marked paid.
+**Update — paying now auto-confirms the booking too (confirmed with the user; this reverses the "don't auto-confirm" note that used to be here).** `GhlService::applyInvoiceStatus()` — after flipping the booking's `Transaction`(s) to `paid` — now also calls `BookingService::autoConfirmAfterPayment($booking)` (resolved lazily via `app(BookingService::class)` inside the method, **not** constructor-injected, to avoid a circular dependency: `GhlService` ← `GhlBookingService` ← `BookingService`) whenever the booking is still `requested`. That method is a no-op if the booking was already confirmed/cancelled (webhook-retry safe), otherwise it calls `GhlBookingService::createBooking($booking, skipPaymentEmail: true)` (creates the real GHL calendar booking, same as manual `confirm()`) and sets `status: 'confirmed'` — but does **not** call `TransactionService::autoCreateFromBooking()` again, since the Transaction from customer submission already exists and was just marked paid.
 
-**Why `skipPaymentEmail` matters**: `createBooking()`'s `calendars/bookings/create` call always auto-generates its *own* invoice as a side effect (GHL's rental API has no way to book a calendar slot without one) and overwrites `ghl_invoice_id` with it — but the guest already paid the *original* Text2Pay invoice. Emailing them a payment link for this new one would ask them to pay twice. `skipPaymentEmail: true` makes `createBooking()` call `recordInvoicePayment()` on the new invoice immediately (marking it settled with the booking's `total_amount`) instead of `sendInvoicePaymentEmail()`. Accepted tradeoff, unchanged from before: a guest can still pay (and now auto-confirm) before staff has manually verified availability — `confirm()`/this auto-confirm path do not re-check `remainingStock()`.
+**Why `skipPaymentEmail` matters**: `createBooking()`'s `calendars/bookings/create` call always auto-generates its *own* invoice as a side effect (GHL's rental API has no way to book a calendar slot without one) and overwrites `ghl_invoice_id` with it — but the customer already paid the *original* Text2Pay invoice. Emailing them a payment link for this new one would ask them to pay twice. `skipPaymentEmail: true` makes `createBooking()` call `recordInvoicePayment()` on the new invoice immediately (marking it settled with the booking's `total_amount`) instead of `sendInvoicePaymentEmail()`. Accepted tradeoff, unchanged from before: a customer can still pay (and now auto-confirm) before staff has manually verified availability — `confirm()`/this auto-confirm path do not re-check `remainingStock()`.
 
 The `InvoicePaid`/`InvoicePartiallyPaid` webhook matching itself (`GhlService::applyInvoiceStatus()`, matches on `Booking::ghl_invoice_id`) needed no changes — it already flips any non-`paid` `Transaction` on the booking to `paid` regardless of which invoice-creation path (booking-linked or Text2Pay) produced that `ghl_invoice_id`.
 
-`app/pos/bookings/page.tsx` shows a separate **Payment** column (`Paid`/`Unpaid` badge, derived from `transactions[].payment_status`) alongside the booking **Status** column — once a guest-paid booking auto-confirms, the row just shows `Status: confirmed` / `Payment: Paid` with no action needed. If a paid booking is still momentarily `requested` (webhook hasn't landed yet), the Actions column shows "Auto-confirming…" instead of a clickable Confirm button, since manually confirming it would trigger the exact same `createBooking()` GHL round trip a second time.
+`app/pos/bookings/page.tsx` shows a separate **Payment** column (`Paid`/`Unpaid` badge, derived from `transactions[].payment_status`) alongside the booking **Status** column — once a customer-paid booking auto-confirms, the row just shows `Status: confirmed` / `Payment: Paid` with no action needed. If a paid booking is still momentarily `requested` (webhook hasn't landed yet), the Actions column shows "Auto-confirming…" instead of a clickable Confirm button, since manually confirming it would trigger the exact same `createBooking()` GHL round trip a second time.
 
 `BookingService::confirm(Booking)` — the **only** path that turns a `requested` booking real: calls `GhlBookingService::createBooking()` (contact sync + booking + invoice + payment email, NOT wrapped in try/catch — failures must surface to staff, unlike the staff-created path which logs and swallows GHL errors), sets `status: 'confirmed'`, creates the `Transaction`. Triggered by the "Confirm" button in `app/pos/bookings/page.tsx`, hitting `POST /bookings/{id}/confirm`.
 
@@ -157,7 +157,7 @@ Guard: `BookingService::updateStatus()` (the generic `PATCH /bookings/{id}/statu
 | Sync a product to GHL | `GhlProductSyncService::syncProductToGhl()` | Pushes `collectionIds` from local `Category.engage_collection_id` |
 | Create/sync a customer contact | `GhlService::syncContactToGhl()` | Called lazily inside `GhlBookingService::createBooking()`, only if `ghl_contact_id` is null |
 | Create a real booking + invoice | `GhlBookingService::createBooking()` | The one method that does contact sync + calendar booking + invoice + payment email; called by both the staff auto-confirm path and `BookingService::confirm()` |
-| Create a standalone payment link (no calendar booking) | `GhlBookingService::createText2PayInvoice()` | `POST invoices/text2pay`; called at guest-submission time so a QR/payment link exists immediately, decoupled from staff confirming availability |
+| Create a standalone payment link (no calendar booking) | `GhlBookingService::createText2PayInvoice()` | `POST invoices/text2pay`; called at customer-submission time so a QR/payment link exists immediately, decoupled from staff confirming availability |
 | Update/cancel an existing GHL booking | `GhlBookingService::updateBookingStatus()` | No-op if `ghl_booking_id` is null — never creates a booking, only touches an existing one |
 
 ---
@@ -165,7 +165,7 @@ Guard: `BookingService::updateStatus()` (the generic `PATCH /bookings/{id}/statu
 ## Frontend Architecture (Next.js 16, React 19)
 
 ### Route groups
-- `app/(customer)/...` — the guest-facing booking site (site root, own layout with header/footer nav — Gallery/About/Contact/Login). Deliberately does not use `AppLayout`.
+- `app/(customer)/...` — the customer-facing booking site (site root, own layout with header/footer nav — Gallery/About/Contact/Login). Deliberately does not use `AppLayout`.
 - `app/pos/...` — internal staff POS (dashboard, bookings, services, transactions, campsite-map, staff), uses `AppLayout` + `Navbar` (blue theme).
 - `app/admin/...` — admin panel (Products, Services, Customers, Configurations, Engage Settings), uses `AppLayout` + `Sidebar`.
 - Auth guard (`AppLayout`) is client-side only — no `middleware.ts` exists. Reads `AuthContext` (token in `localStorage('auth_token')`), renders `null` while loading/unauthenticated, redirects via `useEffect`. No content flash, but also no server-side gate.
@@ -175,12 +175,12 @@ Guard: `BookingService::updateStatus()` (the generic `PATCH /bookings/{id}/statu
 - `components/ui/AppLayout.tsx`, `Navbar.tsx`, `Sidebar.tsx` — POS/admin chrome.
 - `app/(customer)/layout.tsx` — customer site chrome (sticky header, active-pill nav, mobile hamburger, deep-green multi-column footer). Whole frontend restyled 2026-07-11 to the Travl template design system (red `#E23428` primary / green `#135846` secondary, Roboto, CSS-variable tokens in `app/globals.css` — see frontend CLAUDE.md "Design system" note).
 
-### Booking flow (guest)
+### Booking flow (customer)
 ```
 / (customer home, listings)
   → /rentals/{id}                         Pick variant, dates, quantity
       live quote via usePublicServiceQuote (now includes remaining_quantity/is_available)
-      → /rentals/checkout                 Guest enters name/email/phone
+      → /rentals/checkout                 Customer enters name/email/phone
           → POST /public/bookings     autoConfirm=false → status: 'requested'
                                            + Text2Pay invoice created inline (see below)
           → /rentals/confirmation/{id}    Shows QR code + "Pay Now" (payment_url) immediately;
@@ -188,12 +188,12 @@ Guard: `BookingService::updateStatus()` (the generic `PATCH /bookings/{id}/statu
                                            → GHL webhook (InvoicePaid) auto-confirms:
                                              real GHL booking created, status → 'confirmed'
 ```
-If the guest never pays, the booking just sits as `requested` until staff manually reviews and calls `POST /bookings/{id}/confirm` in `/pos/bookings` (same underlying `createBooking()` GHL call, just triggered by staff instead of the webhook).
+If the customer never pays, the booking just sits as `requested` until staff manually reviews and calls `POST /bookings/{id}/confirm` in `/pos/bookings` (same underlying `createBooking()` GHL call, just triggered by staff instead of the webhook).
 
 ### Types
 - `types/booking.ts` — `BookingQuote` (now includes `remaining_quantity`, `is_available`), `QuoteParams`.
 - `types/product.ts` — `Product` (includes `parent_product_id`, `variant_name`, `service_variants?: Product[]`, `pricing_rule: PricingRule | null`).
-- `types/guestBooking.ts` — `GuestBooking` (now includes `booking_start_time`/`booking_end_time`, `payment_url`, `payment_status`).
+- `types/customerBooking.ts` — `CustomerBooking` (now includes `booking_start_time`/`booking_end_time`, `payment_url`, `payment_status`).
 - `types/booking.ts` — `Booking.status`: `'requested' | 'pending' | 'confirmed' | 'cancelled'`.
 
 ---

@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Requests\Guest;
+namespace App\Http\Requests\Customer;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class ForgotPasswordRequest extends FormRequest
+class ResendVerificationRequest extends FormRequest
 {
     public function authorize(): bool
     {

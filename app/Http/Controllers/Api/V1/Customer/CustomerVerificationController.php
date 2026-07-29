@@ -1,23 +1,23 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1\Guest;
+namespace App\Http\Controllers\Api\V1\Customer;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Guest\RegisterGuestRequest;
-use App\Http\Requests\Guest\ResendVerificationRequest;
-use App\Http\Requests\Guest\VerifyCodeRequest;
+use App\Http\Requests\Customer\RegisterCustomerRequest;
+use App\Http\Requests\Customer\ResendVerificationRequest;
+use App\Http\Requests\Customer\VerifyCodeRequest;
 use App\Http\Resources\UserResource;
-use App\Services\GuestAccountService;
+use App\Services\CustomerAccountService;
 use Illuminate\Http\JsonResponse;
 
-class GuestVerificationController extends Controller
+class CustomerVerificationController extends Controller
 {
-    public function __construct(private GuestAccountService $guestAccounts) {}
+    public function __construct(private CustomerAccountService $customerAccounts) {}
 
-    public function register(RegisterGuestRequest $request): JsonResponse
+    public function register(RegisterCustomerRequest $request): JsonResponse
     {
         try {
-            $this->guestAccounts->register($request->validated());
+            $this->customerAccounts->register($request->validated());
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,
@@ -36,7 +36,7 @@ class GuestVerificationController extends Controller
     public function verifyCode(VerifyCodeRequest $request): JsonResponse
     {
         try {
-            $user = $this->guestAccounts->verifyCode(
+            $user = $this->customerAccounts->verifyCode(
                 $request->validated('token'),
                 $request->validated('code')
             );
@@ -61,7 +61,7 @@ class GuestVerificationController extends Controller
     public function resend(ResendVerificationRequest $request): JsonResponse
     {
         try {
-            $this->guestAccounts->resendVerification($request->validated('email'));
+            $this->customerAccounts->resendVerification($request->validated('email'));
         } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'success' => false,

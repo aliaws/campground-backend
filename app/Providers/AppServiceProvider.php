@@ -25,30 +25,30 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        RateLimiter::for('guest-browse', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
-        RateLimiter::for('guest-booking', fn (Request $request) => Limit::perMinute(5)->by($request->ip()));
+        RateLimiter::for('customer-browse', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
+        RateLimiter::for('customer-booking', fn (Request $request) => Limit::perMinute(5)->by($request->ip()));
 
-        RateLimiter::for('guest-verify', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
+        RateLimiter::for('customer-verify', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
 
-        RateLimiter::for('guest-register', function (Request $request) {
+        RateLimiter::for('customer-register', function (Request $request) {
             $email = strtolower((string) $request->input('email'));
 
             return Limit::perHour(5)->by($request->ip().'|'.$email);
         });
 
-        RateLimiter::for('guest-resend-verification', function (Request $request) {
+        RateLimiter::for('customer-resend-verification', function (Request $request) {
             $email = strtolower((string) $request->input('email'));
 
             return Limit::perHour(5)->by($request->ip().'|'.$email);
         });
 
-        RateLimiter::for('guest-forgot-password', function (Request $request) {
+        RateLimiter::for('customer-forgot-password', function (Request $request) {
             $email = strtolower((string) $request->input('email', $request->ip()));
 
             return Limit::perHour(3)->by($request->ip().'|'.$email);
         });
 
-        RateLimiter::for('guest-change-password', function (Request $request) {
+        RateLimiter::for('customer-change-password', function (Request $request) {
             $id = $request->user()?->id ?? $request->ip();
 
             return Limit::perMinute(10)->by((string) $id);

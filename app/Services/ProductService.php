@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 
 class ProductService
 {
-    private const EAGER = ['categories', 'rentals', 'defaultRental'];
+    private const EAGER = ['categories', 'rentals', 'defaultRental', 'amenities', 'features'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -80,12 +80,26 @@ class ProductService
     public function update(Product $product, array $data): Product
     {
         $categoryIds = $data['category_ids'] ?? null;
+        $amenityIds = $data['amenity_ids'] ?? null;
+        $featureIds = $data['feature_ids'] ?? null;
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
 
         $product->update($data);
 
         if ($categoryIds !== null) {
             $product->categories()->sync($categoryIds);
+        }
+
+        // Amenities/features are a Services-module concept (see service_amenities/
+        // service_features) — syncing is harmless to send for a non-rental product,
+        // but the goods form never sends these keys, so this only ever fires from
+        // the Manage Service edit form in practice.
+        if ($amenityIds !== null) {
+            $product->amenities()->sync($amenityIds);
+        }
+
+        if ($featureIds !== null) {
+            $product->features()->sync($featureIds);
         }
 
         return $product->fresh()->load(self::EAGER);
@@ -101,9 +115,10 @@ class ProductService
      * an uppercase-alnum-and-dash-only string, since this feeds directly
      * into a Code 39 barcode (rendered client-side), which doesn't support
      * lowercase letters or most punctuation. Retries on the rare per-tenant
-     * collision rather than trusting randomness alone.
+     * collision rather than trusting randomness alone. Public so
+     * GhlProductSyncService can assign one to a GHL-pulled stub product too.
      */
-    private function generateUniqueSku(string $tenantId, string $name): string
+    public function generateUniqueSku(string $tenantId, string $name): string
     {
         $base = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name));
         $base = substr($base, 0, 6) ?: 'SKU';
@@ -114,6 +129,28 @@ class ProductService
         } while ($exists);
 
         return $candidate;
+    }
+
+    /**
+     * Backfills a SKU (and therefore a printable barcode, generated
+     * client-side from the SKU) onto every non-rental goods product in the
+     * tenant that doesn't have one yet — e.g. products created via a GHL
+     * pull before this feature existed, or via any path that bypassed
+     * create()'s auto-generation. Rentals/services are never touched: they
+     * have no SKU/barcode concept (see Product/ProductRental docs).
+     */
+    public function generateMissingSkus(string $tenantId): array
+    {
+        $products = Product::byTenant($tenantId)
+            ->whereNull('product_rental_id')
+            ->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', ''))
+            ->get();
+
+        foreach ($products as $product) {
+            $product->update(['sku' => $this->generateUniqueSku($tenantId, $product->name)]);
+        }
+
+        return ['updated' => $products->count()];
     }
 
     /** Exact-match SKU lookup for the Product Sales page's barcode scanner. */
@@ -143,7 +180,7 @@ class ProductService
         $query = Product::byTenant($filters['tenant_id'])
             ->whereNotNull('product_rental_id')
             ->where('status', 'active')
-            ->with(['rentals', 'defaultRental', 'categories']);
+            ->with(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {

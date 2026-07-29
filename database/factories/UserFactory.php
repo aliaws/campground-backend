@@ -46,7 +46,7 @@ class UserFactory extends Factory
         ]);
     }
 
-    public function guestPendingVerification(?Customer $customer = null): static
+    public function customerPendingVerification(?Customer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
             $linked = $customer ?? Customer::factory()->create([
@@ -56,24 +56,24 @@ class UserFactory extends Factory
             ]);
 
             return [
-                'role' => 'guest',
+                'role' => 'customer',
                 'password' => null,
                 'customer_id' => $linked->id,
                 'tenant_id' => $linked->tenant_id,
                 'email' => $linked->email,
                 'name' => $linked->name,
-                'guest_status' => 'pending_verification',
-                'guest_registered_at' => now(),
-                'guest_action_type' => 'email_verification',
-                'guest_action_expires_at' => now()->addMinutes(30),
-                'guest_action_token_hash' => hash('sha256', 'test-token'),
-                'guest_verification_code_hash' => Hash::make('123456'),
-                'guest_verification_attempts' => 0,
+                'customer_status' => 'pending_verification',
+                'customer_registered_at' => now(),
+                'customer_account_type' => 'email_verification',
+                'customer_account_expires_at' => now()->addMinutes(30),
+                'customer_account_token_hash' => hash('sha256', 'test-token'),
+                'customer_verification_code_hash' => Hash::make('123456'),
+                'customer_verification_attempts' => 0,
             ];
         });
     }
 
-    public function guestVerified(?Customer $customer = null): static
+    public function customerVerified(?Customer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
             $linked = $customer ?? Customer::factory()->create([
@@ -83,25 +83,25 @@ class UserFactory extends Factory
             ]);
 
             return [
-                'role' => 'guest',
+                'role' => 'customer',
                 'password' => null,
                 'customer_id' => $linked->id,
                 'tenant_id' => $linked->tenant_id,
                 'email' => $linked->email,
                 'name' => $linked->name,
-                'guest_status' => 'verified',
-                'guest_registered_at' => now()->subHour(),
-                'guest_verified_at' => now(),
-                'guest_action_type' => 'email_verification',
-                'guest_action_expires_at' => now()->addMinutes(30),
-                'guest_action_token_hash' => hash('sha256', 'test-token'),
-                'guest_verification_code_hash' => null,
-                'guest_verification_attempts' => 0,
+                'customer_status' => 'verified',
+                'customer_registered_at' => now()->subHour(),
+                'customer_verified_at' => now(),
+                'customer_account_type' => 'email_verification',
+                'customer_account_expires_at' => now()->addMinutes(30),
+                'customer_account_token_hash' => hash('sha256', 'test-token'),
+                'customer_verification_code_hash' => null,
+                'customer_verification_attempts' => 0,
             ];
         });
     }
 
-    public function guestActive(?Customer $customer = null): static
+    public function customerActive(?Customer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
             $linked = $customer ?? Customer::factory()->create([
@@ -111,20 +111,20 @@ class UserFactory extends Factory
             ]);
 
             return [
-                'role' => 'guest',
+                'role' => 'customer',
                 'password' => static::$password ??= Hash::make('password'),
                 'customer_id' => $linked->id,
                 'tenant_id' => $linked->tenant_id,
                 'email' => $linked->email,
                 'name' => $linked->name,
-                'guest_status' => 'active',
-                'guest_registered_at' => now()->subDay(),
-                'guest_verified_at' => now()->subDay(),
-                'guest_action_token_hash' => null,
-                'guest_action_type' => null,
-                'guest_action_expires_at' => null,
-                'guest_verification_code_hash' => null,
-                'guest_verification_attempts' => 0,
+                'customer_status' => 'active',
+                'customer_registered_at' => now()->subDay(),
+                'customer_verified_at' => now()->subDay(),
+                'customer_account_token_hash' => null,
+                'customer_account_type' => null,
+                'customer_account_expires_at' => null,
+                'customer_verification_code_hash' => null,
+                'customer_verification_attempts' => 0,
             ];
         });
     }

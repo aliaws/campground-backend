@@ -19,6 +19,7 @@ class ProductRentalResource extends JsonResource
             'map_position' => $this->map_position,
             'ghl_id' => $this->ghl_id,
             'ghl_product_id' => $this->ghl_product_id,
+            'listing_price' => $this->listing_price !== null ? (float) $this->listing_price : null,
             'product_id' => $this->product_id,
             'service_category_id' => $this->service_category_id,
             'service_id' => $this->service_id,

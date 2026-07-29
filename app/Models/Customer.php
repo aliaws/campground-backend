@@ -45,8 +45,8 @@ class Customer extends Model
         return $this->hasMany(Transaction::class);
     }
 
-    /** The guest portal login linked to this customer, if one has been created (see GuestAccountService::ensureGuestAccount()). */
-    public function guestUser(): HasOne
+    /** The customer portal login linked to this customer, if one has been created (see CustomerAccountService::ensureCustomerAccount()). */
+    public function customerAccount(): HasOne
     {
         return $this->hasOne(User::class, 'customer_id');
     }

@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1\Guest;
+namespace App\Http\Controllers\Api\V1\Customer;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Guest\UpdateGuestProfileRequest;
-use App\Http\Resources\GuestPortalBookingResource;
+use App\Http\Requests\Customer\UpdateCustomerProfileRequest;
+use App\Http\Resources\CustomerPortalBookingResource;
 use App\Http\Resources\UserResource;
 use App\Models\Booking;
 use App\Models\Customer;
@@ -16,7 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
-class GuestPortalController extends Controller
+class CustomerPortalController extends Controller
 {
     public function __construct(
         private BookingService $bookingService,
@@ -37,9 +37,21 @@ class GuestPortalController extends Controller
             'tenant_id' => $request->user()->tenant_id,
         ]);
 
+        // Same self-heal as bookingShow()/BookingController::index() — without
+        // this, "My bookings" can show a paid invoice next to a status that's
+        // still stuck "requested" until the customer happens to open that one
+        // booking's own detail page.
+        $bookings->getCollection()->transform(function (Booking $booking) {
+            $reconciled = $this->ghlService->reconcileInvoiceStatus($booking);
+
+            return $reconciled->relationLoaded('customer')
+                ? $reconciled
+                : $reconciled->load(['customer', 'product', 'productRental', 'transactions']);
+        });
+
         return response()->json([
             'success' => true,
-            'data' => GuestPortalBookingResource::collection($bookings),
+            'data' => CustomerPortalBookingResource::collection($bookings),
             'message' => 'Bookings retrieved.',
         ]);
     }
@@ -50,11 +62,17 @@ class GuestPortalController extends Controller
             return $response;
         }
 
+        // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
+        // publicly reachable webhook URL in local dev) — same pattern as
+        // BookingController::show() for the staff side. Without this, a
+        // customer who pays via the GHL-hosted invoice page can come back to
+        // their own booking card and still see "Unpaid" indefinitely.
+        $booking = $this->ghlService->reconcileInvoiceStatus($booking);
         $booking->loadMissing('customer', 'product', 'productRental', 'transactions');
 
         return response()->json([
             'success' => true,
-            'data' => new GuestPortalBookingResource($booking),
+            'data' => new CustomerPortalBookingResource($booking),
             'message' => 'Booking retrieved.',
         ]);
     }
@@ -97,7 +115,7 @@ class GuestPortalController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => new GuestPortalBookingResource($booking),
+            'data' => new CustomerPortalBookingResource($booking),
             'message' => 'Booking cancelled.',
         ]);
     }
@@ -117,7 +135,7 @@ class GuestPortalController extends Controller
         ]);
     }
 
-    public function updateProfile(UpdateGuestProfileRequest $request): JsonResponse
+    public function updateProfile(UpdateCustomerProfileRequest $request): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -138,7 +156,7 @@ class GuestPortalController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer);
         } catch (\Throwable $e) {
-            Log::error('Guest profile GHL sync failed', [
+            Log::error('Customer profile GHL sync failed', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -189,7 +207,7 @@ class GuestPortalController extends Controller
         return response()->json([
             'success' => false,
             'data' => null,
-            'message' => 'Guest account is not linked to a customer record.',
+            'message' => 'Your account is not linked to a customer record.',
         ], 422);
     }
 }

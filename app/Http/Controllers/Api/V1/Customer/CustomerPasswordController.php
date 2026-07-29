@@ -1,26 +1,26 @@
 <?php
 
-namespace App\Http\Controllers\Api\V1\Guest;
+namespace App\Http\Controllers\Api\V1\Customer;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Guest\ChangePasswordRequest;
-use App\Http\Requests\Guest\CreatePasswordRequest;
-use App\Http\Requests\Guest\ForgotPasswordRequest;
-use App\Http\Requests\Guest\ResetPasswordRequest;
+use App\Http\Requests\Customer\ChangePasswordRequest;
+use App\Http\Requests\Customer\CreatePasswordRequest;
+use App\Http\Requests\Customer\ForgotPasswordRequest;
+use App\Http\Requests\Customer\ResetPasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
-use App\Services\GuestAccountService;
+use App\Services\CustomerAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 
-class GuestPasswordController extends Controller
+class CustomerPasswordController extends Controller
 {
-    public function __construct(private GuestAccountService $guestAccounts) {}
+    public function __construct(private CustomerAccountService $customerAccounts) {}
 
     public function createPassword(CreatePasswordRequest $request): JsonResponse
     {
         try {
-            $result = $this->guestAccounts->createPassword(
+            $result = $this->customerAccounts->createPassword(
                 $request->validated('token'),
                 $request->validated('password')
             );
@@ -46,7 +46,7 @@ class GuestPasswordController extends Controller
 
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
-        $this->guestAccounts->forgotPassword($request->validated('email'));
+        $this->customerAccounts->forgotPassword($request->validated('email'));
 
         return response()->json([
             'success' => true,
@@ -58,7 +58,7 @@ class GuestPasswordController extends Controller
     public function resetPassword(ResetPasswordRequest $request): JsonResponse
     {
         try {
-            $this->guestAccounts->resetPassword(
+            $this->customerAccounts->resetPassword(
                 $request->validated('token'),
                 $request->validated('password')
             );
@@ -85,7 +85,7 @@ class GuestPasswordController extends Controller
         $user = $request->user();
 
         try {
-            $this->guestAccounts->changePassword(
+            $this->customerAccounts->changePassword(
                 $user,
                 $request->validated('current_password'),
                 $request->validated('password')

@@ -36,6 +36,25 @@ class BookingController extends Controller
 
         $bookings = $this->bookingService->list($filters);
 
+        // Self-heals a stale payment status the same way show() already does
+        // for a single booking — otherwise a booking's GHL invoice can get
+        // paid (customer pays the emailed Text2Pay link) and this list would
+        // still show "Unpaid" forever unless someone happens to open that one
+        // booking's pay page. reconcileInvoiceStatus() is a cheap no-op for
+        // anything already paid or without a ghl_invoice_id, so this only
+        // makes a live GHL call for the typically-few still-unpaid rows on
+        // the current page. Only reload relations when the row actually
+        // changed (fresh() drops them) — the common already-paid/no-invoice
+        // case returns the same instance untouched, so no extra queries are
+        // added for the rest of the page.
+        $bookings->getCollection()->transform(function (Booking $booking) {
+            $reconciled = $this->ghlService->reconcileInvoiceStatus($booking);
+
+            return $reconciled->relationLoaded('customer')
+                ? $reconciled
+                : $reconciled->load(['customer', 'product', 'productRental', 'transactions']);
+        });
+
         return response()->json([
             'success' => true,
             'data' => BookingResource::collection($bookings),
@@ -251,7 +270,7 @@ class BookingController extends Controller
         ]);
     }
 
-    /** Staff confirms a guest-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
+    /** Staff confirms a customer-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
     public function confirm(Booking $booking): JsonResponse
     {
         try {

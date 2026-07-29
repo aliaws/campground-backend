@@ -9,13 +9,12 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-/** Sent only for direct self-registration via /guest/register — GuestVerificationMail covers the booking/contact-created path. */
-class GuestRegistrationMail extends Mailable
+class CustomerVerificationMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public function __construct(
-        public User $guestUser,
+        public User $customerUser,
         public string $rawCode,
         public string $rawToken,
     ) {}
@@ -23,18 +22,18 @@ class GuestRegistrationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Welcome! Verify your email to finish creating your account',
+            subject: 'Verify your account & create a password',
         );
     }
 
     public function content(): Content
     {
-        $verifyUrl = rtrim((string) config('app.frontend_url'), '/').'/guest/verify?token='.urlencode($this->rawToken);
+        $verifyUrl = rtrim((string) config('app.frontend_url'), '/').'/customer-auth/verify?token='.urlencode($this->rawToken);
 
         return new Content(
-            view: 'emails.guest.registration',
+            view: 'emails.customer.verification',
             with: [
-                'customerName' => $this->guestUser->name,
+                'customerName' => $this->customerUser->name,
                 'verifyUrl' => $verifyUrl,
                 'code' => $this->rawCode,
             ],

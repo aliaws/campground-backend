@@ -16,7 +16,7 @@ class UserResource extends JsonResource
             'role' => $this->role,
             'tenant_id' => $this->tenant_id,
             'customer_id' => $this->customer_id,
-            'guest_status' => $this->guest_status,
+            'customer_status' => $this->customer_status,
             'phone' => $this->when(
                 $this->relationLoaded('customer'),
                 fn () => $this->customer?->phone

@@ -248,7 +248,15 @@ class GhlServiceSyncService
     private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $tenantId): ProductRental
     {
         $isBase = $detail->id() === $baseGhlId;
-        $baseListingPrice = $isBase ? ($detail->basePrice() ?? $detail->paymentAmount()) : null;
+        // Priced for every variant, not just the base listing (2026-07-27) —
+        // `listing_price` used to only ever be written for the base row, so
+        // the Manage Service Variants tab had no stored price to show for any
+        // other variant. Each GhlServiceDetail already carries its own price
+        // (same basePrice()/paymentAmount() fields ServiceVariantResource
+        // already uses for live per-variant pricing), so this was just an
+        // unnecessary gate — no new column needed, the existing one just
+        // wasn't being populated for non-base rows.
+        $variantPrice = $detail->basePrice() ?? $detail->paymentAmount();
 
         // map_position is local-only data — deliberately never written here.
         return ProductRental::updateOrCreate(
@@ -260,7 +268,7 @@ class GhlServiceSyncService
                 'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
                 'slug' => $detail->slug(),
                 'ghl_product_id' => $detail->paymentsProductId(),
-                'listing_price' => $baseListingPrice,
+                'listing_price' => $variantPrice,
                 'product_id' => $product->id,
                 'service_category_id' => $detail->serviceCategoryId(),
                 'service_id' => $baseGhlId,
