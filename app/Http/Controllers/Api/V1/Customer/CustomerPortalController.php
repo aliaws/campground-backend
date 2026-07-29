@@ -40,14 +40,17 @@ class CustomerPortalController extends Controller
         // Same self-heal as bookingShow()/BookingController::index() — without
         // this, "My bookings" can show a paid invoice next to a status that's
         // still stuck "requested" until the customer happens to open that one
-        // booking's own detail page.
-        $bookings->getCollection()->transform(function (Booking $booking) {
-            $reconciled = $this->ghlService->reconcileInvoiceStatus($booking);
-
-            return $reconciled->relationLoaded('customer')
-                ? $reconciled
-                : $reconciled->load(['customer', 'product', 'productRental', 'transactions']);
-        });
+        // booking's own detail page. Batched (see GhlService::reconcileInvoiceStatusBatch())
+        // so N still-unpaid rows' live GHL lookups fire concurrently instead
+        // of one after another — this list now polls automatically while
+        // anything is unpaid, so sequential calls here would directly slow
+        // down how quickly a customer sees their own payment reflected.
+        $reconciled = $this->ghlService->reconcileInvoiceStatusBatch($bookings->getCollection());
+        $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
+            return $booking->relationLoaded('customer')
+                ? $booking
+                : $booking->load(['customer', 'product', 'productRental', 'transactions']);
+        }));
 
         return response()->json([
             'success' => true,

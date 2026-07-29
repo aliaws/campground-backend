@@ -40,20 +40,23 @@ class BookingController extends Controller
         // for a single booking — otherwise a booking's GHL invoice can get
         // paid (customer pays the emailed Text2Pay link) and this list would
         // still show "Unpaid" forever unless someone happens to open that one
-        // booking's pay page. reconcileInvoiceStatus() is a cheap no-op for
-        // anything already paid or without a ghl_invoice_id, so this only
-        // makes a live GHL call for the typically-few still-unpaid rows on
-        // the current page. Only reload relations when the row actually
-        // changed (fresh() drops them) — the common already-paid/no-invoice
-        // case returns the same instance untouched, so no extra queries are
-        // added for the rest of the page.
-        $bookings->getCollection()->transform(function (Booking $booking) {
-            $reconciled = $this->ghlService->reconcileInvoiceStatus($booking);
-
-            return $reconciled->relationLoaded('customer')
-                ? $reconciled
-                : $reconciled->load(['customer', 'product', 'productRental', 'transactions']);
-        });
+        // booking's pay page. reconcileInvoiceStatusBatch() applies the exact
+        // same per-row logic as reconcileInvoiceStatus() (cheap no-op for
+        // anything already paid or without a ghl_invoice_id) but fires the
+        // still-unpaid rows' live GHL lookups concurrently instead of one
+        // after another — with the staff Bookings list now polling this
+        // endpoint automatically while anything is unpaid, sequential calls
+        // here would otherwise directly slow down how "live" that polling
+        // feels. Only reload relations when the row actually changed (fresh()
+        // drops them) — the common already-paid/no-invoice case returns the
+        // same instance untouched, so no extra queries are added for the
+        // rest of the page.
+        $reconciled = $this->ghlService->reconcileInvoiceStatusBatch($bookings->getCollection());
+        $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
+            return $booking->relationLoaded('customer')
+                ? $booking
+                : $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
+        }));
 
         return response()->json([
             'success' => true,
@@ -174,7 +177,7 @@ class BookingController extends Controller
         // publicly reachable webhook URL in local dev) — the staff invoice page
         // polls this endpoint waiting for ghl_invoice_status to flip to paid.
         $booking = $this->ghlService->reconcileInvoiceStatus($booking);
-        $booking->load(['customer', 'product', 'productRental', 'transactions']);
+        $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
