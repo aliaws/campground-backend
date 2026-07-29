@@ -47,3 +47,4 @@ json/
 Homestead.json
 Homestead.yaml
 auth.json
+start_local_server.sh
