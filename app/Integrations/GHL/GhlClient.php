@@ -16,6 +16,19 @@ class GhlClient
 
     public const BACKEND_BASE_URL = 'https://backend.leadconnectorhq.com/';
 
+    /**
+     * Connect/read timeouts (seconds) for outbound GHL calls. None of these
+     * existed before — an unresponsive GHL endpoint could hang a web worker
+     * indefinitely. GHL sync failures are already caught/logged and never
+     * block the main operation everywhere this client is used, so turning a
+     * hang into a timeout exception after a generous window is a pure
+     * reliability/performance fix, not a behavior change for any request
+     * that would have succeeded anyway.
+     */
+    private const CONNECT_TIMEOUT = 10;
+
+    private const REQUEST_TIMEOUT = 30;
+
     private ?string $baseUrl = null;
 
     private ?string $accessToken = null;
@@ -159,6 +172,8 @@ class GhlClient
         return Http::pool(fn ($pool) => collect($requests)->map(
             fn (array $req, string $key) => $pool->as($key)
                 ->withHeaders($headers)
+                ->connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::REQUEST_TIMEOUT)
                 ->get($baseUrl.'/'.ltrim($req['endpoint'], '/'), $req['query'] ?? [])
         )->all());
     }
@@ -202,7 +217,7 @@ class GhlClient
             $url .= '?'.http_build_query($query);
         }
 
-        $http = Http::withHeaders($headers);
+        $http = Http::withHeaders($headers)->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT);
         $response = match ($method) {
             'get' => $http->get($url, $data),
             'delete' => $http->delete($url),
@@ -211,7 +226,7 @@ class GhlClient
 
         if ($response->status() === 401 && $this->token?->refresh_token) {
             $this->refreshToken();
-            $http = Http::withHeaders($this->buildHeaders($version));
+            $http = Http::withHeaders($this->buildHeaders($version))->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT);
             $response = match ($method) {
                 'get' => $http->get($url, $data),
                 'delete' => $http->delete($url),
@@ -257,6 +272,8 @@ class GhlClient
         ];
 
         $response = Http::withHeaders($headers)
+            ->connectTimeout(self::CONNECT_TIMEOUT)
+            ->timeout(self::REQUEST_TIMEOUT)
             ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
             ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
 
@@ -264,6 +281,8 @@ class GhlClient
             $this->refreshToken();
             $headers['Authorization'] = "Bearer {$this->accessToken}";
             $response = Http::withHeaders($headers)
+                ->connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::REQUEST_TIMEOUT)
                 ->attach('file', $fileContents, $filename, ['Content-Type' => $mimeType])
                 ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}", $formFields);
         }

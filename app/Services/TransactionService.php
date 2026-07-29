@@ -56,7 +56,7 @@ class TransactionService
             $query->where('transaction_date', '<=', $filters['date_to']);
         }
 
-        return $query->with(['customer', 'items.product', 'booking'])
+        return $query->with(['customer.customerAccount', 'items.product.rentals', 'booking'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
@@ -309,6 +309,10 @@ class TransactionService
      * this is the authoritative check for every other caller, including the
      * PATCH endpoint (no frontend currently calls it, but it's still public
      * API surface).
+     *
+     * For booking-linked transactions, marking paid also auto-confirms the
+     * booking (cash + online), so Payment: Paid never sits next to Status:
+     * requested/pending.
      */
     public function updatePaymentStatus(Transaction $transaction, string $status): Transaction
     {
@@ -321,9 +325,35 @@ class TransactionService
         if ($status === 'paid') {
             $transaction->update(['invoice_status' => 'completed']);
             $this->syncGhlInvoicePayment($transaction);
+            $this->autoConfirmLinkedBooking($transaction);
         }
 
         return $transaction->fresh()->load(['customer', 'items.product', 'booking']);
+    }
+
+    /**
+     * When a booking-linked transaction flips to paid, advance the booking to
+     * confirmed. Resolved lazily to avoid a circular constructor dependency
+     * (BookingService -> TransactionService).
+     */
+    private function autoConfirmLinkedBooking(Transaction $transaction): void
+    {
+        $transaction->loadMissing('booking');
+        $booking = $transaction->booking;
+
+        if (! $booking || ! in_array($booking->status, ['requested', 'pending'], true)) {
+            return;
+        }
+
+        try {
+            app(BookingService::class)->autoConfirmAfterPayment($booking);
+        } catch (\Exception $e) {
+            Log::error('Auto-confirm after payment status update failed', [
+                'transaction_id' => $transaction->id,
+                'booking_id' => $booking->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function syncGhlInvoicePayment(Transaction $transaction): void

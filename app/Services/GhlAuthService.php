@@ -13,6 +13,11 @@ class GhlAuthService
 
     private const TOKEN_URL = 'https://services.leadconnectorhq.com/oauth/token';
 
+    /** Mirrors GhlClient's timeouts — a hung OAuth token call previously had no ceiling. */
+    private const CONNECT_TIMEOUT = 10;
+
+    private const REQUEST_TIMEOUT = 30;
+
     private const DEFAULT_SCOPES = [
         'contacts.readonly',
         'contacts.write',
@@ -48,7 +53,7 @@ class GhlAuthService
 
     public function exchangeCodeForTokens(EngageSetting $setting, string $code, string $redirectUri): EngageSetting
     {
-        $response = Http::asForm()->post(self::TOKEN_URL, [
+        $response = Http::asForm()->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT)->post(self::TOKEN_URL, [
             'client_id' => $setting->client_id,
             'client_secret' => $setting->client_secret,
             'grant_type' => 'authorization_code',
@@ -82,13 +87,14 @@ class GhlAuthService
 
     public function refreshAccessToken(EngageSetting $setting): EngageSetting
     {
+
         $token = $this->resolveToken($setting);
 
         if (! $token->refresh_token) {
             throw new \RuntimeException('No refresh token available. Please re-authorize.');
         }
 
-        $response = Http::asForm()->post(self::TOKEN_URL, [
+        $response = Http::asForm()->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT)->post(self::TOKEN_URL, [
             'client_id' => $setting->client_id,
             'client_secret' => $setting->client_secret,
             'grant_type' => 'refresh_token',

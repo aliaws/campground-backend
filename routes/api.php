@@ -114,6 +114,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/customers', [CustomerController::class, 'store']);
         Route::get('/customers/{customer}', [CustomerController::class, 'show']);
         Route::put('/customers/{customer}', [CustomerController::class, 'update']);
+        Route::get('/customers/{customer}/deletion-preview', [CustomerController::class, 'deletionPreview']);
         Route::post('/customers/{customer}/sync-ghl', [CustomerController::class, 'syncToGhl']);
         Route::post('/customers/bulk-sync-ghl', [CustomerController::class, 'bulkSync']);
         Route::post('/customers/bulk-pull-ghl', [CustomerController::class, 'bulkPull']);

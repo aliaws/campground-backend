@@ -43,7 +43,7 @@ class BookingService
             $query->where('check_out_date', '<=', $filters['date_to']);
         }
 
-        return $query->with(['customer', 'product', 'productRental', 'transactions'])
+        return $query->with(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
@@ -192,34 +192,48 @@ class BookingService
     }
 
     /**
-     * Auto-confirm a customer booking whose Text2Pay invoice was just paid (called from
-     * the GHL webhook handler, `GhlService::applyInvoiceStatus()`). Creates the real GHL
-     * calendar booking — same as confirm() — but records the already-collected payment on
-     * the booking's auto-generated invoice instead of emailing a duplicate payment request,
-     * and does NOT create a second Transaction (the one from customer submission was already
-     * marked paid by the webhook handler before this runs).
+     * Auto-confirm a booking whose payment was just marked paid (webhook,
+     * invoice reconciliation, cash pay, or TransactionService::updatePaymentStatus).
      *
-     * No-op if the booking isn't 'requested' anymore — keeps this safe to call from a
-     * webhook, which may retry/redeliver.
+     * Applies to both customer/online (`requested`) and staff cash (`pending`)
+     * bookings. Tries to create the real GHL calendar booking when missing,
+     * but ALWAYS flips local status to `confirmed` once payment is paid —
+     * a GHL outage must not leave the booking stuck as Paid + requested.
+     *
+     * Idempotent / webhook-safe: no-op when already confirmed or cancelled.
      */
     public function autoConfirmAfterPayment(Booking $booking): Booking
     {
-        if ($booking->status !== 'requested') {
+        if (in_array($booking->status, ['confirmed', 'cancelled'], true)) {
             return $booking;
         }
 
-        // Guard against duplicate real GHL calendar bookings: this now runs from
-        // both the InvoicePaid webhook and the live invoice-status reconciliation
-        // fallback (GhlService::reconcileInvoiceStatus), so it must tolerate being
-        // called more than once for the same booking — e.g. a redelivered webhook,
-        // or a webhook and a reconciliation poll landing close together. If a real
-        // booking already exists, just correct the local status instead of
-        // creating a second one.
-        if (! $booking->ghl_booking_id) {
-            $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+        if (! in_array($booking->status, ['requested', 'pending'], true)) {
+            return $booking;
         }
 
-        $booking->update(['status' => 'confirmed']);
+        // Guard against duplicate real GHL calendar bookings: this runs from
+        // the InvoicePaid webhook, live invoice-status reconciliation, cash
+        // pay, and payment-status updates — so it must tolerate being called
+        // more than once for the same booking.
+        if (! $booking->ghl_booking_id) {
+            try {
+                $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+                $booking = $booking->fresh() ?? $booking;
+            } catch (\Exception $e) {
+                // Payment is already collected — confirm locally anyway so the
+                // booking never sticks at Paid + requested/pending in production
+                // when GHL is briefly unreachable or the slot sync fails.
+                Log::error('GHL calendar booking failed during auto-confirm after payment', [
+                    'booking_id' => $booking->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if ($booking->status !== 'confirmed') {
+            $booking->update(['status' => 'confirmed']);
+        }
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
     }
@@ -227,15 +241,10 @@ class BookingService
     /**
      * Marks a cash reservation as paid, triggered from the Bookings list's Pay
      * action. Every cash booking is created local-only (see $deferGhl in
-     * create()), so this is also what actually syncs it to GHL for the first
-     * time: creates the real GHL calendar booking now, then confirms. Also
-     * self-healing if a *retry* is needed — e.g. GHL rejected the slot on a
-     * previous Pay attempt (createBooking() swallows that failure so the local
-     * row stays as-is) — same spirit as
-     * GhlService::reconcileInvoiceStatus()/autoConfirmAfterPayment() for the
-     * online/card path. Only marks 'confirmed' once a real ghl_booking_id
-     * exists, so a still-failing GHL sync can't be silently hidden behind a
-     * "confirmed" badge.
+     * create()), so this also syncs it to GHL for the first time when possible.
+     * Payment-status update itself triggers autoConfirmAfterPayment(); we still
+     * call it explicitly when the transaction was already paid so a stuck
+     * Paid + pending/requested row can self-heal on a second Pay click.
      */
     public function payCash(Booking $booking): Booking
     {
@@ -248,16 +257,15 @@ class BookingService
                     'error' => $e->getMessage(),
                 ]);
             }
-            $booking = $booking->fresh();
+            $booking = $booking->fresh() ?? $booking;
         }
 
         $transaction = $booking->transactions()->latest()->first();
         if ($transaction && $transaction->payment_status !== 'paid') {
+            // updatePaymentStatus() also auto-confirms the linked booking.
             $this->transactionService->updatePaymentStatus($transaction, 'paid');
-        }
-
-        if ($booking->ghl_booking_id) {
-            $booking = $this->updateStatus($booking, 'confirmed');
+        } else {
+            $this->autoConfirmAfterPayment($booking);
         }
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
