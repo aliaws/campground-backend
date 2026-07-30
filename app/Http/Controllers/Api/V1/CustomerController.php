@@ -26,7 +26,12 @@ class CustomerController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Customer::with('customerAccount')->where('tenant_id', $request->user()->tenant_id);
+        $locationId = $request->user()->resolveOrganizationLocationId();
+
+        $query = Customer::with('customerAccount')->whereHas(
+            'locationLinks',
+            fn ($q) => $q->where('engage_organization_location_id', $locationId)
+        );
 
         if ($request->search) {
             $query->where(function ($q) use ($request) {
@@ -53,12 +58,12 @@ class CustomerController extends Controller
     {
         $customer = $this->customerService->findOrCreate(
             $request->validated(),
-            $request->user()->tenant_id,
+            $request->user()->resolveOrganizationLocationId(),
             User::createdByLabel($request->user(), $request->validated('name'))
         );
 
         try {
-            $this->ghlService->syncContactToGhl($customer);
+            $this->ghlService->syncContactToGhl($customer, $request->user()->resolveOrganizationLocationId());
         } catch (\Exception $e) {
             Log::error('GHL sync failed for new customer', [
                 'customer_id' => $customer->id,
@@ -71,7 +76,12 @@ class CustomerController extends Controller
         // but never emails it — a customer entered by staff hasn't opted into an
         // online account, so an unsolicited "verify your email" message would be
         // unwanted. They can still verify later (e.g. via Forgot Password).
-        $this->customerAccountService->ensureCustomerAccount($customer, $request->validated(), sendEmail: false);
+        $this->customerAccountService->ensureCustomerAccount(
+            $customer,
+            $request->validated(),
+            sendEmail: false,
+            createdBy: $request->user(),
+        );
 
         return response()->json([
             'success' => true,
@@ -94,7 +104,7 @@ class CustomerController extends Controller
         $customer->update($request->validated());
 
         try {
-            $this->ghlService->syncContactToGhl($customer->fresh());
+            $this->ghlService->syncContactToGhl($customer->fresh(), $request->user()->resolveOrganizationLocationId());
         } catch (\Exception $e) {
             Log::error('GHL sync failed for customer update', [
                 'customer_id' => $customer->id,
@@ -161,7 +171,7 @@ class CustomerController extends Controller
     public function syncToGhl(Customer $customer): JsonResponse
     {
         try {
-            $this->ghlService->syncContactToGhl($customer);
+            $this->ghlService->syncContactToGhl($customer, $request->user()->resolveOrganizationLocationId());
 
             return response()->json([
                 'success' => true,
@@ -178,7 +188,7 @@ class CustomerController extends Controller
 
     public function bulkSync(Request $request): JsonResponse
     {
-        $results = $this->ghlService->bulkSyncContacts($request->user()->tenant_id);
+        $results = $this->ghlService->bulkSyncContacts($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,
@@ -190,7 +200,7 @@ class CustomerController extends Controller
     public function bulkPull(Request $request): JsonResponse
     {
         try {
-            $results = $this->ghlService->bulkPullContacts($request->user()->tenant_id);
+            $results = $this->ghlService->bulkPullContacts($request->user()->resolveOrganizationLocationId());
 
             return response()->json([
                 'success' => true,

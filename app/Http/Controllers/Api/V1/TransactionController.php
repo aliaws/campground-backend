@@ -22,7 +22,7 @@ class TransactionController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = array_merge($request->all(), [
-            'tenant_id' => $request->user()->tenant_id,
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         $transactions = $this->transactionService->list($filters);
@@ -58,7 +58,7 @@ class TransactionController extends Controller
     {
         try {
             $transaction = $this->transactionService->create(
-                $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+                $request->validated() + ['engage_organization_location_id' => $request->user()->resolveOrganizationLocationId()]
             );
         } catch (\InvalidArgumentException $e) {
             return response()->json([

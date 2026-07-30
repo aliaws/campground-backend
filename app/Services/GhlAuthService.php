@@ -38,6 +38,10 @@ class GhlAuthService
         'calendars/resources.readonly',
     ];
 
+    public function __construct(
+        private EngageTokenCache $engageTokenCache,
+    ) {}
+
     public function getAuthorizationUrl(EngageSetting $setting, string $redirectUri): string
     {
         $params = http_build_query([
@@ -45,7 +49,7 @@ class GhlAuthService
             'client_id' => $setting->client_id,
             'redirect_uri' => $redirectUri,
             'scope' => implode(' ', $this->getScopes($setting)),
-            'state' => $setting->tenant_id,
+            'state' => $setting->oauth_state_key,
         ]);
 
         return self::AUTHORIZE_URL.'?'.$params;
@@ -71,6 +75,7 @@ class GhlAuthService
 
         $data = $response->json();
         $token = $this->resolveToken($setting);
+        $previousLocationId = $token->location_id;
 
         $token->fill([
             'authorization_code' => $code,
@@ -82,17 +87,20 @@ class GhlAuthService
             'company_id' => $data['companyId'] ?? $token->company_id,
         ])->save();
 
+        $this->engageTokenCache->refresh($token->fresh(), $previousLocationId);
+
         return $setting->fresh(['token']);
     }
 
-    public function refreshAccessToken(EngageSetting $setting): EngageSetting
+    public function refreshAccessToken(EngageSetting $setting): EngageToken
     {
-
         $token = $this->resolveToken($setting);
 
         if (! $token->refresh_token) {
             throw new \RuntimeException('No refresh token available. Please re-authorize.');
         }
+
+        $previousLocationId = $token->location_id;
 
         $response = Http::asForm()->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT)->post(self::TOKEN_URL, [
             'client_id' => $setting->client_id,
@@ -113,11 +121,17 @@ class GhlAuthService
 
         $token->update([
             'access_token' => $data['access_token'],
-            'refresh_token' => $data['refresh_token'],
+            'refresh_token' => $data['refresh_token'] ?? $token->refresh_token,
             'token_expiry' => now()->addSeconds($data['expires_in'] ?? 86400),
+            'location_id' => $data['locationId'] ?? $token->location_id,
+            'user_id' => $data['userId'] ?? $token->user_id,
+            'company_id' => $data['companyId'] ?? $token->company_id,
         ]);
 
-        return $setting->fresh(['token']);
+        $fresh = $token->fresh();
+        $this->engageTokenCache->refresh($fresh, $previousLocationId);
+
+        return $fresh;
     }
 
     /**
@@ -136,7 +150,7 @@ class GhlAuthService
 
     private function resolveToken(EngageSetting $setting): EngageToken
     {
-        $token = $setting->token ?? EngageToken::query()->where('tenant_id', $setting->tenant_id)->first();
+        $token = $setting->token ?? EngageToken::query()->where('engage_setting_id', $setting->id)->first();
 
         if ($token) {
             if (! $token->engage_setting_id) {
@@ -147,8 +161,9 @@ class GhlAuthService
         }
 
         return EngageToken::create([
-            'tenant_id' => $setting->tenant_id,
             'engage_setting_id' => $setting->id,
+            'token_type' => EngageToken::TYPE_LOCATION,
+            'engage_organization_location_id' => null,
         ]);
     }
 }

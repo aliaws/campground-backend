@@ -16,7 +16,7 @@ class Category extends Model
         'image',
         'sort_order',
         'is_active',
-        'tenant_id',
+        'engage_organization_location_id',
         'engage_collection_id',
         'engage_sync_status',
         'engage_last_synced_at',

@@ -14,7 +14,7 @@ class SiteMapIconTypeController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $iconTypes = SiteMapIconType::where('tenant_id', $request->user()->tenant_id)
+        $iconTypes = SiteMapIconType::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->orderBy('name')
             ->get();
 
@@ -32,7 +32,7 @@ class SiteMapIconTypeController extends Controller
         $iconType = SiteMapIconType::create([
             'name' => $request->validated('name'),
             'image_url' => Storage::url($path),
-            'tenant_id' => $request->user()->tenant_id,
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         return response()->json([
@@ -44,7 +44,7 @@ class SiteMapIconTypeController extends Controller
 
     public function destroy(Request $request, SiteMapIconType $iconType): JsonResponse
     {
-        if ($iconType->tenant_id !== $request->user()->tenant_id) {
+        if ($iconType->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Icon not found.'], 404);
         }
 

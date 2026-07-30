@@ -7,10 +7,11 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Support\SessionJwt;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
@@ -20,11 +21,11 @@ class AuthController extends Controller
             'name' => $request->name,
             'email' => $request->email,
             'password' => $request->password,
-            'role' => $request->input('role', 'customer'),
-            'tenant_id' => Str::ulid()->toBase32(),
+            'roles' => [$request->input('role', User::ROLE_CUSTOMER)],
+            'status' => User::STATUS_ACTIVE,
         ]);
 
-        $token = $user->createToken('pos-token')->plainTextToken;
+        $token = SessionJwt::issue($user);
 
         return response()->json([
             'success' => true,
@@ -47,7 +48,21 @@ class AuthController extends Controller
             ], 401);
         }
 
-        $token = $user->createToken('pos-token')->plainTextToken;
+        if ($user->isLoginBlocked()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This account is not allowed to sign in. Please contact support.',
+            ], 403);
+        }
+
+        if ($user->hasRole(User::ROLE_CUSTOMER) && ! $user->hasAnyRole(...User::STAFF_ROLES) && $user->status !== User::STATUS_ACTIVE) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please finish verifying your account before signing in.',
+            ], 403);
+        }
+
+        $token = SessionJwt::issue($user);
 
         return response()->json([
             'success' => true,
@@ -61,7 +76,14 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        /** @var \App\Auth\JwtGuard $guard */
+        $guard = Auth::guard('api');
+        $jti = $guard->currentJti();
+        $exp = $guard->currentTokenExp();
+
+        if ($jti && $exp) {
+            SessionJwt::revoke($jti, $exp);
+        }
 
         return response()->json([
             'success' => true,

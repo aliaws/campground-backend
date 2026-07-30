@@ -12,23 +12,25 @@ use App\Models\Country;
 use App\Models\CustomField;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
+use App\Models\User;
+use App\Services\EngageTokenCache;
 use App\Services\GhlAuthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class SettingsController extends Controller
 {
     public function __construct(
         private GhlAuthService $ghlAuthService,
+        private EngageTokenCache $engageTokenCache,
     ) {}
 
     public function getEngage(Request $request): JsonResponse
     {
-        $setting = EngageSetting::with('token')
-            ->where('tenant_id', $request->user()->tenant_id)
-            ->first();
+        $setting = $this->resolveEngageSetting($request->user());
 
         if (! $setting) {
             return response()->json([
@@ -47,16 +49,21 @@ class SettingsController extends Controller
 
     public function storeEngage(StoreEngageSettingRequest $request): JsonResponse
     {
-        $tenantId = $request->user()->tenant_id;
+        $locationId = $request->user()->resolveOrganizationLocationId();
+        $existing = $this->resolveEngageSetting($request->user());
+        $oauthStateKey = $existing?->oauth_state_key ?? (string) Str::ulid();
 
         $setting = EngageSetting::updateOrCreate(
-            ['tenant_id' => $tenantId],
-            $request->validated() + ['tenant_id' => $tenantId]
+            [EngageSetting::OAUTH_STATE_COLUMN => $oauthStateKey],
+            $request->validated() + ['oauth_state_key' => $oauthStateKey]
         );
 
-        EngageToken::firstOrCreate(
-            ['tenant_id' => $tenantId],
-            ['engage_setting_id' => $setting->id]
+        EngageToken::updateOrCreate(
+            ['engage_setting_id' => $setting->id],
+            [
+                'token_type' => EngageToken::TYPE_LOCATION,
+                'engage_organization_location_id' => $locationId,
+            ]
         );
 
         return response()->json([
@@ -68,7 +75,7 @@ class SettingsController extends Controller
 
     public function getAuthorizeUrl(Request $request): JsonResponse
     {
-        $setting = EngageSetting::where('tenant_id', $request->user()->tenant_id)->first();
+        $setting = $this->resolveEngageSetting($request->user());
 
         if (! $setting || ! $setting->client_id || ! $setting->client_secret) {
             return response()->json([
@@ -100,19 +107,16 @@ class SettingsController extends Controller
         ]);
 
         $code = $request->input('code');
-        $tenantId = $request->input('state');
 
-        if (! $code || ! $tenantId) {
+        if (! $code) {
             Log::error('GHL OAuth callback missing params', [
                 'code' => $code,
-                'state' => $tenantId,
                 'url' => $request->fullUrl(),
             ]);
-
             return $this->callbackRedirect('error=missing_params');
         }
 
-        $setting = EngageSetting::with('token')->where('tenant_id', $tenantId)->first();
+        $setting = EngageSetting::with('token')->first();
 
         if (! $setting) {
             return $this->callbackRedirect('error=settings_not_found');
@@ -130,9 +134,7 @@ class SettingsController extends Controller
 
     public function refreshToken(Request $request): JsonResponse
     {
-        $setting = EngageSetting::with('token')
-            ->where('tenant_id', $request->user()->tenant_id)
-            ->first();
+        $setting = $this->resolveEngageSetting($request->user());
 
         $token = $setting?->token;
 
@@ -144,11 +146,12 @@ class SettingsController extends Controller
         }
 
         try {
-            $setting = $this->ghlAuthService->refreshAccessToken($setting);
+            $token = $this->ghlAuthService->refreshAccessToken($setting);
+            $payload = $this->engageTokenCache->buildPayload($token);
 
             return response()->json([
                 'success' => true,
-                'data' => new EngageSettingResource($setting),
+                'data' => $payload,
                 'message' => 'Token refreshed successfully.',
             ]);
         } catch (\Exception $e) {
@@ -162,10 +165,15 @@ class SettingsController extends Controller
     public function getTokens(Request $request): JsonResponse
     {
         $token = EngageToken::query()
-            ->where('tenant_id', $request->user()->tenant_id)
+            ->where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->first();
 
-        if (! $token) {
+        $payload = $this->engageTokenCache->rememberForLocation(
+            $token?->location_id,
+            $token,
+        );
+
+        if (! $payload) {
             return response()->json([
                 'success' => true,
                 'data' => null,
@@ -175,18 +183,7 @@ class SettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'has_access_token' => ! empty($token->access_token),
-                'has_refresh_token' => ! empty($token->refresh_token),
-                'authorization_code' => $token->authorization_code,
-                'access_token' => $token->access_token,
-                'refresh_token' => $token->refresh_token,
-                'token_expiry' => $token->token_expiry,
-                'is_token_expired' => $token->isTokenExpired(),
-                'location_id' => $token->location_id,
-                'user_id' => $token->user_id,
-                'company_id' => $token->company_id,
-            ],
+            'data' => $payload,
             'message' => 'Token info retrieved.',
         ]);
     }
@@ -202,8 +199,8 @@ class SettingsController extends Controller
             'company_id' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $tenantId = $request->user()->tenant_id;
-        $setting = EngageSetting::where('tenant_id', $tenantId)->first();
+        $locationId = $request->user()->resolveOrganizationLocationId();
+        $setting = $this->resolveEngageSetting($request->user());
 
         if (! $setting) {
             return response()->json([
@@ -212,21 +209,30 @@ class SettingsController extends Controller
             ], 422);
         }
 
-        $updateData = ['engage_setting_id' => $setting->id];
+        $existing = EngageToken::query()->where('engage_setting_id', $setting->id)->first();
+        $previousLocationId = $existing?->location_id;
+
+        $updateData = [
+            'engage_setting_id' => $setting->id,
+            'token_type' => $request->input('token_type', EngageToken::TYPE_LOCATION),
+            'engage_organization_location_id' => $locationId,
+        ];
         foreach (['authorization_code', 'access_token', 'refresh_token', 'location_id', 'user_id', 'company_id'] as $field) {
             if ($request->has($field)) {
                 $updateData[$field] = $request->input($field);
             }
         }
 
-        EngageToken::updateOrCreate(
-            ['tenant_id' => $tenantId],
+        $token = EngageToken::updateOrCreate(
+            ['engage_setting_id' => $setting->id],
             $updateData
         );
 
+        $payload = $this->engageTokenCache->refresh($token->fresh(), $previousLocationId);
+
         return response()->json([
             'success' => true,
-            'data' => new EngageSettingResource($setting->load('token')),
+            'data' => $payload,
             'message' => 'Tokens saved.',
         ]);
     }
@@ -249,7 +255,7 @@ class SettingsController extends Controller
 
     public function getCustomFields(Request $request): JsonResponse
     {
-        $fields = CustomField::where('tenant_id', $request->user()->tenant_id)
+        $fields = CustomField::forOrganizationLocation($request->user()->resolveOrganizationLocationId())
             ->when($request->entity_type, fn ($q, $v) => $q->where('entity_type', $v))
             ->get();
 
@@ -262,12 +268,29 @@ class SettingsController extends Controller
 
     public function storeCustomField(StoreCustomFieldRequest $request): JsonResponse
     {
-        $field = CustomField::create($request->validated());
+        $field = CustomField::create($request->validated() + [
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
+        ]);
 
         return response()->json([
             'success' => true,
             'data' => new CustomFieldResource($field),
             'message' => 'Custom field created.',
         ], 201);
+    }
+
+    private function resolveEngageSetting(User $user): ?EngageSetting
+    {
+        $locationId = $user->resolveOrganizationLocationId();
+
+        $token = EngageToken::with('setting.token')
+            ->where('engage_organization_location_id', $locationId)
+            ->first();
+
+        if ($token?->setting) {
+            return $token->setting->loadMissing('token');
+        }
+
+        return EngageSetting::with('token')->first();
     }
 }

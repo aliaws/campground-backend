@@ -23,8 +23,8 @@ class BookingService
     {
         $query = Booking::query();
 
-        if (! empty($filters['tenant_id'])) {
-            $query->where('tenant_id', $filters['tenant_id']);
+        if (! empty($filters['engage_organization_location_id'])) {
+            $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
         }
 
         if (! empty($filters['status'])) {
@@ -109,7 +109,7 @@ class BookingService
      */
     public function create(array $data, bool $autoConfirm = true): Booking
     {
-        $resolved = $this->resolver->resolve($data['product_id'], $data['tenant_id']);
+        $resolved = $this->resolver->resolve($data['product_id'], $data['engage_organization_location_id']);
 
         if (! $resolved) {
             throw new \InvalidArgumentException('Product must be a bookable service for bookings.');

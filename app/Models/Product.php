@@ -23,7 +23,7 @@ class Product extends Model
         'image',
         'tax_inclusive',
         'is_taxes_enabled',
-        'tenant_id',
+        'engage_organization_location_id',
         'slug',
         'sku',
         'quantity',
@@ -51,9 +51,9 @@ class Product extends Model
 
     // ── Scopes ────────────────────────────────────────────────────────────────
 
-    public function scopeByTenant($query, string $tenantId)
+    public function scopeByLocation($query, string $locationId)
     {
-        return $query->where('tenant_id', $tenantId);
+        return $query->where('engage_organization_location_id', $locationId);
     }
 
     public function scopeService($query)

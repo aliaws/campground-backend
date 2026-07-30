@@ -85,7 +85,7 @@ class CustomerPasswordController extends Controller
         $user = $request->user();
 
         try {
-            $this->customerAccounts->changePassword(
+            $token = $this->customerAccounts->changePassword(
                 $user,
                 $request->validated('current_password'),
                 $request->validated('password')
@@ -102,7 +102,7 @@ class CustomerPasswordController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => null,
+            'data' => ['token' => $token],
             'message' => 'Password updated.',
         ]);
     }

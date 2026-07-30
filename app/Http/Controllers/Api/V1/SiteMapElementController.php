@@ -15,12 +15,12 @@ class SiteMapElementController extends Controller
 {
     public function store(StoreSiteMapElementRequest $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
         $element = $siteMap->elements()->create(
-            $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+            $request->validated() + ['engage_organization_location_id' => $request->user()->resolveOrganizationLocationId()]
         );
 
         // Reload from the DB: any field the request omitted (width, height,
@@ -37,7 +37,7 @@ class SiteMapElementController extends Controller
 
     public function update(UpdateSiteMapElementRequest $request, SiteMapElement $element): JsonResponse
     {
-        if ($element->tenant_id !== $request->user()->tenant_id) {
+        if ($element->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Element not found.'], 404);
         }
 
@@ -52,7 +52,7 @@ class SiteMapElementController extends Controller
 
     public function destroy(Request $request, SiteMapElement $element): JsonResponse
     {
-        if ($element->tenant_id !== $request->user()->tenant_id) {
+        if ($element->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Element not found.'], 404);
         }
 

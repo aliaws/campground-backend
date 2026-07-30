@@ -2,9 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Models\EngageOrganizationLocation;
 use App\Models\Product;
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Str;
 
 /**
  * @extends Factory<Product>
@@ -15,6 +15,10 @@ class ProductFactory extends Factory
 
     public function definition(): array
     {
+        $locationId = EngageOrganizationLocation::query()->where('is_default', true)->value('id')
+            ?? EngageOrganizationLocation::query()->value('id')
+            ?? (string) \Illuminate\Support\Str::uuid();
+
         return [
             'name' => fake()->words(3, true),
             'product_type' => 'PHYSICAL',
@@ -23,7 +27,7 @@ class ProductFactory extends Factory
             'price' => fake()->randomFloat(2, 1, 100),
             'quantity' => 10,
             'track_product_inventory' => false,
-            'tenant_id' => (string) Str::ulid(),
+            'engage_organization_location_id' => $locationId,
         ];
     }
 

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Cache;
  * single path for reading rental detail data (durations, quantities, pricing
  * rules, booking times) — none of it is stored locally anymore.
  *
- * Cache: ghl:service-detail:{tenant}:{ghl_id}, 5 min TTL. pullServices() warms
+ * Cache: ghl:service-detail:{location}:{ghl_id}, 5 min TTL. pullServices() warms
  * it with the details it just fetched and forgets pruned ids, so a pull is
  * always followed by fresh reads. Failures are never cached.
  */
@@ -191,16 +191,16 @@ class GhlRentalGateway
 
     private function cacheKey(string $ghlServiceId): string
     {
-        $tenantId = $this->client->getSetting()?->tenant_id ?? 'default';
+        $cacheKeyPrefix = $this->client->getSetting()?->oauth_state_key ?? 'default';
 
-        return "ghl:service-detail:{$tenantId}:{$ghlServiceId}";
+        return "ghl:service-detail:{$cacheKeyPrefix}:{$ghlServiceId}";
     }
 
     private function paymentsProductCacheKey(string $ghlProductId): string
     {
-        $tenantId = $this->client->getSetting()?->tenant_id ?? 'default';
+        $cacheKeyPrefix = $this->client->getSetting()?->oauth_state_key ?? 'default';
 
-        return "ghl:payments-product:{$tenantId}:{$ghlProductId}";
+        return "ghl:payments-product:{$cacheKeyPrefix}:{$ghlProductId}";
     }
 
     private function requireLocationId(): string

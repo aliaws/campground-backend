@@ -10,7 +10,7 @@ use App\Models\Product;
 use App\Services\GhlRentalGateway;
 use App\Services\ProductService;
 use App\Services\RentalResolver;
-use App\Services\TenantResolver;
+use App\Services\OrganizationLocationResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -27,7 +27,7 @@ class PublicServiceController extends Controller
     {
         $filters = array_merge(
             $request->only(['search', 'category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']),
-            ['tenant_id' => TenantResolver::resolveDefault()]
+            ['engage_organization_location_id' => OrganizationLocationResolver::resolveDefaultLocationId()]
         );
 
         $services = $this->productService->listServices($filters);
@@ -49,9 +49,9 @@ class PublicServiceController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $tenantId = TenantResolver::resolveDefault();
+        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
 
-        if ($product->tenant_id !== $tenantId || $product->status !== 'active' || $product->product_rental_id === null) {
+        if ($product->engage_organization_location_id !== $locationId || $product->status !== 'active' || $product->product_rental_id === null) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -92,8 +92,8 @@ class PublicServiceController extends Controller
     /** Live GHL detail for a single variant (product id or product_rentals id). */
     public function variant(string $id): JsonResponse
     {
-        $tenantId = TenantResolver::resolveDefault();
-        $resolved = $this->rentalResolver->resolve($id, $tenantId);
+        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
+        $resolved = $this->rentalResolver->resolve($id, $locationId);
 
         if (! $resolved) {
             return response()->json([

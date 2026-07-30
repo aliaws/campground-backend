@@ -19,7 +19,7 @@ class CategoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $categories = Category::where('tenant_id', $request->user()->tenant_id)
+        $categories = Category::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->withCount('products')
             ->orderBy('sort_order')
             ->orderBy('name')
@@ -35,7 +35,7 @@ class CategoryController extends Controller
     public function store(StoreCategoryRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $data['tenant_id'] = $request->user()->tenant_id;
+        $data['engage_organization_location_id'] = $request->user()->resolveOrganizationLocationId();
 
         if (empty($data['slug'])) {
             $data['slug'] = Str::slug($data['name']);
@@ -106,7 +106,7 @@ class CategoryController extends Controller
 
     public function bulkSync(Request $request): JsonResponse
     {
-        $results = $this->ghlProductSyncService->bulkSyncCategories($request->user()->tenant_id);
+        $results = $this->ghlProductSyncService->bulkSyncCategories($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,
@@ -117,7 +117,7 @@ class CategoryController extends Controller
 
     public function pullFromGhl(Request $request): JsonResponse
     {
-        $results = $this->ghlProductSyncService->pullCategoriesFromGhl($request->user()->tenant_id);
+        $results = $this->ghlProductSyncService->pullCategoriesFromGhl($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,

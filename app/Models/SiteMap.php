@@ -14,7 +14,7 @@ class SiteMap extends Model
         'name',
         'image_url',
         'is_default',
-        'tenant_id',
+        'engage_organization_location_id',
     ];
 
     protected function casts(): array

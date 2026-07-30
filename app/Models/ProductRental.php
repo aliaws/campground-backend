@@ -30,7 +30,6 @@ class ProductRental extends Model
         'product_id',
         'service_category_id',
         'service_id',
-        'tenant_id',
     ];
 
     protected function casts(): array

@@ -9,27 +9,28 @@ class FindDuplicateCustomerEmails extends Command
 {
     protected $signature = 'customers:find-duplicate-emails';
 
-    protected $description = 'Detect (tenant_id, LOWER(email)) duplicates that would block the customers unique email index (read-only).';
+    protected $description = 'Detect (location, LOWER(email)) duplicates among customers linked to the same organization location (read-only).';
 
     public function handle(): int
     {
-        $duplicates = DB::table('customers')
-            ->selectRaw('tenant_id, LOWER(email) as email_key, COUNT(*) as cnt')
-            ->whereNotNull('email')
-            ->whereNull('deleted_at')
-            ->groupByRaw('tenant_id, LOWER(email)')
+        $duplicates = DB::table('customers_locations as cl')
+            ->join('customers as c', 'c.id', '=', 'cl.customer_id')
+            ->selectRaw('cl.engage_organization_location_id as location_id, LOWER(c.email) as email_key, COUNT(*) as cnt')
+            ->whereNotNull('c.email')
+            ->whereNull('c.deleted_at')
+            ->groupByRaw('cl.engage_organization_location_id, LOWER(c.email)')
             ->havingRaw('COUNT(*) > 1')
             ->get();
 
         if ($duplicates->isEmpty()) {
-            $this->info('No duplicate (tenant_id, email) pairs found.');
+            $this->info('No duplicate (location, email) pairs found.');
 
             return self::SUCCESS;
         }
 
         $this->error('Found '.$duplicates->count().' duplicate email group(s):');
         foreach ($duplicates as $row) {
-            $this->line("  tenant={$row->tenant_id} email={$row->email_key} count={$row->cnt}");
+            $this->line("  location={$row->location_id} email={$row->email_key} count={$row->cnt}");
         }
 
         return self::FAILURE;

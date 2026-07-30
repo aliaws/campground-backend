@@ -31,7 +31,7 @@ class BookingController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = array_merge($request->all(), [
-            'tenant_id' => $request->user()->tenant_id,
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         $bookings = $this->bookingService->list($filters);
@@ -70,7 +70,7 @@ class BookingController extends Controller
     {
         $resolved = $this->rentalResolver->resolve(
             $request->validated('product_id'),
-            $request->user()->tenant_id
+            $request->user()->resolveOrganizationLocationId()
         );
 
         if (! $resolved) {
@@ -120,7 +120,7 @@ class BookingController extends Controller
         try {
             $booking = $this->bookingService->create(
                 $request->validated() + [
-                    'tenant_id' => $request->user()->tenant_id,
+                    'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
                     'created_by' => User::createdByLabel($request->user(), ''),
                 ],
                 autoConfirm: $autoConfirm,
@@ -189,7 +189,7 @@ class BookingController extends Controller
     /** Marks a cash "pay later" reservation as paid; self-heals a missing GHL calendar booking first (see BookingService::payCash()). */
     public function payCash(Request $request, Booking $booking): JsonResponse
     {
-        if ($booking->tenant_id !== $request->user()->tenant_id) {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
         }
 
@@ -206,7 +206,7 @@ class BookingController extends Controller
 
     public function updateStatus(UpdateBookingStatusRequest $request, Booking $booking): JsonResponse
     {
-        if ($booking->tenant_id !== $request->user()->tenant_id) {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
         }
 
@@ -232,7 +232,7 @@ class BookingController extends Controller
 
     public function updateCheckInOut(UpdateBookingCheckInOutRequest $request, Booking $booking): JsonResponse
     {
-        if ($booking->tenant_id !== $request->user()->tenant_id) {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
         }
 
@@ -260,7 +260,7 @@ class BookingController extends Controller
      */
     public function invoice(Request $request, Booking $booking): JsonResponse
     {
-        if ($booking->tenant_id !== $request->user()->tenant_id) {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
         }
 

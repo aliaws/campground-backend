@@ -29,8 +29,8 @@ Route::prefix('v1')->group(function () {
     // Auth — login/register open; logout/me for any authenticated role (staff or customer)
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
-    Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
-    Route::get('/auth/me', [AuthController::class, 'me'])->middleware('auth:sanctum');
+    Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:api');
+    Route::get('/auth/me', [AuthController::class, 'me'])->middleware('auth:api');
 
     // Webhooks (no auth - GHL calls these)
     Route::post('/webhooks/ghl', [WebhookController::class, 'ghl']);
@@ -72,7 +72,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/reset-password', [CustomerPasswordController::class, 'resetPassword'])
             ->middleware('throttle:customer-forgot-password');
 
-        Route::middleware(['auth:sanctum', 'role:customer'])->group(function () {
+        Route::middleware(['auth:api', 'role:customer'])->group(function () {
             Route::post('/change-password', [CustomerPasswordController::class, 'changePassword'])
                 ->middleware('throttle:customer-change-password');
 
@@ -85,7 +85,7 @@ Route::prefix('v1')->group(function () {
     });
 
     // Staff-protected routes
-    Route::middleware(['auth:sanctum', 'role:admin,staff,cashier'])->group(function () {
+    Route::middleware(['auth:api', 'role:admin,owner,staff,superadmin'])->group(function () {
         // Products (unified - campsites + inventory)
         Route::get('/products', [ProductController::class, 'index']);
         Route::post('/products', [ProductController::class, 'store']);
@@ -171,16 +171,18 @@ Route::prefix('v1')->group(function () {
         Route::delete('/features/{feature}', [FeatureController::class, 'destroy']);
 
         // Staff management — admin-only: staff accounts are created here, not via public /auth/register
-        Route::middleware('role:admin')->group(function () {
+        Route::middleware('role:admin,owner,superadmin')->group(function () {
             Route::get('/staff', [StaffController::class, 'index']);
             Route::post('/staff', [StaffController::class, 'store']);
+            Route::put('/staff/{staff}', [StaffController::class, 'update']);
+            Route::delete('/staff/{staff}', [StaffController::class, 'destroy']);
         });
 
         // Site maps: viewing is open to any staff role, editing (the map builder) is admin-only
         Route::get('/site-maps', [SiteMapController::class, 'index']);
         Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
         Route::get('/site-map-icon-types', [SiteMapIconTypeController::class, 'index']);
-        Route::middleware('role:admin')->group(function () {
+        Route::middleware('role:admin,owner,superadmin')->group(function () {
             Route::post('/site-maps', [SiteMapController::class, 'store']);
             Route::put('/site-maps/{siteMap}', [SiteMapController::class, 'update']);
             Route::delete('/site-maps/{siteMap}', [SiteMapController::class, 'destroy']);

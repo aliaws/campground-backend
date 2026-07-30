@@ -14,7 +14,7 @@ class CustomFieldResource extends JsonResource
             'entity_type' => $this->entity_type,
             'field_name' => $this->field_name,
             'field_type' => $this->field_type,
-            'tenant_id' => $this->tenant_id,
+            'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,
         ];
     }

@@ -45,7 +45,7 @@ class TransactionResource extends JsonResource
             // booking-less "card" product sale (BookingResource already
             // exposes its own ghl_invoice_url the same way for bookings).
             'ghl_invoice_url' => $this->ghl_invoice_url,
-            'tenant_id' => $this->tenant_id,
+            'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

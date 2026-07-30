@@ -28,7 +28,7 @@ class UpdateProductRequest extends FormRequest
             'sku' => [
                 'nullable', 'string', 'max:32', 'regex:/^[A-Z0-9\-]+$/',
                 Rule::unique('products', 'sku')
-                    ->where('tenant_id', $this->user()->tenant_id)
+                    ->where('engage_organization_location_id', $this->user()->resolveOrganizationLocationId())
                     ->ignore($this->route('product')),
             ],
             'price' => ['nullable', 'numeric', 'min:0'],

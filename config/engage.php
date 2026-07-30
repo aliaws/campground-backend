@@ -6,9 +6,15 @@ return [
     |--------------------------------------------------------------------------
     | Engage / GoHighLevel Settings (seeded into engage_settings)
     |--------------------------------------------------------------------------
+    |
+    | `tenant_id` remains as the config key used by EngageSettingSeeder (database/
+    | seeders are left unchanged). It seeds the physical engage_settings.tenant_id
+    | column, which app code exposes as oauth_state_key.
     */
 
     'tenant_id' => env('ENGAGE_TENANT_ID'),
+
+    'oauth_state_key' => env('ENGAGE_OAUTH_STATE_KEY', env('ENGAGE_TENANT_ID')),
 
     'client_id' => env('ENGAGE_CLIENT_ID'),
 
@@ -40,5 +46,32 @@ return [
     'access_token' => env('ENGAGE_ACCESS_TOKEN'),
 
     'refresh_token' => env('ENGAGE_REFRESH_TOKEN'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | SaaS Super Admin (platform owner — NOT a location owner)
+    | Manual: php artisan db:seed --class=SuperAdminSeeder
+    |--------------------------------------------------------------------------
+    */
+
+    'superadmin' => [
+        'name' => env('SUPERADMIN_NAME', 'Super Admin'),
+        'email' => env('SUPERADMIN_EMAIL'),
+        'password' => env('SUPERADMIN_PASSWORD'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Location Owner (one owner per Engage organization location)
+    | Manual: php artisan db:seed --class=EngageLocationOwnerSeeder
+    | Requires EngageOrganizationLocationSeeder first.
+    |--------------------------------------------------------------------------
+    */
+
+    'location_owner' => [
+        'name' => env('ENGAGE_ORG_OWNER_NAME', 'Location Owner'),
+        'email' => env('ENGAGE_ORG_OWNER_EMAIL'),
+        'password' => env('ENGAGE_ORG_OWNER_PASSWORD'),
+    ],
 
 ];

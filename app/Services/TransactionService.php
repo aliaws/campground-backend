@@ -20,8 +20,8 @@ class TransactionService
     {
         $query = Transaction::query();
 
-        if (! empty($filters['tenant_id'])) {
-            $query->where('tenant_id', $filters['tenant_id']);
+        if (! empty($filters['engage_organization_location_id'])) {
+            $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
         }
 
         if (! empty($filters['payment_status'])) {
@@ -95,7 +95,7 @@ class TransactionService
                 'payment_status' => $data['payment_status'] ?? 'draft',
                 'invoice_status' => 'invoicing',
                 'transaction_date' => now(),
-                'tenant_id' => $data['tenant_id'],
+                'engage_organization_location_id' => $data['engage_organization_location_id'],
             ]);
 
             $total = 0;
@@ -283,7 +283,7 @@ class TransactionService
                 'payment_status' => 'pending',
                 'invoice_status' => 'invoicing',
                 'transaction_date' => now(),
-                'tenant_id' => $booking->tenant_id,
+                'engage_organization_location_id' => $booking->engage_organization_location_id,
             ]);
 
             $quantity = max((int) ($booking->quantity ?? 1), 1);

@@ -70,15 +70,8 @@ class GhlBookingService
         }
 
         $customer = $booking->customer;
-
-        if (! $customer->ghl_contact_id) {
-            $this->ghlService->syncContactToGhl($customer);
-            $customer = $customer->fresh();
-        }
-
-        if (! $customer->ghl_contact_id) {
-            throw new \RuntimeException('Unable to sync customer to GHL before creating booking.');
-        }
+        $orgLocationId = $booking->engage_organization_location_id;
+        $ghlContactId = $this->ensureGhlContactId($customer, $orgLocationId);
 
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
@@ -111,6 +104,7 @@ class GhlBookingService
                 $detail,
                 $baseDetail,
                 $customer,
+                $ghlContactId,
                 $locationId,
                 $timezone,
             );
@@ -160,15 +154,7 @@ class GhlBookingService
         $booking->loadMissing(['customer', 'product']);
         $product = $booking->product;
         $customer = $booking->customer;
-
-        if (! $customer->ghl_contact_id) {
-            $this->ghlService->syncContactToGhl($customer);
-            $customer = $customer->fresh();
-        }
-
-        if (! $customer->ghl_contact_id) {
-            throw new \RuntimeException('Unable to sync customer to GHL before creating Text2Pay invoice.');
-        }
+        $ghlContactId = $this->ensureGhlContactId($customer, $booking->engage_organization_location_id);
 
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
@@ -187,7 +173,7 @@ class GhlBookingService
                 'qty' => 1,
             ]],
             'contactDetails' => [
-                'id' => $customer->ghl_contact_id,
+                'id' => $ghlContactId,
                 'name' => $customer->name,
                 'phoneNo' => $this->normalizePhoneForGhl($customer->phone) ?? '',
                 'email' => $customer->email ?? '',
@@ -251,14 +237,7 @@ class GhlBookingService
             return;
         }
 
-        if (! $customer->ghl_contact_id) {
-            $this->ghlService->syncContactToGhl($customer);
-            $customer = $customer->fresh();
-        }
-
-        if (! $customer->ghl_contact_id) {
-            throw new \RuntimeException('Unable to sync customer to GHL before creating product sale invoice.');
-        }
+        $ghlContactId = $this->ensureGhlContactId($customer, $transaction->engage_organization_location_id);
 
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
@@ -281,7 +260,7 @@ class GhlBookingService
                 'priceId' => $item['price_id'] ?? null,
             ], fn ($value) => $value !== null), $lineItems),
             'contactDetails' => [
-                'id' => $customer->ghl_contact_id,
+                'id' => $ghlContactId,
                 'name' => $customer->name,
                 'phoneNo' => $this->normalizePhoneForGhl($customer->phone) ?? '',
                 'email' => $customer->email ?? '',
@@ -549,6 +528,7 @@ class GhlBookingService
         GhlServiceDetail $detail,
         GhlServiceDetail $baseDetail,
         Customer $customer,
+        string $ghlContactId,
         string $locationId,
         string $timezone,
     ): array {
@@ -557,7 +537,7 @@ class GhlBookingService
 
         return [
             'locationId' => $locationId,
-            'contactId' => $customer->ghl_contact_id,
+            'contactId' => $ghlContactId,
             'source' => 'rental',
             'formData' => $this->buildContactFormData($customer, $firstName, $lastName, $locationId, $timezone),
             'selectedSlotInfo' => [
@@ -826,5 +806,23 @@ class GhlBookingService
             ],
             'status' => 'processed',
         ]);
+    }
+
+    private function ensureGhlContactId(Customer $customer, ?string $orgLocationId): string
+    {
+        $ghlContactId = $customer->ghlContactIdFor($orgLocationId);
+
+        if ($ghlContactId) {
+            return $ghlContactId;
+        }
+
+        $this->ghlService->syncContactToGhl($customer, $orgLocationId);
+        $ghlContactId = $customer->fresh()->ghlContactIdFor($orgLocationId);
+
+        if (! $ghlContactId) {
+            throw new \RuntimeException('Unable to sync customer to GHL.');
+        }
+
+        return $ghlContactId;
     }
 }

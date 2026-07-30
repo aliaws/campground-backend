@@ -24,7 +24,7 @@ class ServiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = array_merge($request->all(), [
-            'tenant_id' => $request->user()->tenant_id,
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         $services = $this->productService->listServices($filters);
@@ -38,7 +38,7 @@ class ServiceController extends Controller
 
     public function show(Request $request, Product $product): JsonResponse
     {
-        if ($product->tenant_id !== $request->user()->tenant_id || $product->product_rental_id === null) {
+        if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId() || $product->product_rental_id === null) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -79,7 +79,7 @@ class ServiceController extends Controller
     public function pullFromGhl(Request $request): JsonResponse
     {
         try {
-            $results = $this->ghlServiceSyncService->pullServices($request->user()->tenant_id);
+            $results = $this->ghlServiceSyncService->pullServices($request->user()->resolveOrganizationLocationId());
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

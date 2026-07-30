@@ -31,7 +31,7 @@ class SiteMapElement extends Model
         'z_index',
         'is_visible',
         'category',
-        'tenant_id',
+        'engage_organization_location_id',
     ];
 
     protected function casts(): array

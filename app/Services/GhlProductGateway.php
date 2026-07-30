@@ -117,9 +117,9 @@ class GhlProductGateway
 
     private function cacheKey(string $ghlProductId): string
     {
-        $tenantId = $this->client->getSetting()?->tenant_id ?? 'default';
+        $cacheKeyPrefix = $this->client->getSetting()?->oauth_state_key ?? 'default';
 
-        return "ghl:product-price:{$tenantId}:{$ghlProductId}";
+        return "ghl:product-price:{$cacheKeyPrefix}:{$ghlProductId}";
     }
 
     private function requireLocationId(): string

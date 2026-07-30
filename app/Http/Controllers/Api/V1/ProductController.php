@@ -24,7 +24,7 @@ class ProductController extends Controller
     public function index(Request $request): JsonResponse
     {
         $products = $this->productService->list(
-            array_merge($request->all(), ['tenant_id' => $request->user()->tenant_id])
+            array_merge($request->all(), ['engage_organization_location_id' => $request->user()->resolveOrganizationLocationId()])
         );
 
         return response()->json([
@@ -52,7 +52,7 @@ class ProductController extends Controller
     public function lookupBySku(Request $request): JsonResponse
     {
         $sku = $request->query('sku');
-        $product = $sku ? $this->productService->findBySku($request->user()->tenant_id, $sku) : null;
+        $product = $sku ? $this->productService->findBySku($request->user()->resolveOrganizationLocationId(), $sku) : null;
 
         return response()->json([
             'success' => true,
@@ -64,7 +64,7 @@ class ProductController extends Controller
     public function store(StoreProductRequest $request): JsonResponse
     {
         $product = $this->productService->create(
-            $request->validated() + ['tenant_id' => $request->user()->tenant_id]
+            $request->validated() + ['engage_organization_location_id' => $request->user()->resolveOrganizationLocationId()]
         );
 
         return response()->json([
@@ -169,7 +169,7 @@ class ProductController extends Controller
 
     public function bulkSync(Request $request): JsonResponse
     {
-        $results = $this->ghlProductSyncService->bulkSyncProducts($request->user()->tenant_id);
+        $results = $this->ghlProductSyncService->bulkSyncProducts($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,
@@ -180,7 +180,7 @@ class ProductController extends Controller
 
     public function bulkPull(Request $request): JsonResponse
     {
-        $results = $this->ghlProductSyncService->bulkPullFromGhl($request->user()->tenant_id);
+        $results = $this->ghlProductSyncService->bulkPullFromGhl($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,
@@ -191,14 +191,14 @@ class ProductController extends Controller
 
     /**
      * Backfills a SKU (and therefore a printable Code 39 barcode) onto every
-     * non-rental goods product in the tenant that doesn't have one yet —
+     * non-rental goods product in the location that doesn't have one yet —
      * covers products created before SKU auto-generation existed, or via any
      * path that bypassed it. Rentals/services have no SKU concept and are
      * never touched (see ProductService::generateMissingSkus()).
      */
     public function generateSkus(Request $request): JsonResponse
     {
-        $results = $this->productService->generateMissingSkus($request->user()->tenant_id);
+        $results = $this->productService->generateMissingSkus($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,

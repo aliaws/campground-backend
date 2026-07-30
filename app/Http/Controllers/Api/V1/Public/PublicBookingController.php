@@ -13,7 +13,7 @@ use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
 use App\Services\RentalResolver;
-use App\Services\TenantResolver;
+use App\Services\OrganizationLocationResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -30,8 +30,8 @@ class PublicBookingController extends Controller
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
     public function quote(QuoteBookingRequest $request): JsonResponse
     {
-        $tenantId = TenantResolver::resolveDefault();
-        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $tenantId);
+        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
+        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $locationId);
 
         if (! $resolved) {
             return response()->json([
@@ -82,9 +82,9 @@ class PublicBookingController extends Controller
 
     public function store(StoreCustomerBookingRequest $request): JsonResponse
     {
-        $tenantId = TenantResolver::resolveDefault();
+        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
 
-        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $tenantId);
+        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $locationId);
 
         if (! $resolved) {
             return response()->json([
@@ -108,7 +108,7 @@ class PublicBookingController extends Controller
 
         $customer = $this->customerService->findOrCreate(
             $request->only(['name', 'email', 'phone']),
-            $tenantId,
+            $locationId,
             $createdBy
         );
 
@@ -124,7 +124,7 @@ class PublicBookingController extends Controller
                 'check_in_date' => $request->validated('check_in_date'),
                 'check_out_date' => $request->validated('check_out_date'),
                 'quantity' => $request->validated('quantity'),
-                'tenant_id' => $tenantId,
+                'engage_organization_location_id' => $locationId,
                 'created_by' => $createdBy,
             ], autoConfirm: false);
         } catch (\InvalidArgumentException $e) {

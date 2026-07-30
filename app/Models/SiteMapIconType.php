@@ -13,7 +13,7 @@ class SiteMapIconType extends Model
     protected $fillable = [
         'name',
         'image_url',
-        'tenant_id',
+        'engage_organization_location_id',
     ];
 
     public function elements(): HasMany

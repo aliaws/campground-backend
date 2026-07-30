@@ -16,24 +16,30 @@ class CustomerService
     ) {}
 
     /**
-     * Match an existing customer by email, then phone, before creating a new one.
+     * Match an existing customer by email, then phone, scoped to a location, before creating.
      *
      * @param  ?string  $createdBy  Only applied when actually creating a new row (see
      *                              User::createdByLabel()) — never overwrites an existing
      *                              customer's original creator on a dedup match.
      */
-    public function findOrCreate(array $data, string $tenantId, ?string $createdBy = null): Customer
+    public function findOrCreate(array $data, string $locationId, ?string $createdBy = null): Customer
     {
         $customer = null;
 
         if (! empty($data['email'])) {
-            $customer = Customer::where('tenant_id', $tenantId)
+            $customer = Customer::whereHas(
+                'locationLinks',
+                fn ($q) => $q->where('engage_organization_location_id', $locationId)
+            )
                 ->whereRaw('LOWER(email) = ?', [strtolower($data['email'])])
                 ->first();
         }
 
         if (! $customer && ! empty($data['phone'])) {
-            $customer = Customer::where('tenant_id', $tenantId)
+            $customer = Customer::whereHas(
+                'locationLinks',
+                fn ($q) => $q->where('engage_organization_location_id', $locationId)
+            )
                 ->where('phone', $data['phone'])
                 ->first();
         }
@@ -49,10 +55,15 @@ class CustomerService
                 $customer->update($patch);
             }
 
+            $customer->attachLocation($locationId);
+
             return $customer;
         }
 
-        return Customer::create($data + ['tenant_id' => $tenantId, 'created_by' => $createdBy]);
+        $customer = Customer::create($data + ['created_by' => $createdBy]);
+        $customer->attachLocation($locationId);
+
+        return $customer;
     }
 
     /**
@@ -122,27 +133,16 @@ class CustomerService
             }
         }
 
-        // Existing, pre-established behavior (contact delete + portal login
-        // teardown) — kept in the same order as the prior soft-delete flow.
-        // GHL contact delete already fails open internally (catches/logs its
-        // own errors), so it's safe to run before the transaction below.
-        // CustomerAccountService is resolved lazily (not constructor-injected)
-        // to avoid a circular dependency — it already depends on
-        // CustomerService itself (see PublicBookingController's booking flow),
-        // same pattern GhlService::markInvoiceStatus() uses for BookingService.
         $this->ghlService->deleteContactFromGhl($customer);
         app(CustomerAccountService::class)->deleteCustomerAccount($customer);
 
         DB::transaction(function () use ($customer, $bookings) {
-            // withTrashed(): a customer's transactions might include rows
-            // already soft-deleted by the normal Transaction flow — those
-            // still need a real hard delete here, not to be left behind.
             $customer->transactions()->withTrashed()->get()->each(
                 fn (Transaction $transaction) => $transaction->forceDelete()
             );
 
             foreach ($bookings as $booking) {
-                $booking->delete(); // Booking has no soft delete — already permanent.
+                $booking->delete();
             }
 
             $customer->forceDelete();

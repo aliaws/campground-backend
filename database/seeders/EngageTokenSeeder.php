@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\EngageOrganizationLocation;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
 use Illuminate\Database\Seeder;
@@ -24,9 +25,13 @@ class EngageTokenSeeder extends Seeder
             return;
         }
 
+        $locationId = EngageOrganizationLocation::query()->where('is_default', true)->value('id')
+            ?? EngageOrganizationLocation::query()->value('id');
+
         EngageToken::create([
-            'tenant_id' => $setting->tenant_id,
             'engage_setting_id' => $setting->id,
+            'engage_organization_location_id' => $locationId,
+            'token_type' => EngageToken::TYPE_LOCATION,
             'location_id' => config('engage.location_id'),
             'company_id' => config('engage.company_id'),
             'user_id' => config('engage.user_id'),
@@ -35,6 +40,6 @@ class EngageTokenSeeder extends Seeder
             'refresh_token' => config('engage.refresh_token'),
         ]);
 
-        $this->command?->info("engage_tokens seeded for tenant {$setting->tenant_id}.");
+        $this->command?->info('engage_tokens seeded (token_type=location).');
     }
 }

@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Integrations\GHL\GhlClient;
 use App\Models\Booking;
 use App\Models\Customer;
-use App\Models\EngageSetting;
+use App\Models\CustomerLocation;
 use App\Models\Transaction;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
@@ -16,11 +16,13 @@ class GhlService
         private GhlClient $client,
     ) {}
 
-    public function syncContactToGhl(Customer $customer): ?string
+    public function syncContactToGhl(Customer $customer, ?string $orgLocationId = null): ?string
     {
+        $orgLocationId ??= OrganizationLocationResolver::resolveDefaultLocationId();
+
         $customer->update(['ghl_sync_status' => 'pending']);
 
-        $locationId = $this->client->getLocationId();
+        $ghlLocationId = $this->client->getLocationId();
 
         $nameParts = explode(' ', $customer->name, 2);
         $firstName = $nameParts[0] ?? '';
@@ -54,9 +56,11 @@ class GhlService
         }
 
         try {
-            if ($customer->ghl_contact_id) {
+            $ghlContactId = $customer->ghlContactIdFor($orgLocationId);
+
+            if ($ghlContactId) {
                 // PUT does not accept locationId
-                $response = $this->client->put("contacts/{$customer->ghl_contact_id}", $sharedFields);
+                $response = $this->client->put("contacts/{$ghlContactId}", $sharedFields);
 
                 $this->logOutbound('contact.updated', $sharedFields, $response);
 
@@ -65,11 +69,11 @@ class GhlService
                     'ghl_last_synced_at' => now(),
                 ]);
 
-                return $customer->ghl_contact_id;
+                return $ghlContactId;
             }
 
-            // POST requires locationId to identify the sub-account
-            $createPayload = array_merge(['locationId' => $locationId], $sharedFields);
+            // POST requires GHL's locationId to identify the sub-account
+            $createPayload = array_merge(['locationId' => $ghlLocationId], $sharedFields);
             $response = $this->client->post('contacts/', $createPayload);
 
             $this->logOutbound('contact.created', $createPayload, $response);
@@ -82,8 +86,8 @@ class GhlService
                 ?? null;
 
             if ($ghlId) {
+                $customer->setGhlContactIdFor($orgLocationId, $ghlId);
                 $customer->update([
-                    'ghl_contact_id' => $ghlId,
                     'ghl_sync_status' => 'synced',
                     'ghl_last_synced_at' => now(),
                 ]);
@@ -104,8 +108,8 @@ class GhlService
                         'ghl_contact_id' => $existingId,
                     ]);
 
+                    $customer->setGhlContactIdFor($orgLocationId, $existingId);
                     $customer->update([
-                        'ghl_contact_id' => $existingId,
                         'ghl_sync_status' => 'synced',
                         'ghl_last_synced_at' => now(),
                     ]);
@@ -137,7 +141,7 @@ class GhlService
      *
      * @return array{pulled: int, created: int, updated: int, errors: int, error_details: array}
      */
-    public function bulkPullContacts(string $tenantId): array
+    public function bulkPullContacts(string $locationId): array
     {
         $locationId = $this->client->getLocationId();
 
@@ -171,22 +175,29 @@ class GhlService
                         ($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')
                     ) ?: ($contact['name'] ?? 'Unknown');
 
-                    $customer = Customer::updateOrCreate(
-                        ['ghl_contact_id' => $contact['id']],
-                        [
+                    $link = CustomerLocation::where('ghl_contact_id', $contact['id'])->first();
+                    $customer = $link ? Customer::find($link->customer_id) : null;
+
+                    if ($customer) {
+                        $customer->update([
                             'name' => $name,
                             'email' => $contact['email'] ?? null,
                             'phone' => $contact['phone'] ?? null,
                             'ghl_sync_status' => 'synced',
                             'ghl_last_synced_at' => now(),
-                            'tenant_id' => $tenantId,
-                        ]
-                    );
-
-                    if ($customer->wasRecentlyCreated) {
-                        $results['created']++;
-                    } else {
+                        ]);
+                        $customer->attachLocation($locationId, $contact['id']);
                         $results['updated']++;
+                    } else {
+                        $customer = Customer::create([
+                            'name' => $name,
+                            'email' => $contact['email'] ?? null,
+                            'phone' => $contact['phone'] ?? null,
+                            'ghl_sync_status' => 'synced',
+                            'ghl_last_synced_at' => now(),
+                        ]);
+                        $customer->attachLocation($locationId, $contact['id']);
+                        $results['created']++;
                     }
 
                     $results['pulled']++;
@@ -209,15 +220,18 @@ class GhlService
         return $results;
     }
 
-    public function bulkSyncContacts(string $tenantId): array
+    public function bulkSyncContacts(string $locationId): array
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $customers = Customer::where('tenant_id', $tenantId)->get();
+        $customers = Customer::whereHas(
+            'locationLinks',
+            fn ($q) => $q->where('engage_organization_location_id', $locationId)
+        )->get();
 
         foreach ($customers as $customer) {
             try {
-                $this->syncContactToGhl($customer);
+                $this->syncContactToGhl($customer, $locationId);
                 $results['synced']++;
             } catch (\Exception $e) {
                 $results['errors']++;
@@ -235,18 +249,20 @@ class GhlService
     }
 
     /** Delete the linked GHL contact. Non-blocking: failures are logged, never thrown, so the local delete always proceeds. */
-    public function deleteContactFromGhl(Customer $customer): void
+    public function deleteContactFromGhl(Customer $customer, ?string $locationId = null): void
     {
-        if (! $customer->ghl_contact_id) {
+        $ghlContactId = $customer->ghlContactIdFor($locationId);
+
+        if (! $ghlContactId) {
             return;
         }
 
         try {
-            $this->client->delete("contacts/{$customer->ghl_contact_id}");
+            $this->client->delete("contacts/{$ghlContactId}");
         } catch (\Exception $e) {
             Log::error('GHL contact delete failed', [
                 'customer_id' => $customer->id,
-                'ghl_contact_id' => $customer->ghl_contact_id,
+                'ghl_contact_id' => $ghlContactId,
                 'error' => $e->getMessage(),
             ]);
         }
@@ -256,17 +272,20 @@ class GhlService
     {
         $customer = $booking->customer;
 
-        if (! $customer->ghl_contact_id) {
-            $this->syncContactToGhl($customer);
-            $customer = $customer->fresh();
+        $locationId = $booking->engage_organization_location_id;
+        $ghlContactId = $customer->ghlContactIdFor($locationId);
+
+        if (! $ghlContactId) {
+            $this->syncContactToGhl($customer, $locationId);
+            $ghlContactId = $customer->fresh()->ghlContactIdFor($locationId);
         }
 
-        if (! $customer->ghl_contact_id) {
+        if (! $ghlContactId) {
             return null;
         }
 
         $payload = [
-            'contactId' => $customer->ghl_contact_id,
+            'contactId' => $ghlContactId,
             'name' => "Booking - {$booking->product->name} ({$booking->check_in_date} to {$booking->check_out_date})",
             'status' => 'new',
         ];
@@ -353,26 +372,38 @@ class GhlService
     private function handleContactCreated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
+        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
 
-        Customer::updateOrCreate(
-            ['ghl_contact_id' => $contact['id']],
-            [
-                'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
-                'email' => $contact['email'] ?? null,
-                'phone' => $contact['phone'] ?? null,
-                'ghl_sync_status' => 'synced',
-                'ghl_last_synced_at' => now(),
-                'tenant_id' => $this->resolveTenantId(),
-            ]
-        );
+        $link = CustomerLocation::where('ghl_contact_id', $contact['id'])->first();
+        $fields = [
+            'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
+            'email' => $contact['email'] ?? null,
+            'phone' => $contact['phone'] ?? null,
+            'ghl_sync_status' => 'synced',
+            'ghl_last_synced_at' => now(),
+        ];
+
+        if ($link) {
+            Customer::where('id', $link->customer_id)->update($fields);
+
+            return;
+        }
+
+        $customer = Customer::create($fields);
+        $customer->attachLocation($locationId, $contact['id']);
     }
 
     private function handleContactUpdated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
 
-        Customer::where('ghl_contact_id', $contact['id'])
-            ->update([
+        $link = CustomerLocation::where('ghl_contact_id', $contact['id'])->first();
+
+        if (! $link) {
+            return;
+        }
+
+        Customer::where('id', $link->customer_id)->update([
                 'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
                 'email' => $contact['email'] ?? null,
                 'phone' => $contact['phone'] ?? null,
@@ -387,7 +418,8 @@ class GhlService
         $contactId = $opportunity['contactId'] ?? null;
 
         if ($contactId) {
-            $customer = Customer::where('ghl_contact_id', $contactId)->first();
+            $link = CustomerLocation::where('ghl_contact_id', $contactId)->first();
+            $customer = $link ? Customer::find($link->customer_id) : null;
             if ($customer) {
                 Booking::where('customer_id', $customer->id)
                     ->whereNull('ghl_opportunity_id')
@@ -705,10 +737,5 @@ class GhlService
         }
 
         return $transaction->fresh();
-    }
-
-    private function resolveTenantId(): string
-    {
-        return EngageSetting::first()?->tenant_id ?? 'default';
     }
 }

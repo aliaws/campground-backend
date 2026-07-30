@@ -1,0 +1,4655 @@
+{
+  "info": {
+    "_postman_id": "38ffd89c-2f5c-4c4c-a42f-ceca52c97884",
+    "name": "Campground POS API",
+    "description": "# Campground POS API\n\n## How to use tokens\n1. Open **0. Auth \u2014 Login by Role**\n2. Run the login for the role you want (Owner / Staff / Customer / \u2026)\n3. Tests auto-save that role's token **and** set `active_token`\n4. Most authenticated folders use `{{active_token}}` (collection auth)\n5. Customer Portal folder forces `{{customer_token}}`\n6. Public Website folder uses **no auth**\n\n## Roles\n| Role | Typical use |\n|------|-------------|\n| owner | Location owner \u2014 POS + staff + map admin |\n| admin | Location admin (create via Staff API) |\n| staff | Day-to-day POS |\n| customer | Guest portal |\n| superadmin | SaaS (folder stub \u2014 later) |\n\nUpdate emails/passwords in collection variables or the companion environment.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "27155710",
+    "_collection_link": "https://manha-systems.postman.co/workspace/ads~778de663-6e02-466e-8e94-93bdf93bfaa6/collection/27155710-38ffd89c-2f5c-4c4c-a42f-ceca52c97884?action=share&source=collection_link&creator=27155710"
+  },
+  "item": [
+    {
+      "name": "0. Auth \u2014 Login by Role",
+      "description": "Run a login to populate role tokens. Each login also sets active_token used by the rest of the collection.",
+      "item": [
+        {
+          "name": "Login as Owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Location owner. Saves owner_token + active_token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{owner_email}}\",\n  \"password\": \"{{owner_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"owner_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to owner_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Location admin (create via Staff Management first). Saves admin_token + active_token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"admin_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to admin_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "POS cashier/staff. Saves staff_token + active_token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{staff_email}}\",\n  \"password\": \"{{staff_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"staff_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to staff_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Customer portal. Account must be status=active. Saves customer_token + active_token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customer_email}}\",\n  \"password\": \"{{customer_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"customer_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to customer_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as Superadmin (later)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "SaaS superadmin \u2014 use after Super Admin folder work. Saves superadmin_token + active_token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{superadmin_email}}\",\n  \"password\": \"{{superadmin_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"superadmin_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to superadmin_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me (current active_token)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Uses collection auth {{active_token}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout (current active_token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Register (dev only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Generic register. Prefer Staff Management for real staff accounts.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dev User\",\n  \"email\": \"dev.user@example.com\",\n  \"password\": \"password123\",\n  \"password_confirmation\": \"password123\",\n  \"role\": \"staff\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"staff_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to staff_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Public Website (no auth)",
+      "item": [
+        {
+          "name": "List Public Services",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/services?search=cabin&category_id={{category_id}}&min_price=50&max_price=500&sort=price_asc&per_page=15",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "services"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "cabin",
+                  "disabled": true
+                },
+                {
+                  "key": "category_id",
+                  "value": "{{category_id}}",
+                  "disabled": true
+                },
+                {
+                  "key": "min_price",
+                  "value": "50",
+                  "disabled": true
+                },
+                {
+                  "key": "max_price",
+                  "value": "500",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "price_asc",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "15",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Rate-limited: guest-browse (60/min/IP). Resolves tenant via OrganizationLocationResolver::resolveDefaultLocationId()."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Public Service Variant (live detail)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/services/variant/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "services",
+                "variant",
+                "{{product_id}}"
+              ]
+            },
+            "description": "`{{product_id}}` here may be a Product id or a ProductRental id."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Public Service",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/services/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "services",
+                "{{product_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Public Categories",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/categories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "categories"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Quote a Public Booking",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"check_in_date\": \"2026-08-10\",\n  \"check_out_date\": \"2026-08-13\",\n  \"quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/public/bookings/quote",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "bookings",
+                "quote"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Public Booking (customer confirmation lookup)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/bookings/{{booking_id}}?email=john.camper@example.com",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "bookings",
+                "{{booking_id}}"
+              ],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "john.camper@example.com"
+                }
+              ]
+            },
+            "description": "Gated only by the `email` query param matching the booking's customer email \u2014 not real auth."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Public (Customer) Booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.id) {",
+                  "        pm.collectionVariables.set('booking_id', json.data.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"check_in_date\": \"2026-08-10\",\n  \"check_out_date\": \"2026-08-13\",\n  \"quantity\": 1,\n  \"name\": \"John Camper\",\n  \"email\": \"john.camper@example.com\",\n  \"phone\": \"+1-555-0100\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/public/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "bookings"
+              ]
+            },
+            "description": "Rate-limited: guest-booking (5/min/IP). Finds-or-creates the Customer and implicitly creates/links a customer portal account (verification email sent)."
+          },
+          "response": []
+        },
+        {
+          "name": "List Public Site Maps",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/site-maps",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "site-maps"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Public Site Map",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/site-maps/{{site_map_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "site-maps",
+                "{{site_map_id}}"
+              ]
+            },
+            "description": "Only is_visible elements are included."
+          },
+          "response": []
+        }
+      ],
+      "description": "Unauthenticated browse/book widget. Matches the customer-facing website.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "2. Customer Account (register / verify)",
+      "item": [
+        {
+          "name": "Customer Register",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Camper\",\n  \"email\": \"john.camper@example.com\",\n  \"phone\": \"+1-555-0100\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "register"
+              ]
+            },
+            "description": "Rate-limited: guest-register. Explicit self-service signup (separate from the implicit account creation on a public booking). Sends a verification email."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"customer_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to customer_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{customer_email}}\",\n  \"password\": \"{{customer_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Same endpoint as staff login \u2014 saves the token into `customer_token` instead of `staff_token`."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Verify Code",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{customer_action_token}}\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/verify-code",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "verify-code"
+              ]
+            },
+            "description": "Rate-limited: guest-verify. `token` comes from the verification email/link (set the `customer_action_token` collection variable manually from the email or dev log \u2014 it is never returned by any API response, by design)."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Resend Verification",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.camper@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/resend-verification",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "resend-verification"
+              ]
+            },
+            "description": "Rate-limited: guest-resend-verification (5/hr per IP+email)."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Create Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const json = pm.response.json();",
+                  "    if (json.data && json.data.token) {",
+                  "        pm.collectionVariables.set('customer_token', json.data.token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{customer_action_token}}\",\n  \"password\": \"password123\",\n  \"password_confirmation\": \"password123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/create-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "create-password"
+              ]
+            },
+            "description": "Requires the account to already be `verified` (see Customer Verify Code). Returns a JWT access token \u2014 signs the guest in immediately."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Forgot Password",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.camper@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/forgot-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "forgot-password"
+              ]
+            },
+            "description": "Rate-limited: guest-forgot-password (3/hr per IP+email)."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Reset Password",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{customer_action_token}}\",\n  \"password\": \"newPassword123\",\n  \"password_confirmation\": \"newPassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/reset-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "reset-password"
+              ]
+            },
+            "description": "`token` comes from the password-reset email link. Invalidates all existing JWT sessions on success."
+          },
+          "response": []
+        }
+      ],
+      "description": "Customer self-registration + verification. Paths are /customer/* (not /guest/*). Login saves customer_token.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "3. Customer Portal (role:customer)",
+      "item": [
+        {
+          "name": "Customer Change Password",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"password123\",\n  \"password\": \"newPassword123\",\n  \"password_confirmation\": \"newPassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/change-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "change-password"
+              ]
+            },
+            "description": "Rate-limited: guest-change-password (10/min/user). Revokes all *other* sessions, keeps this one alive."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer: List My Bookings",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "bookings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Customer: Get My Booking",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer/bookings/{{booking_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "bookings",
+                "{{booking_id}}"
+              ]
+            },
+            "description": "403s if the booking doesn't belong to this customer's linked customer."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer: Cancel My Booking",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer/bookings/{{booking_id}}/cancel",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "bookings",
+                "{{booking_id}}",
+                "cancel"
+              ]
+            },
+            "description": "422 if already cancelled or already paid (paid bookings must go through staff)."
+          },
+          "response": []
+        },
+        {
+          "name": "Customer: Get My Booking Invoice",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer/bookings/{{booking_id}}/invoice",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "bookings",
+                "{{booking_id}}",
+                "invoice"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Customer: Update My Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Camper\",\n  \"phone\": \"+1-555-0199\",\n  \"address\": {\n    \"line1\": \"123 Pine Rd\",\n    \"city\": \"Sacramento\",\n    \"state\": \"CA\",\n    \"zip\": \"95814\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/customer/profile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer",
+                "profile"
+              ]
+            },
+            "description": "Updates the linked Customer record and re-syncs the GHL contact (non-blocking on failure)."
+          },
+          "response": []
+        }
+      ],
+      "description": "Requires customer_token. Run Login as Customer first. Account must be active.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{customer_token}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "4. POS Operations (owner / admin / staff)",
+      "description": "Day-to-day POS. Uses {{active_token}} \u2014 login as Owner or Staff first.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{active_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Products",
+          "item": [
+            {
+              "name": "List Products",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products?search=cabin&product_type=PHYSICAL&is_rental=1&status=active&engage_sync_status=synced&category_id={{category_id}}&per_page=15",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "cabin",
+                      "disabled": true
+                    },
+                    {
+                      "key": "product_type",
+                      "value": "PHYSICAL",
+                      "disabled": true
+                    },
+                    {
+                      "key": "is_rental",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "active",
+                      "disabled": true
+                    },
+                    {
+                      "key": "engage_sync_status",
+                      "value": "synced",
+                      "disabled": true
+                    },
+                    {
+                      "key": "category_id",
+                      "value": "{{category_id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated. All query params optional/disabled by default \u2014 enable the ones you need."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('product_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Firewood Bundle\",\n  \"product_type\": \"PHYSICAL\",\n  \"description\": \"Bundle of seasoned firewood, ~0.75 cu ft.\",\n  \"status\": \"active\",\n  \"available_in_store\": true,\n  \"tax_inclusive\": false,\n  \"is_taxes_enabled\": true,\n  \"track_product_inventory\": true,\n  \"price\": 12.5,\n  \"quantity\": 50,\n  \"category_ids\": []\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products"
+                  ]
+                },
+                "description": "`product_type`: DIGITAL|PHYSICAL|SERVICE. `status`: active|draft|archived. A SERVICE product only becomes a bookable rental once it has a `product_rental_id` (set via the GHL rental sync, not this endpoint)."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Product",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Product",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Firewood Bundle (Updated)\",\n  \"price\": 14.0,\n  \"status\": \"active\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}"
+                  ]
+                },
+                "description": "All fields are `sometimes` \u2014 send only what changed."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Product",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}"
+                  ]
+                },
+                "description": "Soft delete."
+              },
+              "response": []
+            },
+            {
+              "name": "Upload Product Image",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "image",
+                      "description": "Image file, max 2MB",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/image",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "image"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Attach Categories to Product",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"category_ids\": [\n    \"{{category_id}}\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/categories",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "categories"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Sync Product to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "sync-ghl"
+                  ]
+                },
+                "description": "Regular catalog products only (not rentals \u2014 those sync via Services pull-ghl)."
+              },
+              "response": []
+            },
+            {
+              "name": "Pull Product from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "pull-ghl"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Products to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "bulk-sync-ghl"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Pull Products from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/bulk-pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "bulk-pull-ghl"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Customers",
+          "item": [
+            {
+              "name": "List Customers",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers?search=john&ghl_sync_status=synced&per_page=15",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "john",
+                      "disabled": true
+                    },
+                    {
+                      "key": "ghl_sync_status",
+                      "value": "synced",
+                      "disabled": true
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Customer",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('customer_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"John Camper\",\n  \"email\": \"john.camper@example.com\",\n  \"phone\": \"+1-555-0100\",\n  \"address\": {\n    \"line1\": \"123 Pine Rd\",\n    \"city\": \"Sacramento\",\n    \"state\": \"CA\",\n    \"zip\": \"95814\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/customers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers"
+                  ]
+                },
+                "description": "find-or-create by email/phone within the tenant. Also implicitly creates/links a `role=customer` portal account for this email (no verification email sent when created by staff)."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Customer",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Customer",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"John Camper Jr.\",\n  \"phone\": \"+1-555-0101\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Customer",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Sync Customer to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/{{customer_id}}/sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "{{customer_id}}",
+                    "sync-ghl"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Customers to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "bulk-sync-ghl"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Pull Customers from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/bulk-pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "bulk-pull-ghl"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Services (Rentals)",
+          "item": [
+            {
+              "name": "List Services (Staff)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/services?search=cabin&category_id={{category_id}}&min_price=50&max_price=500&sort=price_asc&per_page=15",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "services"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "cabin",
+                      "disabled": true
+                    },
+                    {
+                      "key": "category_id",
+                      "value": "{{category_id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "min_price",
+                      "value": "50",
+                      "disabled": true
+                    },
+                    {
+                      "key": "max_price",
+                      "value": "500",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sort",
+                      "value": "price_asc",
+                      "disabled": true
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Bookable rentals only (product_rental_id not null). Local, fast \u2014 no live GHL calls."
+              },
+              "response": []
+            },
+            {
+              "name": "Pull Services from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/services/pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "services",
+                    "pull-ghl"
+                  ]
+                },
+                "description": "Hits GHL `calendars/services?industryType=rental` and upserts the rental catalog (products + product_rentals)."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Service (Staff, live detail)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/services/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "services",
+                    "{{product_id}}"
+                  ]
+                },
+                "description": "Fetches live pricing/availability/duration from GHL via GhlRentalGateway (falls back to local-only payload if GHL is unreachable)."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Bookings",
+          "item": [
+            {
+              "name": "List Bookings",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/bookings?status=confirmed&customer_id={{customer_id}}&date_from=2026-08-01&date_to=2026-08-31&per_page=15",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "confirmed",
+                      "disabled": true
+                    },
+                    {
+                      "key": "customer_id",
+                      "value": "{{customer_id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "date_from",
+                      "value": "2026-08-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "date_to",
+                      "value": "2026-08-31",
+                      "disabled": true
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Quote a Booking",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"check_in_date\": \"2026-08-10\",\n  \"check_out_date\": \"2026-08-13\",\n  \"quantity\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/bookings/quote",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "quote"
+                  ]
+                },
+                "description": "`product_id` accepts either a Product id or a ProductRental id (resolved via RentalResolver). Live GHL pricing \u2014 nothing persisted."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Booking (Staff)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('booking_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"product_id\": \"{{product_id}}\",\n  \"check_in_date\": \"2026-08-10\",\n  \"check_out_date\": \"2026-08-13\",\n  \"quantity\": 1,\n  \"notes\": \"Requested a lakeside site if available.\",\n  \"payment_method\": \"cash\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/bookings",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings"
+                  ]
+                },
+                "description": "`payment_method`: omit (real GHL booking + invoice email, status `pending`) | `cash` (real booking, marked paid+confirmed immediately, no email) | `card` (Text2Pay link, status `requested`, same flow as customer bookings)."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Booking",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}"
+                  ]
+                },
+                "description": "Self-heals GHL invoice/paid-status via GhlService::reconcileInvoiceStatus() before returning."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Booking Invoice (live Engage detail)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}/invoice",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Booking Status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"confirmed\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}/status",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}",
+                    "status"
+                  ]
+                },
+                "description": "status: pending|confirmed|cancelled."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Booking Check-in/out",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"check_in\": \"2026-08-10T15:00:00Z\",\n  \"check_out\": \"2026-08-13T11:00:00Z\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}/check-in-out",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}",
+                    "check-in-out"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Confirm Booking (customer request -> real booking)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}/confirm",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}",
+                    "confirm"
+                  ]
+                },
+                "description": "For a staff-visible 'requested' booking (e.g. a customer booking awaiting staff review): creates the real GHL calendar booking + invoice and emails the payment link."
+              },
+              "response": []
+            },
+            {
+              "name": "Pay Cash (mark booking paid)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/bookings/{{booking_id}}/pay-cash",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "bookings",
+                    "{{booking_id}}",
+                    "pay-cash"
+                  ]
+                },
+                "description": "Marks a cash 'pay later' booking as paid; self-heals a missing GHL calendar booking first if needed."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Transactions",
+          "item": [
+            {
+              "name": "List Transactions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/transactions?payment_status=paid&payment_method=cash&invoice_status=completed&customer_id={{customer_id}}&date_from=2026-08-01&date_to=2026-08-31&per_page=15",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "transactions"
+                  ],
+                  "query": [
+                    {
+                      "key": "payment_status",
+                      "value": "paid",
+                      "disabled": true
+                    },
+                    {
+                      "key": "payment_method",
+                      "value": "cash",
+                      "disabled": true
+                    },
+                    {
+                      "key": "invoice_status",
+                      "value": "completed",
+                      "disabled": true
+                    },
+                    {
+                      "key": "customer_id",
+                      "value": "{{customer_id}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "date_from",
+                      "value": "2026-08-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "date_to",
+                      "value": "2026-08-31",
+                      "disabled": true
+                    },
+                    {
+                      "key": "per_page",
+                      "value": "15",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Transaction",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('transaction_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"booking_id\": \"{{booking_id}}\",\n  \"payment_method\": \"cash\",\n  \"payment_status\": \"paid\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"product_type\": \"physical\",\n      \"quantity\": 2,\n      \"unit_price\": 12.5\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/transactions",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "transactions"
+                  ]
+                },
+                "description": "`items[].product_type`: rental|physical|addon. `payment_method`: cash|card. `payment_status`: paid|pending|draft. Used directly by staff for extras/add-ons; booking-linked rental transactions are normally auto-created by POST /bookings."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Transaction",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/transactions/{{transaction_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "transactions",
+                    "{{transaction_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Transaction Payment Status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"payment_status\": \"paid\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/transactions/{{transaction_id}}/payment-status",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "transactions",
+                    "{{transaction_id}}",
+                    "payment-status"
+                  ]
+                },
+                "description": "Setting to `paid` auto-sets invoice_status to completed and (for booking-linked transactions) triggers the GHL record-payment call."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Transaction Invoice",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/transactions/{{transaction_id}}/invoice",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "transactions",
+                    "{{transaction_id}}",
+                    "invoice"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Reports",
+          "item": [
+            {
+              "name": "Report Summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/reports/summary",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "reports",
+                    "summary"
+                  ]
+                },
+                "description": "Today's paid revenue, occupancy %, check-ins today, avg stay nights, bookings-per-weekday, revenue-by-category \u2014 all computed live."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('category_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cabins\",\n  \"sort_order\": 1,\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/categories",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories"
+                  ]
+                },
+                "description": "`slug` auto-derived from `name` if omitted."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Category",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Category",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cabins & Cottages\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Sync Category to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}/sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}",
+                    "sync-ghl"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Categories to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "bulk-sync-ghl"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Amenities",
+          "item": [
+            {
+              "name": "List Amenities",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/amenities",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Amenity",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('amenity_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"WiFi\",\n  \"icon\": \"wifi\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/amenities",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Amenity",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Free WiFi\",\n  \"icon\": \"wifi\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities",
+                    "{{amenity_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Amenity",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities",
+                    "{{amenity_id}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Features",
+          "item": [
+            {
+              "name": "List Features",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/features",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Feature",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('feature_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/features",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Feature",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/features/{{feature_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features",
+                    "{{feature_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Feature",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/features/{{feature_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features",
+                    "{{feature_id}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Admin / Owner",
+      "description": "Staff CRUD, map builder mutations, Engage settings. Login as Owner (or Admin) so active_token has permission.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{active_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Staff Management",
+          "item": [
+            {
+              "name": "List Staff",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/staff",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "staff"
+                  ]
+                },
+                "description": "admin/staff/cashier users within the caller's tenant."
+              },
+              "response": []
+            },
+            {
+              "name": "Create Staff Account (admin only)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"New Cashier\",\n  \"email\": \"cashier@example.com\",\n  \"password\": \"password123\",\n  \"password_confirmation\": \"password123\",\n  \"role\": \"cashier\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/staff",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "staff"
+                  ]
+                },
+                "description": "role: admin|staff|cashier. Requires the caller to have role=admin."
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "  var json = pm.response.json();",
+                      "  var id = json.data.id;",
+                      "  if (id) {",
+                      "    pm.collectionVariables.set(\"staff_user_id\", id);",
+                      "    console.log(\"Saved staff_user_id=\" + id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update Staff",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/staff/{{staff_user_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "staff",
+                    "{{staff_user_id}}"
+                  ]
+                },
+                "description": "Omit password fields or leave empty to keep current password. role: admin|staff.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Updated Staff\",\n  \"role\": \"staff\",\n  \"password\": \"\",\n  \"password_confirmation\": \"\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Staff",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/staff/{{staff_user_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "staff",
+                    "{{staff_user_id}}"
+                  ]
+                },
+                "description": "Owner/admin only (admin cannot delete other admins)."
+              },
+              "response": []
+            }
+          ],
+          "description": "Requires owner/admin/superadmin. Create staff \u2192 saves staff_user_id.",
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Site Maps",
+          "item": [
+            {
+              "name": "List Site Maps",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-maps",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Site Map (admin only)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('site_map_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Main Campground\",\n  \"is_default\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-maps",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Site Map",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Site Map (admin only)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Main Campground (North Field)\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Site Map (admin only)",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Upload Site Map Photo (admin only)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "image",
+                      "description": "Image file, max 4MB",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}/image",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}",
+                    "image"
+                  ]
+                },
+                "description": "Replacing/uploading a photo clears all existing markers on this map (their x/y percentages have no tie to the new photo's content)."
+              },
+              "response": []
+            },
+            {
+              "name": "Remove Site Map Photo (admin only)",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}/image",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}",
+                    "image"
+                  ]
+                },
+                "description": "Also clears all markers on this map, same reasoning as upload."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Site Map Elements",
+          "item": [
+            {
+              "name": "Add Element to Map (admin only)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('element_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"icon\",\n  \"icon_key\": \"tent\",\n  \"shape\": \"circle\",\n  \"icon_style\": \"filled\",\n  \"label\": \"Site 12\",\n  \"x\": 45.5,\n  \"y\": 30.2,\n  \"width\": 6,\n  \"height\": 6,\n  \"rotation\": 0,\n  \"color\": \"#135846\",\n  \"opacity\": 1,\n  \"z_index\": 1,\n  \"is_visible\": true,\n  \"category\": \"Tent Sites\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}/elements",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}",
+                    "elements"
+                  ]
+                },
+                "description": "type: icon|rental. For type=rental, `product_rental_id` is required instead of icon_key. x/y/width/height are percentages (0-100) of the canvas."
+              },
+              "response": []
+            },
+            {
+              "name": "Add Rental Marker to Map (admin only)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"rental\",\n  \"product_rental_id\": \"{{product_id}}\",\n  \"shape\": \"rectangle\",\n  \"label\": \"12\",\n  \"x\": 60,\n  \"y\": 40,\n  \"width\": 5,\n  \"height\": 5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-maps/{{site_map_id}}/elements",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-maps",
+                    "{{site_map_id}}",
+                    "elements"
+                  ]
+                },
+                "description": "Example of placing a bookable rental as a map marker. `product_rental_id` here should be an actual ProductRental id, not a Product id."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Element (admin only)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"x\": 47.0,\n  \"y\": 32.5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-map-elements/{{element_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-map-elements",
+                    "{{element_id}}"
+                  ]
+                },
+                "description": "Every field is independently optional/`sometimes` \u2014 PATCH only what changed (drag = x/y, resize = width/height, restyle = color/opacity, etc.)."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Element (admin only)",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-map-elements/{{element_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-map-elements",
+                    "{{element_id}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Site Map Icon Types",
+          "item": [
+            {
+              "name": "List Icon Types",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-map-icon-types",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-map-icon-types"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Icon Type (admin only)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('icon_type_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "name",
+                      "value": "RV Site",
+                      "type": "text"
+                    },
+                    {
+                      "key": "image",
+                      "description": "Image file, max 2MB",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{base_url}}/site-map-icon-types",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-map-icon-types"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Icon Type (admin only)",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/site-map-icon-types/{{icon_type_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "site-map-icon-types",
+                    "{{icon_type_id}}"
+                  ]
+                },
+                "description": "Elements referencing this icon type fall back to the default pin rather than being deleted."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Settings & Engage",
+          "item": [
+            {
+              "name": "Get Engage (GHL) Settings",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/engage",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Save Engage (GHL) Settings",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"location_id\": \"abc123LocationId\",\n  \"client_id\": \"your-ghl-client-id\",\n  \"client_secret\": \"your-ghl-client-secret\",\n  \"api_version\": \"2021-07-28\",\n  \"api_base_url\": \"https://services.leadconnectorhq.com/\",\n  \"timezone\": \"America/New_York\",\n  \"user_id\": \"\",\n  \"company_id\": \"\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/settings/engage",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Engage Authorize URL",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/engage/authorize?redirect_uri=",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage",
+                    "authorize"
+                  ],
+                  "query": [
+                    {
+                      "key": "redirect_uri",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Requires client_id/client_secret already saved. Open the returned authorize_url in a browser to complete OAuth (redirects to /settings/engage/callback)."
+              },
+              "response": []
+            },
+            {
+              "name": "Engage OAuth Callback (browser redirect, not for direct use)",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/engage/callback?code=&state={{tenant_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage",
+                    "callback"
+                  ],
+                  "query": [
+                    {
+                      "key": "code",
+                      "value": ""
+                    },
+                    {
+                      "key": "state",
+                      "value": "{{tenant_id}}"
+                    }
+                  ]
+                },
+                "description": "GHL redirects the browser here after the user authorizes \u2014 `code` and `state` (tenant_id) are supplied by GHL. Not meant to be called directly from Postman; kept here for completeness."
+              },
+              "response": []
+            },
+            {
+              "name": "Refresh Engage Token",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/engage/refresh-token",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage",
+                    "refresh-token"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Raw Tokens",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/engage/tokens",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage",
+                    "tokens"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Save Raw Tokens",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"authorization_code\": \"\",\n  \"access_token\": \"\",\n  \"refresh_token\": \"\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/settings/engage/tokens",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "engage",
+                    "tokens"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Countries",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/countries",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "countries"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Custom Fields",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/settings/custom-fields?entity_type=customer",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "custom-fields"
+                  ],
+                  "query": [
+                    {
+                      "key": "entity_type",
+                      "value": "customer",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Custom Field",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entity_type\": \"customer\",\n  \"field_name\": \"Preferred Contact Method\",\n  \"field_type\": \"text\",\n  \"engage_organization_location_id\": \"{{engage_organization_location_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/settings/custom-fields",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "settings",
+                    "custom-fields"
+                  ]
+                },
+                "description": "entity_type: customer|booking|product. `tenant_id` must be set explicitly \u2014 run Auth > Me first to populate the `tenant_id` collection variable."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Super Admin (later)",
+      "description": "Placeholder for SaaS-level routes. Login as Superadmin is already under Auth. Add platform routes here when built.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{superadmin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Login as Superadmin (shortcut)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Same as Auth \u2192 Login as Superadmin.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{superadmin_email}}\",\n  \"password\": \"{{superadmin_password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.token).to.be.a(\"string\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set(\"superadmin_token\", json.data.token);",
+                  "  pm.collectionVariables.set(\"active_token\", json.data.token);",
+                  "  if (json.data.user && json.data.user.id) {",
+                  "    pm.collectionVariables.set(\"user_id\", String(json.data.user.id));",
+                  "  }",
+                  "  if (json.data.user && json.data.user.engage_organization_location_id) {",
+                  "    pm.collectionVariables.set(\"engage_organization_location_id\", json.data.user.engage_organization_location_id);",
+                  "  }",
+                  "  console.log(\"Saved token to superadmin_token + active_token\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me as Superadmin",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superadmin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Webhooks",
+      "item": [
+        {
+          "name": "Engage Inbound Webhook",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ContactCreate\",\n  \"locationId\": \"abc123LocationId\",\n  \"id\": \"ghl-contact-id\",\n  \"email\": \"john.camper@example.com\",\n  \"phone\": \"+1-555-0100\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Camper\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/webhooks/ghl",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "ghl"
+              ]
+            },
+            "description": "No auth \u2014 GHL calls this directly. Example payload shown is for a contact.created event; opportunity.created/stage_changed events have a different shape (see GhlWebhookHandler)."
+          },
+          "response": []
+        }
+      ],
+      "auth": {
+        "type": "noauth"
+      }
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{active_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1"
+    },
+    {
+      "key": "active_token",
+      "value": ""
+    },
+    {
+      "key": "owner_token",
+      "value": ""
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    },
+    {
+      "key": "staff_token",
+      "value": ""
+    },
+    {
+      "key": "customer_token",
+      "value": ""
+    },
+    {
+      "key": "superadmin_token",
+      "value": ""
+    },
+    {
+      "key": "owner_email",
+      "value": "admin@campground.com"
+    },
+    {
+      "key": "owner_password",
+      "value": "abc123AB@2021"
+    },
+    {
+      "key": "admin_email",
+      "value": ""
+    },
+    {
+      "key": "admin_password",
+      "value": ""
+    },
+    {
+      "key": "staff_email",
+      "value": "staff@campground.com"
+    },
+    {
+      "key": "staff_password",
+      "value": "password"
+    },
+    {
+      "key": "customer_email",
+      "value": "ali@accuratewebsolution.com"
+    },
+    {
+      "key": "customer_password",
+      "value": "password"
+    },
+    {
+      "key": "superadmin_email",
+      "value": "ali@accuratedigitalsolutions.com"
+    },
+    {
+      "key": "superadmin_password",
+      "value": "abc123AB@2021"
+    },
+    {
+      "key": "engage_organization_location_id",
+      "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "category_id",
+      "value": ""
+    },
+    {
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "booking_id",
+      "value": ""
+    },
+    {
+      "key": "transaction_id",
+      "value": ""
+    },
+    {
+      "key": "amenity_id",
+      "value": ""
+    },
+    {
+      "key": "feature_id",
+      "value": ""
+    },
+    {
+      "key": "site_map_id",
+      "value": ""
+    },
+    {
+      "key": "element_id",
+      "value": ""
+    },
+    {
+      "key": "icon_type_id",
+      "value": ""
+    },
+    {
+      "key": "staff_user_id",
+      "value": ""
+    },
+    {
+      "key": "customer_action_token",
+      "value": ""
+    },
+    {
+      "key": "guest_email",
+      "value": "guest@example.com"
+    }
+  ]
+}

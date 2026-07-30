@@ -13,7 +13,7 @@ class ReportController extends Controller
 
     public function summary(Request $request): JsonResponse
     {
-        $summary = $this->reportService->summary($request->user()->tenant_id);
+        $summary = $this->reportService->summary($request->user()->resolveOrganizationLocationId());
 
         return response()->json([
             'success' => true,

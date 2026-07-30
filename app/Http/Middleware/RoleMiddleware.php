@@ -12,10 +12,10 @@ class RoleMiddleware
     {
         $user = $request->user();
 
-        if (!$user || !in_array($user->role, $roles)) {
+        if (! $user || ! $user->hasAnyRole(...$roles)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. Required role: ' . implode(', ', $roles),
+                'message' => 'Unauthorized. Required role: '.implode(', ', $roles),
             ], 403);
         }
 

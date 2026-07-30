@@ -11,7 +11,7 @@ use Carbon\CarbonInterface;
 
 class ReportService
 {
-    public function summary(string $tenantId): array
+    public function summary(string $locationId): array
     {
         $today = Carbon::today();
         $weekStart = Carbon::now()->startOfWeek(Carbon::MONDAY);
@@ -20,27 +20,30 @@ class ReportService
         return [
             'week_start' => $weekStart->toDateString(),
             'week_end' => $weekEnd->toDateString(),
-            'today_revenue' => $this->todayRevenue($tenantId, $today),
-            'occupancy_pct' => $this->occupancyPct($tenantId, $today),
-            'checkins_today' => $this->checkinsToday($tenantId, $today),
-            'avg_stay_nights' => $this->avgStayNights($tenantId),
-            'bookings_this_week' => $this->bookingsThisWeek($tenantId, $weekStart, $weekEnd),
-            'revenue_by_category' => $this->revenueByCategory($tenantId, $weekStart, $weekEnd),
+            'today_revenue' => $this->todayRevenue($locationId, $today),
+            'occupancy_pct' => $this->occupancyPct($locationId, $today),
+            'checkins_today' => $this->checkinsToday($locationId, $today),
+            'avg_stay_nights' => $this->avgStayNights($locationId),
+            'bookings_this_week' => $this->bookingsThisWeek($locationId, $weekStart, $weekEnd),
+            'revenue_by_category' => $this->revenueByCategory($locationId, $weekStart, $weekEnd),
         ];
     }
 
-    private function todayRevenue(string $tenantId, Carbon $today): float
+    private function todayRevenue(string $locationId, Carbon $today): float
     {
-        return (float) Transaction::where('tenant_id', $tenantId)
+        return (float) Transaction::where('engage_organization_location_id', $locationId)
             ->where('payment_status', 'paid')
             ->whereDate('transaction_date', $today)
             ->sum('total_amount');
     }
 
-    /** Confirmed & paid bookings active today, as a % of the tenant's active rental units. */
-    private function occupancyPct(string $tenantId, Carbon $today): int
+    /** Confirmed & paid bookings active today, as a % of the location's active rental units. */
+    private function occupancyPct(string $locationId, Carbon $today): int
     {
-        $totalUnits = ProductRental::where('tenant_id', $tenantId)
+        $totalUnits = ProductRental::whereHas(
+            'product',
+            fn ($q) => $q->where('engage_organization_location_id', $locationId)
+        )
             ->where('is_active', true)
             ->count();
 
@@ -48,7 +51,7 @@ class ReportService
             return 0;
         }
 
-        $activeToday = Booking::where('tenant_id', $tenantId)
+        $activeToday = Booking::where('engage_organization_location_id', $locationId)
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', '<=', $today)
             ->whereDate('check_out_date', '>=', $today)
@@ -58,9 +61,9 @@ class ReportService
         return (int) round(min($activeToday / $totalUnits, 1) * 100);
     }
 
-    private function checkinsToday(string $tenantId, Carbon $today): int
+    private function checkinsToday(string $locationId, Carbon $today): int
     {
-        return Booking::where('tenant_id', $tenantId)
+        return Booking::where('engage_organization_location_id', $locationId)
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', $today)
             ->whereHas('transactions', fn ($q) => $q->where('payment_status', 'paid'))
@@ -68,9 +71,9 @@ class ReportService
     }
 
     /** Average nights across all non-cancelled bookings (reflects real demand, not just paid ones). */
-    private function avgStayNights(string $tenantId): float
+    private function avgStayNights(string $locationId): float
     {
-        $bookings = Booking::where('tenant_id', $tenantId)
+        $bookings = Booking::where('engage_organization_location_id', $locationId)
             ->where('status', '!=', 'cancelled')
             ->get(['check_in_date', 'check_out_date']);
 
@@ -86,9 +89,9 @@ class ReportService
     }
 
     /** Bookings created per weekday (Mon-Sun) within the current week. */
-    private function bookingsThisWeek(string $tenantId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
+    private function bookingsThisWeek(string $locationId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
     {
-        $rows = Booking::where('tenant_id', $tenantId)
+        $rows = Booking::where('engage_organization_location_id', $locationId)
             ->whereBetween('created_at', [$weekStart, $weekEnd])
             ->get(['created_at']);
 
@@ -107,10 +110,10 @@ class ReportService
     }
 
     /** Revenue from paid transactions this week, grouped by the booked product's category. */
-    private function revenueByCategory(string $tenantId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
+    private function revenueByCategory(string $locationId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
     {
-        $items = TransactionItem::whereHas('transaction', function ($q) use ($tenantId, $weekStart, $weekEnd) {
-            $q->where('tenant_id', $tenantId)
+        $items = TransactionItem::whereHas('transaction', function ($q) use ($locationId, $weekStart, $weekEnd) {
+            $q->where('engage_organization_location_id', $locationId)
                 ->where('payment_status', 'paid')
                 ->whereBetween('transaction_date', [$weekStart, $weekEnd]);
         })

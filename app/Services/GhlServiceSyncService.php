@@ -76,7 +76,7 @@ class GhlServiceSyncService
      * gateway's live-detail cache, so the first quote/show after a pull is
      * a cache hit.
      */
-    public function pullServices(string $tenantId): array
+    public function pullServices(string $locationId): array
     {
         $locationId = $this->client->getLocationId();
 
@@ -136,7 +136,7 @@ class GhlServiceSyncService
                 $this->gateway->put($ghlBaseId, $rawDetail);
                 $baseDetail = new GhlServiceDetail($rawDetail);
 
-                $product = $this->upsertBaseListing($baseDetail, $tenantId);
+                $product = $this->upsertBaseListing($baseDetail, $locationId);
                 $pulled++;
 
                 $seenGhlIds = [$ghlBaseId];
@@ -173,7 +173,7 @@ class GhlServiceSyncService
                         continue;
                     }
 
-                    $this->upsertVariant($variantDetail, $product, $ghlBaseId, $tenantId);
+                    $this->upsertVariant($variantDetail, $product, $ghlBaseId, $locationId);
                     $seenGhlIds[] = $variantId;
                     $pulled++;
                 }
@@ -197,7 +197,7 @@ class GhlServiceSyncService
     }
 
     /** Identity lives on product_rentals.ghl_id — resolve the Product through it. */
-    private function upsertBaseListing(GhlServiceDetail $detail, string $tenantId): Product
+    private function upsertBaseListing(GhlServiceDetail $detail, string $locationId): Product
     {
         $ghlId = $detail->id();
 
@@ -217,10 +217,12 @@ class GhlServiceSyncService
             'price' => $detail->basePrice() ?? $detail->paymentAmount(),
             'engage_sync_status' => 'synced',
             'engage_last_synced_at' => now(),
-            'tenant_id' => $tenantId,
+            'engage_organization_location_id' => $locationId,
         ];
 
-        $existing = ProductRental::where('tenant_id', $tenantId)->where('ghl_id', $ghlId)->first();
+        $existing = ProductRental::where('ghl_id', $ghlId)
+            ->whereHas('product', fn ($q) => $q->where('engage_organization_location_id', $locationId))
+            ->first();
 
         if ($existing) {
             $product = $existing->product;
@@ -229,12 +231,12 @@ class GhlServiceSyncService
             $product = Product::create($productAttributes);
         }
 
-        $rental = $this->upsertRentalRow($detail, $product, $ghlId, $tenantId);
+        $rental = $this->upsertRentalRow($detail, $product, $ghlId, $locationId);
 
         return $product->fresh();
     }
 
-    private function upsertVariant(GhlServiceDetail $detail, Product $baseProduct, string $baseGhlId, string $tenantId): ProductRental
+    private function upsertVariant(GhlServiceDetail $detail, Product $baseProduct, string $baseGhlId, string $locationId): ProductRental
     {
         $ghlId = $detail->id();
 
@@ -242,10 +244,10 @@ class GhlServiceSyncService
             throw new \RuntimeException('GHL variant detail missing _id');
         }
 
-        return $this->upsertRentalRow($detail, $baseProduct, $baseGhlId, $tenantId);
+        return $this->upsertRentalRow($detail, $baseProduct, $baseGhlId, $locationId);
     }
 
-    private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $tenantId): ProductRental
+    private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $locationId): ProductRental
     {
         $isBase = $detail->id() === $baseGhlId;
         // Priced for every variant, not just the base listing (2026-07-27) —
@@ -260,7 +262,7 @@ class GhlServiceSyncService
 
         // map_position is local-only data — deliberately never written here.
         return ProductRental::updateOrCreate(
-            ['tenant_id' => $tenantId, 'ghl_id' => $detail->id()],
+            ['product_id' => $product->id, 'ghl_id' => $detail->id()],
             array_filter([
                 'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
                 'is_active' => $detail->isActive(),

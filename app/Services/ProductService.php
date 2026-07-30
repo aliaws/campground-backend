@@ -17,8 +17,8 @@ class ProductService
     {
         $query = Product::query();
 
-        if (! empty($filters['tenant_id'])) {
-            $query->byTenant($filters['tenant_id']);
+        if (! empty($filters['engage_organization_location_id'])) {
+            $query->byLocation($filters['engage_organization_location_id']);
         }
 
         if (! empty($filters['product_type'])) {
@@ -65,7 +65,7 @@ class ProductService
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
 
         if (empty($data['sku'])) {
-            $data['sku'] = $this->generateUniqueSku($data['tenant_id'], $data['name'] ?? '');
+            $data['sku'] = $this->generateUniqueSku($data['engage_organization_location_id'], $data['name'] ?? '');
         }
 
         $product = Product::create($data);
@@ -114,18 +114,18 @@ class ProductService
      * Auto-generates a SKU when one isn't explicitly provided on create —
      * an uppercase-alnum-and-dash-only string, since this feeds directly
      * into a Code 39 barcode (rendered client-side), which doesn't support
-     * lowercase letters or most punctuation. Retries on the rare per-tenant
+     * lowercase letters or most punctuation. Retries on the rare per-location
      * collision rather than trusting randomness alone. Public so
      * GhlProductSyncService can assign one to a GHL-pulled stub product too.
      */
-    public function generateUniqueSku(string $tenantId, string $name): string
+    public function generateUniqueSku(string $locationId, string $name): string
     {
         $base = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name));
         $base = substr($base, 0, 6) ?: 'SKU';
 
         do {
             $candidate = $base.'-'.strtoupper(Str::random(4));
-            $exists = Product::where('tenant_id', $tenantId)->where('sku', $candidate)->exists();
+            $exists = Product::where('engage_organization_location_id', $locationId)->where('sku', $candidate)->exists();
         } while ($exists);
 
         return $candidate;
@@ -134,29 +134,29 @@ class ProductService
     /**
      * Backfills a SKU (and therefore a printable barcode, generated
      * client-side from the SKU) onto every non-rental goods product in the
-     * tenant that doesn't have one yet — e.g. products created via a GHL
+     * location that doesn't have one yet — e.g. products created via a GHL
      * pull before this feature existed, or via any path that bypassed
      * create()'s auto-generation. Rentals/services are never touched: they
      * have no SKU/barcode concept (see Product/ProductRental docs).
      */
-    public function generateMissingSkus(string $tenantId): array
+    public function generateMissingSkus(string $locationId): array
     {
-        $products = Product::byTenant($tenantId)
+        $products = Product::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', ''))
             ->get();
 
         foreach ($products as $product) {
-            $product->update(['sku' => $this->generateUniqueSku($tenantId, $product->name)]);
+            $product->update(['sku' => $this->generateUniqueSku($locationId, $product->name)]);
         }
 
         return ['updated' => $products->count()];
     }
 
     /** Exact-match SKU lookup for the Product Sales page's barcode scanner. */
-    public function findBySku(string $tenantId, string $sku): ?Product
+    public function findBySku(string $locationId, string $sku): ?Product
     {
-        return Product::byTenant($tenantId)
+        return Product::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->where('sku', $sku)
             ->with(self::EAGER)
@@ -177,7 +177,7 @@ class ProductService
      */
     public function listServices(array $filters = []): LengthAwarePaginator
     {
-        $query = Product::byTenant($filters['tenant_id'])
+        $query = Product::byLocation($filters['engage_organization_location_id'])
             ->whereNotNull('product_rental_id')
             ->where('status', 'active')
             ->with(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);

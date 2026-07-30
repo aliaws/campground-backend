@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Auth\JwtGuard;
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlWebhookHandler;
 use App\Services\GhlService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -25,6 +27,12 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Auth::extend('jwt', function ($app, string $name, array $config) {
+            return new JwtGuard(
+                Auth::createUserProvider($config['provider']),
+            );
+        });
+
         RateLimiter::for('customer-browse', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
         RateLimiter::for('customer-booking', fn (Request $request) => Limit::perMinute(5)->by($request->ip()));
 

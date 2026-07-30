@@ -163,7 +163,7 @@ class GhlProductSyncService
             ->filter()
             ->values();
 
-        $localCategoryIds = Category::where('tenant_id', $product->tenant_id)
+        $localCategoryIds = Category::where('engage_organization_location_id', $product->engage_organization_location_id)
             ->whereIn('engage_collection_id', $ghlIds)
             ->pluck('id');
 
@@ -257,11 +257,11 @@ class GhlProductSyncService
         }
     }
 
-    public function bulkSyncProducts(string $tenantId): array
+    public function bulkSyncProducts(string $locationId): array
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $products = Product::byTenant($tenantId)
+        $products = Product::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->where('status', 'active')
             ->get();
@@ -283,7 +283,7 @@ class GhlProductSyncService
         return $results;
     }
 
-    public function bulkPullFromGhl(string $tenantId): array
+    public function bulkPullFromGhl(string $locationId): array
     {
         $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
 
@@ -296,7 +296,7 @@ class GhlProductSyncService
                     continue;
                 }
 
-                if ($this->createLocalStubIfMissing($ghlProduct, $tenantId)) {
+                if ($this->createLocalStubIfMissing($ghlProduct, $locationId)) {
                     $results['created']++;
                 }
             }
@@ -306,7 +306,7 @@ class GhlProductSyncService
             Log::error('GHL product list fetch failed', ['error' => $e->getMessage()]);
         }
 
-        $products = Product::byTenant($tenantId)
+        $products = Product::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->whereNotNull('ghl_product_id')
             ->get();
@@ -328,11 +328,11 @@ class GhlProductSyncService
         return $results;
     }
 
-    public function bulkSyncCategories(string $tenantId): array
+    public function bulkSyncCategories(string $locationId): array
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $categories = Category::where('tenant_id', $tenantId)
+        $categories = Category::where('engage_organization_location_id', $locationId)
             ->where('is_active', true)
             ->get();
 
@@ -360,7 +360,7 @@ class GhlProductSyncService
      * everything else is created fresh, same "create local stub if missing,
      * update if not" pattern.
      */
-    public function pullCategoriesFromGhl(string $tenantId): array
+    public function pullCategoriesFromGhl(string $locationId): array
     {
         $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
 
@@ -379,10 +379,10 @@ class GhlProductSyncService
                     'engage_collection_id' => $ghlId,
                     'engage_sync_status' => 'synced',
                     'engage_last_synced_at' => now(),
-                    'tenant_id' => $tenantId,
+                    'engage_organization_location_id' => $locationId,
                 ];
 
-                $category = Category::where('tenant_id', $tenantId)
+                $category = Category::where('engage_organization_location_id', $locationId)
                     ->where('engage_collection_id', $ghlId)
                     ->first();
 
@@ -509,7 +509,7 @@ class GhlProductSyncService
         return $all;
     }
 
-    private function createLocalStubIfMissing(array $ghlProduct, string $tenantId): bool
+    private function createLocalStubIfMissing(array $ghlProduct, string $locationId): bool
     {
         $ghlId = $ghlProduct['_id'] ?? $ghlProduct['id'] ?? null;
 
@@ -518,7 +518,7 @@ class GhlProductSyncService
         }
 
         $exists = Product::withTrashed()
-            ->byTenant($tenantId)
+            ->byLocation($locationId)
             ->where('ghl_product_id', $ghlId)
             ->exists();
 
@@ -543,8 +543,8 @@ class GhlProductSyncService
             'available_in_store' => $ghlProduct['availableInStore'] ?? true,
             'ghl_product_id' => $ghlId,
             'engage_sync_status' => 'pending',
-            'tenant_id' => $tenantId,
-            'sku' => $this->productService->generateUniqueSku($tenantId, $name),
+            'engage_organization_location_id' => $locationId,
+            'sku' => $this->productService->generateUniqueSku($locationId, $name),
         ]);
 
         $this->syncCategoriesFromGhl($product, $ghlProduct);

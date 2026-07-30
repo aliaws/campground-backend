@@ -35,7 +35,7 @@ class Booking extends Model
         'ghl_invoice_number',
         'ghl_invoice_status',
         'ghl_invoice_url',
-        'tenant_id',
+        'engage_organization_location_id',
         'created_by',
     ];
 
@@ -105,7 +105,7 @@ class Booking extends Model
      * GHL's invoice API doesn't return this URL directly, so it's derived
      * from the same white-label domain already present on the booking's own
      * `ghl_invoice_url` (the Text2Pay payment link, e.g. .../l/{code}) —
-     * this keeps it correct per-tenant without hardcoding any one account's
+     * this keeps it correct per-location without hardcoding any one account's
      * domain.
      */
     public function ghlInvoiceViewUrl(): ?string

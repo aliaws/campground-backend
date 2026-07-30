@@ -20,7 +20,7 @@ class Transaction extends Model
         'payment_status',
         'invoice_status',
         'transaction_date',
-        'tenant_id',
+        'engage_organization_location_id',
         'ghl_invoice_id',
         'ghl_invoice_number',
         'ghl_invoice_status',

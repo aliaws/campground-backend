@@ -15,7 +15,7 @@ class SiteMapController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $maps = SiteMap::where('tenant_id', $request->user()->tenant_id)
+        $maps = SiteMap::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->orderBy('name')
             ->get();
 
@@ -28,14 +28,14 @@ class SiteMapController extends Controller
 
     public function store(StoreSiteMapRequest $request): JsonResponse
     {
-        $tenantId = $request->user()->tenant_id;
-        $data = $request->validated() + ['tenant_id' => $tenantId];
+        $locationId = $request->user()->resolveOrganizationLocationId();
+        $data = $request->validated() + ['engage_organization_location_id' => $locationId];
 
-        $map = DB::transaction(function () use ($data, $tenantId) {
-            // Only one map per tenant can be the default customers see — unset
+        $map = DB::transaction(function () use ($data, $locationId) {
+            // Only one map per location can be the default customers see — unset
             // any existing default before creating this one as the new default.
             if (! empty($data['is_default'])) {
-                SiteMap::where('tenant_id', $tenantId)->where('is_default', true)->update(['is_default' => false]);
+                SiteMap::where('engage_organization_location_id', $locationId)->where('is_default', true)->update(['is_default' => false]);
             }
 
             return SiteMap::create($data);
@@ -50,7 +50,7 @@ class SiteMapController extends Controller
 
     public function show(Request $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
@@ -65,18 +65,18 @@ class SiteMapController extends Controller
 
     public function update(StoreSiteMapRequest $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
         $data = $request->validated();
 
         DB::transaction(function () use ($data, $siteMap) {
-            // Enforce a single default per tenant — marking this map as
+            // Enforce a single default per location — marking this map as
             // default unsets it on every sibling first, so customers always see
             // exactly one map (never zero, never more than one).
             if (! empty($data['is_default'])) {
-                SiteMap::where('tenant_id', $siteMap->tenant_id)
+                SiteMap::where('engage_organization_location_id', $siteMap->engage_organization_location_id)
                     ->where('id', '!=', $siteMap->id)
                     ->where('is_default', true)
                     ->update(['is_default' => false]);
@@ -94,7 +94,7 @@ class SiteMapController extends Controller
 
     public function destroy(Request $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
@@ -105,7 +105,7 @@ class SiteMapController extends Controller
 
     public function uploadImage(Request $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
@@ -134,7 +134,7 @@ class SiteMapController extends Controller
 
     public function deleteImage(Request $request, SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->tenant_id !== $request->user()->tenant_id) {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 

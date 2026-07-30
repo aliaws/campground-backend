@@ -10,9 +10,14 @@ class EngageToken extends Model
 {
     use HasUlids;
 
+    public const TYPE_AGENCY = 'agency';
+
+    public const TYPE_LOCATION = 'location';
+
     protected $fillable = [
-        'tenant_id',
+        'engage_organization_location_id',
         'engage_setting_id',
+        'token_type',
         'location_id',
         'user_id',
         'company_id',
@@ -38,6 +43,11 @@ class EngageToken extends Model
     public function setting(): BelongsTo
     {
         return $this->belongsTo(EngageSetting::class, 'engage_setting_id');
+    }
+
+    public function organizationLocation(): BelongsTo
+    {
+        return $this->belongsTo(EngageOrganizationLocation::class, 'engage_organization_location_id');
     }
 
     public function isTokenExpired(): bool

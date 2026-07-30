@@ -34,7 +34,7 @@ class CustomerPortalController extends Controller
 
         $bookings = $this->bookingService->list([
             'customer_id' => $customer->id,
-            'tenant_id' => $request->user()->tenant_id,
+            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         // Same self-heal as bookingShow()/BookingController::index() — without

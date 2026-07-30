@@ -15,9 +15,9 @@ use App\Models\ProductRental;
 class RentalResolver
 {
     /** @return array{0: Product, 1: ProductRental}|null */
-    public function resolve(string $id, string $tenantId): ?array
+    public function resolve(string $id, string $locationId): ?array
     {
-        $product = Product::byTenant($tenantId)->find($id);
+        $product = Product::byLocation($locationId)->find($id);
 
         if ($product) {
             $rental = $product->resolveBaseRental();
@@ -25,7 +25,10 @@ class RentalResolver
             return $rental ? [$product, $rental] : null;
         }
 
-        $rental = ProductRental::where('tenant_id', $tenantId)->find($id);
+        $rental = ProductRental::whereHas(
+            'product',
+            fn ($q) => $q->where('engage_organization_location_id', $locationId)
+        )->find($id);
 
         if ($rental && $rental->product) {
             return [$rental->product, $rental];

@@ -37,16 +37,14 @@ class GhlClient
 
     private ?EngageToken $token = null;
 
-    public function __construct(?string $tenantId = null)
+    public function __construct(?string $oauthStateKey = null)
     {
-        $this->setting = EngageSetting::with('token')
-            ->when($tenantId, fn ($q) => $q->where('tenant_id', $tenantId))
-            ->first();
+        $this->setting = EngageSetting::with('token')->first();
 
         if ($this->setting) {
             $this->baseUrl = $this->setting->api_base_url ?: self::SERVICES_BASE_URL;
             $this->token = $this->setting->token
-                ?? EngageToken::query()->where('tenant_id', $this->setting->tenant_id)->first();
+                ?? EngageToken::query()->where('engage_setting_id', $this->setting->id)->first();
             $this->accessToken = $this->token?->access_token;
         }
     }
@@ -117,7 +115,7 @@ class GhlClient
      * pool resolves, retries any 401s once, sequentially, behind a single
      * refreshToken() call — never let concurrent 401s each trigger their
      * own refresh, since GHL's refresh token is one-time-use/rotating and
-     * two racing refreshes would corrupt the tenant's stored token.
+     * two racing refreshes would corrupt the location's stored token.
      *
      * @param  array<string, array{endpoint: string, query?: array}>  $requests  keyed by caller-chosen id
      * @return array<string, array|\Throwable> same keys as $requests; each value is the decoded
@@ -300,8 +298,8 @@ class GhlClient
     {
         try {
             $authService = app(GhlAuthService::class);
-            $this->setting = $authService->refreshAccessToken($this->setting);
-            $this->token = $this->setting->token;
+            $this->token = $authService->refreshAccessToken($this->setting);
+            $this->setting = $this->setting->fresh(['token']) ?? $this->setting;
             $this->accessToken = $this->token?->access_token;
         } catch (\Exception $e) {
             throw new \RuntimeException('GHL token refresh failed: '.$e->getMessage());

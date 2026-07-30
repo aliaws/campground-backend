@@ -9,14 +9,25 @@ class UserResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $locationIds = $this->relationLoaded('locationLinks')
+            ? $this->locationLinks->pluck('engage_organization_location_id')->filter()->values()->all()
+            : $this->locationLinks()->pluck('engage_organization_location_id')->all();
+
         return [
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
-            'role' => $this->role,
-            'tenant_id' => $this->tenant_id,
+            'role' => $this->primaryRole(),
+            'roles' => $this->roleList(),
+            'engage_organization_location_id' => $this->primaryLocationId(),
+            'engage_organization_location_ids' => $locationIds,
             'customer_id' => $this->customer_id,
-            'customer_status' => $this->customer_status,
+            'status' => $this->status,
+            'created_by' => $this->created_by,
+            'permissions' => $this->when($request->user()?->id === $this->id, [
+                'can_manage_staff' => $this->canManageStaffUsers(),
+                'assignable_roles' => $this->assignableStaffRoles(),
+            ]),
             'phone' => $this->when(
                 $this->relationLoaded('customer'),
                 fn () => $this->customer?->phone

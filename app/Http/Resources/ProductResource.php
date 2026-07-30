@@ -35,7 +35,7 @@ class ProductResource extends JsonResource
             'features' => FeatureResource::collection($this->whenLoaded('features')),
             'rentals' => ProductRentalResource::collection($this->whenLoaded('rentals')),
             'default_rental' => new ProductRentalResource($this->whenLoaded('defaultRental')),
-            'tenant_id' => $this->tenant_id,
+            'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
