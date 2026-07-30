@@ -15,7 +15,6 @@ use Laravel\Sanctum\HasApiTokens;
 #[Fillable(['name', 'email', 'password', 'role', 'tenant_id'])]
 #[Hidden([
     'password',
-    'remember_token',
     'customer_account_token_hash',
     'customer_verification_code_hash',
 ])]
@@ -80,7 +79,6 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'customer_verified_at' => 'datetime',
             'customer_registered_at' => 'datetime',
