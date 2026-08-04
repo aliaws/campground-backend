@@ -51,7 +51,7 @@ class PublicServiceController extends Controller
     {
         $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
 
-        if ($product->engage_organization_location_id !== $locationId || $product->status !== 'active' || $product->product_rental_id === null) {
+        if ($product->engage_organization_location_id !== $locationId || $product->status !== 'active' || ! $product->isRental()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -59,7 +59,8 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
+        $product->load(['productRental', 'defaultRental', 'categories', 'amenities', 'features']);
+        $product->loadRentalFamily();
 
         try {
             $details = $this->gateway->fetchListingBundle($product);
@@ -105,7 +106,7 @@ class PublicServiceController extends Controller
 
         [$product, $rental] = $resolved;
 
-        if ($product->status !== 'active' || $product->product_rental_id === null) {
+        if ($product->status !== 'active' || ! $product->isRental()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -113,7 +114,7 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->loadMissing(['rentals']);
+        $product->loadRentalFamily();
 
         try {
             $enriched = $this->gateway->fetchEnrichedRentalDetail($rental);

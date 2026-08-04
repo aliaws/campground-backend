@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Transaction extends Model
@@ -14,7 +15,8 @@ class Transaction extends Model
 
     protected $fillable = [
         'customer_id',
-        'booking_id',
+        'transactionable_type',
+        'transactionable_id',
         'total_amount',
         'payment_method',
         'payment_status',
@@ -40,9 +42,30 @@ class Transaction extends Model
         return $this->belongsTo(Customer::class);
     }
 
-    public function booking(): BelongsTo
+    /** Booking or Order. */
+    public function transactionable(): MorphTo
     {
-        return $this->belongsTo(Booking::class);
+        return $this->morphTo();
+    }
+
+    public function booking(): ?Booking
+    {
+        return $this->transactionable instanceof Booking ? $this->transactionable : null;
+    }
+
+    public function order(): ?Order
+    {
+        return $this->transactionable instanceof Order ? $this->transactionable : null;
+    }
+
+    public function isForBooking(): bool
+    {
+        return $this->transactionable_type === Booking::class;
+    }
+
+    public function isForOrder(): bool
+    {
+        return $this->transactionable_type === Order::class;
     }
 
     public function items(): HasMany
@@ -63,5 +86,21 @@ class Transaction extends Model
     public function isDraft(): bool
     {
         return $this->payment_status === 'draft';
+    }
+
+    public function ghlInvoiceViewUrl(): ?string
+    {
+        if (! $this->ghl_invoice_id || ! $this->ghl_invoice_url) {
+            return null;
+        }
+
+        $host = parse_url($this->ghl_invoice_url, PHP_URL_HOST);
+        $scheme = parse_url($this->ghl_invoice_url, PHP_URL_SCHEME) ?? 'https';
+
+        if (! $host) {
+            return null;
+        }
+
+        return "{$scheme}://{$host}/invoice/{$this->ghl_invoice_id}";
     }
 }

@@ -16,6 +16,8 @@ class Category extends Model
         'image',
         'sort_order',
         'is_active',
+        'is_rental',
+        'association_id',
         'engage_organization_location_id',
         'engage_collection_id',
         'engage_sync_status',
@@ -26,6 +28,7 @@ class Category extends Model
     {
         return [
             'is_active' => 'boolean',
+            'is_rental' => 'boolean',
             'engage_last_synced_at' => 'datetime',
         ];
     }

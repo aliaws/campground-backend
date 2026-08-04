@@ -12,7 +12,11 @@ class CountryResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'code' => $this->code,
+            'flag_emoji' => $this->flag_emoji,
+            'iso2' => $this->iso2,
+            'dial_code' => $this->dial_code,
+            'is_active' => $this->is_active,
+            'sort_order' => $this->sort_order,
         ];
     }
 }

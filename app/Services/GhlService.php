@@ -469,28 +469,33 @@ class GhlService
             return;
         }
 
-        $booking = Booking::where('ghl_invoice_id', $ghlInvoiceId)->first();
+        // Invoice metadata lives only on transactions now (polymorphic to
+        // Booking or Order). Match by ghl_invoice_id first.
+        $transaction = Transaction::where('ghl_invoice_id', $ghlInvoiceId)->first();
 
-        if ($booking) {
-            $this->markInvoiceStatus($booking, $status);
+        if (! $transaction) {
+            return;
+        }
+
+        if ($transaction->transactionable_type === Booking::class) {
+            $booking = $transaction->transactionable;
+            if ($booking instanceof Booking) {
+                $this->markInvoiceStatus($booking, $status);
+            }
 
             return;
         }
 
-        // Booking-less invoice — a POS Product Sales "card" sale
-        // (GhlBookingService::createProductSaleInvoice()). Only these ever
-        // have their own ghl_invoice_id with no booking_id; a booking-linked
-        // transaction's invoice always belongs to the booking instead.
-        $transaction = Transaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
-
-        if ($transaction) {
-            $this->markTransactionInvoiceStatus($transaction, $status);
-        }
+        // Order / booking-less POS product sale — flip payment on the row itself.
+        $this->markTransactionInvoiceStatus($transaction, $status);
     }
 
     private function markInvoiceStatus(Booking $booking, string $status): void
     {
-        $booking->update(['ghl_invoice_status' => $status]);
+        $tx = $booking->primaryTransaction();
+        if ($tx) {
+            $tx->update(['ghl_invoice_status' => $status]);
+        }
 
         if ($status === 'paid') {
             $booking->transactions()->whereNotIn('payment_status', ['paid'])->get()->each(
@@ -541,6 +546,7 @@ class GhlService
     public function reconcileInvoiceStatus(Booking $booking): Booking
     {
         $booking->loadMissing('transactions');
+        $tx = $booking->primaryTransaction();
 
         // Local payment already known (invoice status OR a paid transaction),
         // but booking still stuck requested/pending — autoConfirmAfterPayment()
@@ -548,7 +554,7 @@ class GhlService
         // Retry here so the staff list / customer portal never show Paid +
         // requested forever. Also covers transactions marked paid without
         // ghl_invoice_status being updated yet.
-        $locallyPaid = $booking->ghl_invoice_status === 'paid'
+        $locallyPaid = $tx?->ghl_invoice_status === 'paid'
             || $booking->transactions->contains(fn (Transaction $t) => $t->payment_status === 'paid');
 
         if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
@@ -562,7 +568,7 @@ class GhlService
             }
         }
 
-        if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+        if (! $tx?->ghl_invoice_id || $tx->ghl_invoice_status === 'paid') {
             return $booking;
         }
 
@@ -572,7 +578,7 @@ class GhlService
         }
 
         try {
-            $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+            $invoice = $this->client->get("invoices/{$tx->ghl_invoice_id}", [
                 'altId' => $locationId,
                 'altType' => 'location',
             ]);
@@ -581,11 +587,11 @@ class GhlService
         }
 
         $status = $invoice['status'] ?? null;
-        if ($status && $status !== $booking->ghl_invoice_status) {
+        if ($status && $status !== $tx->ghl_invoice_status) {
             $this->markInvoiceStatus($booking, $status);
         }
 
-        return $booking->fresh() ?? $booking;
+        return $booking->fresh(['transactions']) ?? $booking;
     }
 
     /**
@@ -616,8 +622,9 @@ class GhlService
 
         foreach ($bookings as $i => $booking) {
             $booking->loadMissing('transactions');
+            $tx = $booking->primaryTransaction();
 
-            $locallyPaid = $booking->ghl_invoice_status === 'paid'
+            $locallyPaid = $tx?->ghl_invoice_status === 'paid'
                 || $booking->transactions->contains(fn (Transaction $t) => $t->payment_status === 'paid');
 
             if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
@@ -634,7 +641,7 @@ class GhlService
                 continue;
             }
 
-            if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+            if (! $tx?->ghl_invoice_id || $tx->ghl_invoice_status === 'paid') {
                 $results[$i] = $booking;
 
                 continue;
@@ -662,13 +669,19 @@ class GhlService
         try {
             $requests = [];
             foreach ($pending as $i => $booking) {
+                $invoiceId = $booking->primaryTransaction()?->ghl_invoice_id;
+                if (! $invoiceId) {
+                    $results[$i] = $booking;
+
+                    continue;
+                }
                 $requests[(string) $i] = [
-                    'endpoint' => "invoices/{$booking->ghl_invoice_id}",
+                    'endpoint' => "invoices/{$invoiceId}",
                     'query' => ['altId' => $locationId, 'altType' => 'location'],
                 ];
             }
 
-            $responses = $this->client->poolGet($requests);
+            $responses = empty($requests) ? [] : $this->client->poolGet($requests);
         } catch (\Exception $e) {
             // Same fail-open behavior as the single-row version's catch —
             // leave these rows exactly as they were, self-heal again next poll.
@@ -681,6 +694,12 @@ class GhlService
         }
 
         foreach ($pending as $i => $booking) {
+            if (! isset($requests[(string) $i])) {
+                $results[$i] ??= $booking;
+
+                continue;
+            }
+
             $response = $responses[(string) $i] ?? null;
 
             if ($response instanceof \Throwable || ! is_array($response)) {
@@ -689,10 +708,11 @@ class GhlService
                 continue;
             }
 
+            $tx = $booking->primaryTransaction();
             $status = $response['status'] ?? null;
-            if ($status && $status !== $booking->ghl_invoice_status) {
+            if ($status && $tx && $status !== $tx->ghl_invoice_status) {
                 $this->markInvoiceStatus($booking, $status);
-                $results[$i] = $booking->fresh() ?? $booking;
+                $results[$i] = $booking->fresh(['transactions']) ?? $booking;
             } else {
                 $results[$i] = $booking;
             }

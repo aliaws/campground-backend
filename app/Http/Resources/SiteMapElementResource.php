@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -10,7 +11,8 @@ class SiteMapElementResource extends JsonResource
     public function toArray(Request $request): array
     {
         $rental = $this->productRental;
-        $product = $rental?->product;
+        $listingId = $rental?->listingProductId();
+        $product = $listingId ? Product::query()->find($listingId) : null;
         $iconType = $this->iconType;
 
         return [
@@ -35,9 +37,6 @@ class SiteMapElementResource extends JsonResource
             'z_index' => $this->z_index,
             'is_visible' => $this->is_visible,
             'category' => $this->category,
-            // Rental-only display fields — resolved live from Product/ProductRental,
-            // never persisted here, same "compute from the source" spirit as the
-            // rest of the app's rental-detail handling.
             'rental' => $rental ? [
                 'product_id' => $product?->id,
                 'name' => $product?->name,

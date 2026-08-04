@@ -5,19 +5,19 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A bookable rental/service variant. The base listing is stored here too as
- * the product's "default" row (products.product_rental_id). Only the GHL pull
- * creates rows — everything beyond these identifiers (durations, quantity,
- * pricing rules, booking times) is fetched live from GHL, never stored.
+ * 1:1 extension of Product. id is PK and FK → products.id (no product_id column).
+ * Variants in the same GHL listing share service_id (= master listing ghl id).
  */
 class ProductRental extends Model
 {
     use HasUlids;
 
     protected $fillable = [
+        'id',
         'name',
         'is_active',
         'service_duration',
@@ -27,7 +27,8 @@ class ProductRental extends Model
         'ghl_id',
         'ghl_product_id',
         'listing_price',
-        'product_id',
+        'quantity',
+        'max_quantity',
         'service_category_id',
         'service_id',
     ];
@@ -39,12 +40,15 @@ class ProductRental extends Model
             'service_duration' => 'integer',
             'map_position' => 'json',
             'listing_price' => 'decimal:2',
+            'quantity' => 'integer',
+            'max_quantity' => 'integer',
         ];
     }
 
+    /** Owning Product — shared primary key (id = products.id). */
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(Product::class, 'id', 'id');
     }
 
     public function bookings(): HasMany
@@ -52,17 +56,45 @@ class ProductRental extends Model
         return $this->hasMany(Booking::class);
     }
 
-    /** True when this row is its product's default (base listing) variant. */
-    public function isDefault(): bool
+    public function amenities(): BelongsToMany
     {
-        return $this->product?->product_rental_id === $this->id;
+        return $this->belongsToMany(Amenity::class, 'product_rental_amenities');
     }
 
-    /** GHL base listing row: calendar service id equals master listing id (variantId was null). */
+    public function features(): BelongsToMany
+    {
+        return $this->belongsToMany(Feature::class, 'product_rental_features');
+    }
+
+    /** GHL base listing row (variantId was null): ghl_id === service_id. */
     public function isBaseListing(): bool
     {
         return $this->ghl_id !== null
             && $this->service_id !== null
             && $this->ghl_id === $this->service_id;
+    }
+
+    public function isDefault(): bool
+    {
+        return $this->isBaseListing();
+    }
+
+    /** All variants in this GHL listing family (base included). */
+    public function family()
+    {
+        return static::query()->where('service_id', $this->service_id);
+    }
+
+    /** Product id of the base listing for this family. */
+    public function listingProductId(): ?string
+    {
+        if ($this->isBaseListing()) {
+            return $this->id;
+        }
+
+        return static::query()
+            ->where('service_id', $this->service_id)
+            ->whereColumn('ghl_id', 'service_id')
+            ->value('id');
     }
 }

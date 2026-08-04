@@ -24,7 +24,10 @@ class ProductResource extends JsonResource
             'sku' => $this->sku,
             'quantity' => $this->quantity,
             'price' => $this->price !== null ? (float) $this->price : null,
-            'product_rental_id' => $this->product_rental_id,
+            // Base rental shares the product id (product_rentals.id === products.id).
+            // Kept for map/frontend callers that still key off product_rental_id.
+            'product_rental_id' => $this->isRental() ? $this->id : null,
+            'is_rental' => (bool) $this->is_rental,
             'from_price' => $this->when($this->isRental(), fn () => $this->fromPrice()),
             'ghl_product_id' => $this->ghl_product_id,
             'ghl_image_url' => $this->ghl_image_url,

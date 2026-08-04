@@ -262,7 +262,7 @@ class GhlProductSyncService
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
         $products = Product::byLocation($locationId)
-            ->whereNull('product_rental_id')
+            ->where('is_rental', false)
             ->where('status', 'active')
             ->get();
 
@@ -307,7 +307,7 @@ class GhlProductSyncService
         }
 
         $products = Product::byLocation($locationId)
-            ->whereNull('product_rental_id')
+            ->where('is_rental', false)
             ->whereNotNull('ghl_product_id')
             ->get();
 

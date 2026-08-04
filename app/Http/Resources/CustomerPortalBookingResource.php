@@ -13,6 +13,7 @@ class CustomerPortalBookingResource extends JsonResource
         $isPaid = $this->isPaid();
         $isCancelled = $this->status === 'cancelled';
         $canCancel = ! $isPaid && ! $isCancelled;
+        $tx = $this->primaryTransaction();
 
         return [
             'id' => $this->id,
@@ -26,8 +27,8 @@ class CustomerPortalBookingResource extends JsonResource
             'security_deposit_amount' => (float) $this->security_deposit_amount,
             'status' => $this->status,
             // Hide pay/invoice links once cancelled — voided invoices must not stay actionable.
-            'payment_url' => $isCancelled ? null : $this->ghl_invoice_url,
-            'payment_status' => $this->ghl_invoice_status,
+            'payment_url' => $isCancelled ? null : $tx?->ghl_invoice_url,
+            'payment_status' => $tx?->ghl_invoice_status,
             'invoice_view_url' => $isCancelled ? null : $this->ghlInvoiceViewUrl(),
             'is_paid' => $isPaid,
             'can_cancel' => $canCancel,

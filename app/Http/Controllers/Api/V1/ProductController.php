@@ -76,7 +76,8 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $product->load(['categories', 'rentals', 'defaultRental']);
+        $product->load(['categories', 'productRental', 'defaultRental']);
+        $product->loadRentalFamily();
 
         return response()->json([
             'success' => true,

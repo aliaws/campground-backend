@@ -118,16 +118,12 @@ class GhlBookingService
             $bookingId = $this->extractBookingId($createResponse);
             $invoiceId = $this->extractInvoiceId($createResponse);
 
-            $updates = array_filter([
-                'ghl_booking_id' => $bookingId,
-                'ghl_invoice_id' => $invoiceId,
-            ]);
-
-            if ($updates !== []) {
-                $booking->update($updates);
+            if ($bookingId) {
+                $booking->update(['ghl_booking_id' => $bookingId]);
             }
 
             if ($invoiceId) {
+                // Invoice metadata lives on the booking's primary Transaction.
                 $this->syncInvoiceMetadata($booking, $invoiceId);
 
                 if ($recordPaymentAs !== null) {
@@ -332,7 +328,8 @@ class GhlBookingService
      */
     public function sendInvoicePaymentEmail(Booking $booking): void
     {
-        if (! $booking->ghl_invoice_id) {
+        $invoiceId = $this->bookingInvoiceId($booking);
+        if (! $invoiceId) {
             return;
         }
 
@@ -361,7 +358,7 @@ class GhlBookingService
 
         try {
             $response = $this->client->post(
-                "invoices/{$booking->ghl_invoice_id}/send",
+                "invoices/{$invoiceId}/send",
                 $payload,
                 [],
                 '2021-07-28',
@@ -378,7 +375,8 @@ class GhlBookingService
      */
     public function recordInvoicePayment(Booking $booking, float $amount, string $paymentMethod = 'cash'): void
     {
-        if (! $booking->ghl_invoice_id) {
+        $invoiceId = $this->bookingInvoiceId($booking);
+        if (! $invoiceId) {
             return;
         }
 
@@ -397,7 +395,7 @@ class GhlBookingService
 
         try {
             $response = $this->client->post(
-                "invoices/{$booking->ghl_invoice_id}/record-payment",
+                "invoices/{$invoiceId}/record-payment",
                 $payload,
             );
             $this->logOutbound('invoice.payment-recorded', $payload, $response);
@@ -428,7 +426,8 @@ class GhlBookingService
                 $this->cancelBooking($booking);
             }
 
-            if ($booking->ghl_invoice_id && $booking->ghl_invoice_status !== 'paid') {
+            $tx = $booking->primaryTransaction();
+            if ($tx?->ghl_invoice_id && $tx->ghl_invoice_status !== 'paid') {
                 $this->voidInvoice($booking);
             }
 
@@ -488,7 +487,8 @@ class GhlBookingService
      */
     public function voidInvoice(Booking $booking): void
     {
-        if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
+        $tx = $booking->primaryTransaction();
+        if (! $tx?->ghl_invoice_id || $tx->ghl_invoice_status === 'paid') {
             return;
         }
 
@@ -504,14 +504,14 @@ class GhlBookingService
 
         try {
             $response = $this->client->post(
-                "invoices/{$booking->ghl_invoice_id}/void",
+                "invoices/{$tx->ghl_invoice_id}/void",
                 $payload,
                 [],
                 '2021-07-28',
             );
             $this->logOutbound('invoice.voided', $payload, $response);
 
-            $booking->update([
+            $tx->update([
                 'ghl_invoice_status' => 'void',
                 'ghl_invoice_url' => null,
             ]);
@@ -707,7 +707,8 @@ class GhlBookingService
      */
     public function fetchInvoiceDetail(Booking $booking): ?array
     {
-        if (! $booking->ghl_invoice_id) {
+        $invoiceId = $this->bookingInvoiceId($booking);
+        if (! $invoiceId) {
             return null;
         }
 
@@ -717,12 +718,12 @@ class GhlBookingService
         }
 
         try {
-            $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+            $invoice = $this->client->get("invoices/{$invoiceId}", [
                 'altId' => $locationId,
                 'altType' => 'location',
             ]);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.fetched', ['invoiceId' => $booking->ghl_invoice_id], ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.fetched', ['invoiceId' => $invoiceId], ['error' => $e->getMessage()]);
 
             return null;
         }
@@ -749,7 +750,7 @@ class GhlBookingService
 
     private function syncInvoiceMetadata(Booking $booking, ?string $invoiceId = null): void
     {
-        $invoiceId = $invoiceId ?? $booking->ghl_invoice_id;
+        $invoiceId = $invoiceId ?? $this->bookingInvoiceId($booking);
         if (! $invoiceId) {
             return;
         }
@@ -782,17 +783,42 @@ class GhlBookingService
         $this->syncInvoiceMetadata($booking);
     }
 
+    /**
+     * Persist ghl_invoice_* onto the booking's primary Transaction (create via
+     * morph if missing). Invoice fields no longer live on the bookings table.
+     */
     private function persistInvoiceMetadata(Booking $booking, array $invoice, ?string $invoiceUrl = null): void
     {
-        $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
-        $number = $invoice['invoiceNumber'] ?? null;
+        $transaction = $this->ensurePrimaryTransaction($booking);
+        $this->persistTransactionInvoiceMetadata($transaction, $invoice, $invoiceUrl);
+    }
 
-        $booking->update(array_filter([
-            'ghl_invoice_id' => $invoice['_id'] ?? $booking->ghl_invoice_id,
-            'ghl_invoice_number' => $number ? $prefix.$number : $booking->ghl_invoice_number,
-            'ghl_invoice_status' => $invoice['status'] ?? $booking->ghl_invoice_status,
-            'ghl_invoice_url' => $invoiceUrl ?? $booking->ghl_invoice_url,
-        ], fn ($value) => $value !== null));
+    private function bookingInvoiceId(Booking $booking): ?string
+    {
+        return $booking->primaryTransaction()?->ghl_invoice_id;
+    }
+
+    /** Primary invoice-bearing transaction for the booking; creates one if absent. */
+    private function ensurePrimaryTransaction(Booking $booking): Transaction
+    {
+        $transaction = $booking->primaryTransaction();
+        if ($transaction) {
+            return $transaction;
+        }
+
+        $transaction = $booking->transactions()->create([
+            'customer_id' => $booking->customer_id,
+            'total_amount' => $booking->total_amount,
+            'payment_method' => 'card',
+            'payment_status' => 'pending',
+            'invoice_status' => 'invoicing',
+            'transaction_date' => now(),
+            'engage_organization_location_id' => $booking->engage_organization_location_id,
+        ]);
+
+        $booking->unsetRelation('transactions');
+
+        return $transaction;
     }
 
     private function logOutbound(string $eventType, array $requestPayload, array $responsePayload): void

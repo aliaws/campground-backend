@@ -203,8 +203,6 @@ Route::prefix('v1')->group(function () {
         Route::get('/settings/engage/tokens', [SettingsController::class, 'getTokens']);
         Route::post('/settings/engage/tokens', [SettingsController::class, 'saveTokens']);
         Route::get('/settings/countries', [SettingsController::class, 'getCountries']);
-        Route::get('/settings/custom-fields', [SettingsController::class, 'getCustomFields']);
-        Route::post('/settings/custom-fields', [SettingsController::class, 'storeCustomField']);
     });
 
 });

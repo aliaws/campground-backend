@@ -20,13 +20,11 @@ class ProductRentalResource extends JsonResource
             'ghl_id' => $this->ghl_id,
             'ghl_product_id' => $this->ghl_product_id,
             'listing_price' => $this->listing_price !== null ? (float) $this->listing_price : null,
-            'product_id' => $this->product_id,
+            'quantity' => $this->quantity,
+            'max_quantity' => $this->max_quantity,
             'service_category_id' => $this->service_category_id,
             'service_id' => $this->service_id,
-            'is_default' => $this->when(
-                $this->relationLoaded('product') || $this->product,
-                fn () => $this->product?->product_rental_id === $this->id
-            ),
+            'is_default' => $this->isBaseListing(),
         ];
     }
 }

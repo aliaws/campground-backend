@@ -215,6 +215,7 @@ class GhlServiceSyncService
             'ghl_product_id' => $detail->paymentsProductId(),
             'quantity' => $detail->quantity(),
             'price' => $detail->basePrice() ?? $detail->paymentAmount(),
+            'is_rental' => true,
             'engage_sync_status' => 'synced',
             'engage_last_synced_at' => now(),
             'engage_organization_location_id' => $locationId,
@@ -247,47 +248,96 @@ class GhlServiceSyncService
         return $this->upsertRentalRow($detail, $baseProduct, $baseGhlId, $locationId);
     }
 
-    private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $locationId): ProductRental
+    private function upsertRentalRow(GhlServiceDetail $detail, Product $listingProduct, string $baseGhlId, string $locationId): ProductRental
     {
         $isBase = $detail->id() === $baseGhlId;
-        // Priced for every variant, not just the base listing (2026-07-27) —
-        // `listing_price` used to only ever be written for the base row, so
-        // the Manage Service Variants tab had no stored price to show for any
-        // other variant. Each GhlServiceDetail already carries its own price
-        // (same basePrice()/paymentAmount() fields ServiceVariantResource
-        // already uses for live per-variant pricing), so this was just an
-        // unnecessary gate — no new column needed, the existing one just
-        // wasn't being populated for non-base rows.
         $variantPrice = $detail->basePrice() ?? $detail->paymentAmount();
 
-        // map_position is local-only data — deliberately never written here.
-        return ProductRental::updateOrCreate(
-            ['product_id' => $product->id, 'ghl_id' => $detail->id()],
-            array_filter([
-                'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
-                'is_active' => $detail->isActive(),
-                'service_duration' => $detail->serviceDuration() ?? $detail->minDuration(),
-                'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
-                'slug' => $detail->slug(),
-                'ghl_product_id' => $detail->paymentsProductId(),
-                'listing_price' => $variantPrice,
-                'product_id' => $product->id,
-                'service_category_id' => $detail->serviceCategoryId(),
-                'service_id' => $baseGhlId,
-            ], fn ($value) => $value !== null)
+        $attributes = array_filter([
+            'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
+            'is_active' => $detail->isActive(),
+            'service_duration' => $detail->serviceDuration() ?? $detail->minDuration(),
+            'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
+            'slug' => $detail->slug(),
+            'ghl_product_id' => $detail->paymentsProductId(),
+            'listing_price' => $variantPrice,
+            'quantity' => $detail->quantity(),
+            'max_quantity' => $detail->maxQuantity(),
+            'service_category_id' => $detail->serviceCategoryId(),
+            'service_id' => $baseGhlId,
+        ], fn ($value) => $value !== null);
+
+        // Base: product_rentals.id = listing products.id (shared PK + FK).
+        if ($isBase) {
+            $existing = ProductRental::find($listingProduct->id)
+                ?? ProductRental::where('ghl_id', $detail->id())
+                    ->where('service_id', $baseGhlId)
+                    ->first();
+
+            if ($existing) {
+                if ($existing->id !== $listingProduct->id) {
+                    throw new \RuntimeException(
+                        "Base product_rental {$existing->id} is not aligned with product {$listingProduct->id}"
+                    );
+                }
+                $existing->update($attributes);
+
+                return $existing->fresh();
+            }
+
+            return ProductRental::create(['id' => $listingProduct->id] + $attributes);
+        }
+
+        // Variant: own Product + ProductRental sharing the same id (no product_id).
+        $existing = ProductRental::where('ghl_id', $detail->id())
+            ->where('service_id', $baseGhlId)
+            ->first();
+
+        if ($existing) {
+            $this->syncVariantProduct($existing->id, $listingProduct, $attributes);
+            $existing->update($attributes);
+
+            return $existing->fresh();
+        }
+
+        $variantProductId = (string) \Illuminate\Support\Str::ulid();
+        $this->syncVariantProduct($variantProductId, $listingProduct, $attributes);
+
+        return ProductRental::create(['id' => $variantProductId, 'ghl_id' => $detail->id()] + $attributes);
+    }
+
+    /** Ensure 1:1 Product row for a variant rental (is_rental=true, shared id). */
+    private function syncVariantProduct(string $productId, Product $listing, array $rentalAttributes): void
+    {
+        $variantName = $rentalAttributes['name'] ?? 'Variant';
+
+        Product::query()->updateOrCreate(
+            ['id' => $productId],
+            [
+                'name' => $listing->name.' — '.$variantName,
+                'product_type' => 'SERVICE',
+                'description' => $listing->description,
+                'status' => $listing->status ?? 'active',
+                'available_in_store' => $listing->available_in_store ?? true,
+                'image' => $listing->image,
+                'slug' => $rentalAttributes['slug'] ?? null,
+                'quantity' => $rentalAttributes['quantity'] ?? null,
+                'price' => $rentalAttributes['listing_price'] ?? null,
+                'is_rental' => true,
+                'ghl_product_id' => $rentalAttributes['ghl_product_id'] ?? null,
+                'engage_sync_status' => 'synced',
+                'engage_last_synced_at' => now(),
+                'engage_organization_location_id' => $listing->engage_organization_location_id,
+            ]
         );
     }
 
-    /**
-     * After variants are synced: pin listing snapshot to the GHL base service
-     * (variantId = null) — default rental pointer, price, and product fields.
-     */
     private function finalizeListing(Product $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
     {
-        $baseRental = ProductRental::where('product_id', $product->id)
-            ->where('ghl_id', $baseGhlId)
-            ->where('service_id', $baseGhlId)
-            ->first();
+        $baseRental = ProductRental::find($product->id)
+            ?? ProductRental::where('ghl_id', $baseGhlId)
+                ->where('service_id', $baseGhlId)
+                ->first();
 
         $basePrice = $baseDetail->basePrice() ?? $baseDetail->paymentAmount();
 
@@ -298,18 +348,22 @@ class GhlServiceSyncService
             'ghl_product_id' => $baseDetail->paymentsProductId(),
             'quantity' => $baseDetail->quantity(),
             'price' => $basePrice,
-            'product_rental_id' => $baseRental?->id,
+            'is_rental' => true,
         ], fn ($value) => $value !== null);
 
         if ($listingUpdate !== []) {
             $product->update($listingUpdate);
         }
 
-        if ($baseRental && $basePrice !== null) {
-            $baseRental->update(['listing_price' => $basePrice]);
+        if ($baseRental) {
+            $baseRental->update(array_filter([
+                'listing_price' => $basePrice,
+                'quantity' => $baseDetail->quantity(),
+                'max_quantity' => $baseDetail->maxQuantity(),
+            ], fn ($value) => $value !== null));
         }
 
-        $pruned = ProductRental::where('product_id', $product->id)
+        $pruned = ProductRental::where('service_id', $baseGhlId)
             ->whereNotIn('ghl_id', $seenGhlIds)
             ->get();
 

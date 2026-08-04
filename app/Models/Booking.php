@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class Booking extends Model
 {
@@ -31,10 +31,6 @@ class Booking extends Model
         'status',
         'ghl_opportunity_id',
         'ghl_booking_id',
-        'ghl_invoice_id',
-        'ghl_invoice_number',
-        'ghl_invoice_status',
-        'ghl_invoice_url',
         'engage_organization_location_id',
         'created_by',
     ];
@@ -65,15 +61,23 @@ class Booking extends Model
         return $this->belongsTo(Product::class);
     }
 
-    /** The rental variant that was booked (null on legacy/local-only rows). */
     public function productRental(): BelongsTo
     {
         return $this->belongsTo(ProductRental::class);
     }
 
-    public function transactions(): HasMany
+    public function transactions(): MorphMany
     {
-        return $this->hasMany(Transaction::class);
+        return $this->morphMany(Transaction::class, 'transactionable');
+    }
+
+    /** Invoice-bearing transaction for this booking (GHL invoice lives here). */
+    public function primaryTransaction(): ?Transaction
+    {
+        $this->loadMissing('transactions');
+
+        return $this->transactions->first(fn (Transaction $t) => filled($t->ghl_invoice_id))
+            ?? $this->transactions->sortByDesc('created_at')->first();
     }
 
     public function isPending(): bool
@@ -98,29 +102,8 @@ class Booking extends Model
         return $this->transactions->contains(fn ($t) => $t->isPaid());
     }
 
-    /**
-     * Public GHL-hosted invoice view page (not gated behind a GHL login,
-     * unlike the GHL dashboard invoice URL) — e.g.
-     * https://msgr.accuratedigitalsolutions.com/invoice/{ghl_invoice_id}.
-     * GHL's invoice API doesn't return this URL directly, so it's derived
-     * from the same white-label domain already present on the booking's own
-     * `ghl_invoice_url` (the Text2Pay payment link, e.g. .../l/{code}) —
-     * this keeps it correct per-location without hardcoding any one account's
-     * domain.
-     */
     public function ghlInvoiceViewUrl(): ?string
     {
-        if (! $this->ghl_invoice_id || ! $this->ghl_invoice_url) {
-            return null;
-        }
-
-        $host = parse_url($this->ghl_invoice_url, PHP_URL_HOST);
-        $scheme = parse_url($this->ghl_invoice_url, PHP_URL_SCHEME) ?? 'https';
-
-        if (! $host) {
-            return null;
-        }
-
-        return "{$scheme}://{$host}/invoice/{$this->ghl_invoice_id}";
+        return $this->primaryTransaction()?->ghlInvoiceViewUrl();
     }
 }

@@ -3,13 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreCustomFieldRequest;
 use App\Http\Requests\StoreEngageSettingRequest;
 use App\Http\Resources\CountryResource;
-use App\Http\Resources\CustomFieldResource;
 use App\Http\Resources\EngageSettingResource;
 use App\Models\Country;
-use App\Models\CustomField;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
 use App\Models\User;
@@ -248,35 +245,11 @@ class SettingsController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => CountryResource::collection(Country::orderBy('name')->get()),
+            'data' => CountryResource::collection(
+                Country::query()->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get()
+            ),
             'message' => 'Countries retrieved.',
         ]);
-    }
-
-    public function getCustomFields(Request $request): JsonResponse
-    {
-        $fields = CustomField::forOrganizationLocation($request->user()->resolveOrganizationLocationId())
-            ->when($request->entity_type, fn ($q, $v) => $q->where('entity_type', $v))
-            ->get();
-
-        return response()->json([
-            'success' => true,
-            'data' => CustomFieldResource::collection($fields),
-            'message' => 'Custom fields retrieved.',
-        ]);
-    }
-
-    public function storeCustomField(StoreCustomFieldRequest $request): JsonResponse
-    {
-        $field = CustomField::create($request->validated() + [
-            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'data' => new CustomFieldResource($field),
-            'message' => 'Custom field created.',
-        ], 201);
     }
 
     private function resolveEngageSetting(User $user): ?EngageSetting

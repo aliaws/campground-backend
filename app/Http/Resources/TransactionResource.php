@@ -2,6 +2,8 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Booking;
+use App\Models\Order;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,41 +11,42 @@ class TransactionResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $booking = $this->relationLoaded('transactionable') && $this->transactionable instanceof Booking
+            ? $this->transactionable
+            : null;
+        $order = $this->relationLoaded('transactionable') && $this->transactionable instanceof Order
+            ? $this->transactionable
+            : null;
+
         return [
             'id' => $this->id,
             'customer' => new CustomerResource($this->whenLoaded('customer')),
             'customer_id' => $this->customer_id,
-            'booking' => new BookingResource($this->whenLoaded('booking')),
-            'booking_id' => $this->booking_id,
+            'transactionable_type' => $this->transactionable_type,
+            'transactionable_id' => $this->transactionable_id,
+            'booking' => $booking ? new BookingResource($booking) : null,
+            'booking_id' => $booking?->id,
+            'order' => $order ? [
+                'id' => $order->id,
+                'status' => $order->status,
+                'total_amount' => (float) $order->total_amount,
+            ] : null,
+            'order_id' => $order?->id,
             'total_amount' => (float) $this->total_amount,
             'payment_method' => $this->payment_method,
             'payment_status' => $this->payment_status,
             'invoice_status' => $this->invoice_status,
             'transaction_date' => $this->transaction_date,
             'items' => TransactionItemResource::collection($this->whenLoaded('items')),
-            // A booking-less product sale carries its own ghl_invoice_*
-            // fields; prefer those, falling back to the linked booking's
-            // (existing rental/booking transactions have their own fields
-            // null, so this preserves prior behavior for them exactly).
             'ghl_invoice' => $this->when(
-                $this->ghl_invoice_id || ($this->relationLoaded('booking') && $this->booking?->ghl_invoice_id),
-                fn () => $this->ghl_invoice_id
-                    ? [
-                        'id' => $this->ghl_invoice_id,
-                        'number' => $this->ghl_invoice_number,
-                        'status' => $this->ghl_invoice_status,
-                        'ghl_booking_id' => $this->booking?->ghl_booking_id,
-                    ]
-                    : [
-                        'id' => $this->booking->ghl_invoice_id,
-                        'number' => $this->booking->ghl_invoice_number,
-                        'status' => $this->booking->ghl_invoice_status,
-                        'ghl_booking_id' => $this->booking->ghl_booking_id,
-                    ],
+                (bool) $this->ghl_invoice_id,
+                fn () => [
+                    'id' => $this->ghl_invoice_id,
+                    'number' => $this->ghl_invoice_number,
+                    'status' => $this->ghl_invoice_status,
+                    'ghl_booking_id' => $booking?->ghl_booking_id,
+                ],
             ),
-            // The pay-link URL itself (Text2Pay) — only ever set on a
-            // booking-less "card" product sale (BookingResource already
-            // exposes its own ghl_invoice_url the same way for bookings).
             'ghl_invoice_url' => $this->ghl_invoice_url,
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,

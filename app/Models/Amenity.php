@@ -23,9 +23,14 @@ class Amenity extends Model
         ];
     }
 
-    /** Service listings (Product rows with product_rental_id set) this amenity is assigned to. */
+    public function productRentals(): BelongsToMany
+    {
+        return $this->belongsToMany(ProductRental::class, 'product_rental_amenities');
+    }
+
+    /** @deprecated Use productRentals() */
     public function services(): BelongsToMany
     {
-        return $this->belongsToMany(Product::class, 'service_amenities');
+        return $this->productRentals();
     }
 }

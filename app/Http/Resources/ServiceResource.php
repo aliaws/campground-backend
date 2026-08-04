@@ -20,9 +20,10 @@ class ServiceResource extends JsonResource
         $product = $this->resource;
         $defaultRental = $product->resolveBaseRental();
 
-        $rentals = $product->relationLoaded('rentals')
-            ? $product->rentals->where('is_active', true)->values()
-            : $product->rentals()->where('is_active', true)->get();
+        if (! $product->relationLoaded('rentals')) {
+            $product->loadRentalFamily();
+        }
+        $rentals = $product->rentals->where('is_active', true)->values();
 
         $sortedRentals = $rentals->sortBy(
             fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1

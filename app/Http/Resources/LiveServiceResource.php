@@ -38,9 +38,10 @@ class LiveServiceResource extends JsonResource
             ? ServiceVariantResource::fromDetail($product, $defaultRental, $baseDetail, $defaultRental, $basePayments)
             : null;
 
-        $rentals = $product->relationLoaded('rentals')
-            ? $product->rentals->where('is_active', true)->values()
-            : $product->rentals()->where('is_active', true)->get();
+        if (! $product->relationLoaded('rentals')) {
+            $product->loadRentalFamily();
+        }
+        $rentals = $product->rentals->where('is_active', true)->values();
 
         $sortedRentals = $rentals->sortBy(
             fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1

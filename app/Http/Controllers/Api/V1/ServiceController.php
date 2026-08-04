@@ -38,7 +38,7 @@ class ServiceController extends Controller
 
     public function show(Request $request, Product $product): JsonResponse
     {
-        if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId() || $product->product_rental_id === null) {
+        if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId() || ! $product->isRental()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -46,7 +46,8 @@ class ServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
+        $product->load(['productRental', 'defaultRental', 'categories', 'amenities', 'features']);
+        $product->loadRentalFamily();
 
         try {
             $details = $this->gateway->fetchListingBundle($product);

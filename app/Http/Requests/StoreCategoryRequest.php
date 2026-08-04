@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreCategoryRequest extends FormRequest
 {
@@ -19,6 +20,13 @@ class StoreCategoryRequest extends FormRequest
             'image' => ['nullable', 'string', 'max:2048'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
+            'is_rental' => ['nullable', 'boolean'],
+            'association_id' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::unique('categories', 'association_id')->ignore($this->route('category')),
+            ],
         ];
     }
 }
