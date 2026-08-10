@@ -5,7 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class StoreTransactionRequest extends FormRequest
+class StoreProductTransactionRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -21,7 +21,7 @@ class StoreTransactionRequest extends FormRequest
             'payment_status' => ['required', Rule::in(['paid', 'pending', 'draft'])],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'string', 'max:26', 'exists:products,id'],
-            'items.*.product_type' => ['required', Rule::in(['rental', 'physical', 'addon'])],
+            'items.*.product_type' => ['required', Rule::in(['physical', 'addon'])],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
             'items.*.rental_start' => ['nullable', 'date'],

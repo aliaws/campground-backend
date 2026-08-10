@@ -8,10 +8,13 @@ use App\Http\Requests\StoreCustomFieldRequest;
 use App\Http\Resources\CountryResource;
 use App\Http\Resources\CustomFieldResource;
 use App\Http\Resources\EngageSettingResource;
+use App\Http\Resources\GhlSyncLogResource;
 use App\Models\Country;
 use App\Models\CustomField;
 use App\Models\EngageSetting;
+use App\Models\GhlSyncLog;
 use App\Services\GhlAuthService;
+use App\Services\GhlFullSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,6 +22,7 @@ class SettingsController extends Controller
 {
     public function __construct(
         private GhlAuthService $ghlAuthService,
+        private GhlFullSyncService $ghlFullSyncService,
     ) {}
 
     public function getEngage(Request $request): JsonResponse
@@ -248,5 +252,53 @@ class SettingsController extends Controller
             'data' => new CustomFieldResource($field),
             'message' => 'Custom field created.',
         ], 201);
+    }
+
+    /**
+     * Runs synchronously (click → wait → see results), matching every other
+     * pull-ghl button in this app. A full pull (contacts + categories +
+     * products + services/rentals + all paid invoices) can take a couple of
+     * minutes on a large account — raising the time limit here only affects
+     * PHP's own limit; a reverse proxy with a shorter timeout in front of
+     * this server could still show the browser an error while the backend
+     * keeps running to completion regardless.
+     */
+    public function pullAllGhlData(Request $request): JsonResponse
+    {
+        set_time_limit(300);
+
+        $tenantId = $request->user()->tenant_id;
+
+        try {
+            $log = $this->ghlFullSyncService->pullAll($tenantId, 'manual');
+
+            return response()->json([
+                'success' => $log->status !== 'failed',
+                'data' => new GhlSyncLogResource($log),
+                'message' => match ($log->status) {
+                    'success' => 'GHL data pulled successfully.',
+                    'partial' => 'GHL data pulled with some errors — see details.',
+                    default => 'GHL data pull failed.',
+                },
+            ], $log->status === 'failed' ? 422 : 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'GHL data pull failed: '.$e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function getLatestSyncLog(Request $request): JsonResponse
+    {
+        $log = GhlSyncLog::where('tenant_id', $request->user()->tenant_id)
+            ->latest('started_at')
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'data' => $log ? new GhlSyncLogResource($log) : null,
+            'message' => $log ? 'Latest sync log retrieved.' : 'No sync has run yet.',
+        ]);
     }
 }

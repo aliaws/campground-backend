@@ -68,13 +68,21 @@ class GhlServiceSyncService
     }
 
     /**
-     * @return array{pulled: int, errors: int, error_details: array}
+     * @return array{pulled: int, base_listings_pulled: int, variants_pulled: int, errors: int, error_details: array}
      *
      * Base-listing details and their embedded variants' details are each
      * fetched in one concurrent batch (via GhlClient::poolGet) rather than
      * one HTTP round trip at a time. Every fetched detail also warms the
      * gateway's live-detail cache, so the first quote/show after a pull is
      * a cache hit.
+     *
+     * `base_listings_pulled`/`variants_pulled` (2026-08-07) are additive to
+     * the pre-existing `pulled` total (which counts both together, since a
+     * rental listing and its variants are the same GHL entity type in this
+     * codebase's data model) — added so callers like the "Pull Data"
+     * full-sync feature can report "Services" and "Rentals" as the two
+     * distinct counts the feature's requirements ask for. Purely additive:
+     * `pulled` keeps its exact original meaning/value.
      */
     public function pullServices(string $tenantId): array
     {
@@ -99,6 +107,8 @@ class GhlServiceSyncService
         })->values();
 
         $pulled = 0;
+        $baseListingsPulled = 0;
+        $variantsPulled = 0;
         $errors = [];
 
         $baseResults = $this->client->poolGet(
@@ -138,6 +148,7 @@ class GhlServiceSyncService
 
                 $product = $this->upsertBaseListing($baseDetail, $tenantId);
                 $pulled++;
+                $baseListingsPulled++;
 
                 $seenGhlIds = [$ghlBaseId];
 
@@ -176,6 +187,7 @@ class GhlServiceSyncService
                     $this->upsertVariant($variantDetail, $product, $ghlBaseId, $tenantId);
                     $seenGhlIds[] = $variantId;
                     $pulled++;
+                    $variantsPulled++;
                 }
 
                 $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId);
@@ -185,7 +197,13 @@ class GhlServiceSyncService
             }
         }
 
-        return ['pulled' => $pulled, 'errors' => count($errors), 'error_details' => $errors];
+        return [
+            'pulled' => $pulled,
+            'base_listings_pulled' => $baseListingsPulled,
+            'variants_pulled' => $variantsPulled,
+            'errors' => count($errors),
+            'error_details' => $errors,
+        ];
     }
 
     private function serviceDetailRequest(string $ghlId, string $locationId): array

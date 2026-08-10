@@ -71,9 +71,18 @@ class Booking extends Model
         return $this->belongsTo(ProductRental::class);
     }
 
+    /**
+     * Retargeted to RentalTransaction as of the 2026-08-10 transactions
+     * refactor (was Transaction — that generic table/model no longer
+     * exists). The relation name itself is deliberately kept as
+     * `transactions` rather than renamed to `rentalTransactions` — this is
+     * what lets every existing `->load(['...', 'transactions'])` call site
+     * across BookingService/BookingController/CustomerPortalController/
+     * GhlService/ReportService keep working unchanged.
+     */
     public function transactions(): HasMany
     {
-        return $this->hasMany(Transaction::class);
+        return $this->hasMany(RentalTransaction::class);
     }
 
     public function isPending(): bool
