@@ -4,7 +4,8 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\Customer;
-use App\Models\Transaction;
+use App\Models\ProductTransaction;
+use App\Models\RentalTransaction;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -134,12 +135,12 @@ class CustomerService
         app(CustomerAccountService::class)->deleteCustomerAccount($customer);
 
         DB::transaction(function () use ($customer, $bookings) {
-            // withTrashed(): a customer's transactions might include rows
-            // already soft-deleted by the normal Transaction flow — those
-            // still need a real hard delete here, not to be left behind.
-            $customer->transactions()->withTrashed()->get()->each(
-                fn (Transaction $transaction) => $transaction->forceDelete()
-            );
+            // Customer no longer has a single transactions() relation — its
+            // history now spans two independent tables (2026-08-10
+            // transactions refactor). Neither has soft deletes, so a plain
+            // delete() is already permanent — no withTrashed() needed.
+            RentalTransaction::where('customer_id', $customer->id)->delete();
+            ProductTransaction::where('customer_id', $customer->id)->delete(); // cascades to product_transaction_items via FK
 
             foreach ($bookings as $booking) {
                 $booking->delete(); // Booking has no soft delete — already permanent.

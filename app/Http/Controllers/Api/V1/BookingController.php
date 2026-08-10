@@ -14,7 +14,7 @@ use App\Services\BookingService;
 use App\Services\GhlBookingService;
 use App\Services\GhlService;
 use App\Services\RentalResolver;
-use App\Services\TransactionService;
+use App\Services\RentalTransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -22,7 +22,7 @@ class BookingController extends Controller
 {
     public function __construct(
         private BookingService $bookingService,
-        private TransactionService $transactionService,
+        private RentalTransactionService $rentalTransactionService,
         private RentalResolver $rentalResolver,
         private GhlBookingService $ghlBookingService,
         private GhlService $ghlService,
@@ -139,7 +139,8 @@ class BookingController extends Controller
             // The autoConfirm=false ('card'/online) branch already creates its own
             // transaction inside BookingService::create() — creating one here too
             // would double it.
-            $transaction = $this->transactionService->autoCreateFromBooking($booking, $paymentMethod ?? 'card');
+            $transaction = $this->rentalTransactionService->createFromBooking($booking, $paymentMethod ?? 'card');
+            $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
             if ($paymentMethod === 'cash') {
                 // Always created local-only (see BookingService::create()'s

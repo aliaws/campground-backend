@@ -6,7 +6,8 @@ use App\Integrations\GHL\GhlClient;
 use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\EngageSetting;
-use App\Models\Transaction;
+use App\Models\ProductTransaction;
+use App\Models\RentalTransaction;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
 
@@ -185,6 +186,12 @@ class GhlService
 
                     if ($customer->wasRecentlyCreated) {
                         $results['created']++;
+                        // Only on genuine creation — never overwrites an
+                        // already-attributed customer's real created_by
+                        // (e.g. staff-added or self-registered via public
+                        // booking) just because a later contact sync
+                        // happened to touch/update the same row.
+                        $customer->update(['created_by' => 'GHL Sync']);
                     } else {
                         $results['updated']++;
                     }
@@ -354,7 +361,7 @@ class GhlService
     {
         $contact = $payload['contact'] ?? $payload;
 
-        Customer::updateOrCreate(
+        $customer = Customer::updateOrCreate(
             ['ghl_contact_id' => $contact['id']],
             [
                 'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
@@ -365,6 +372,11 @@ class GhlService
                 'tenant_id' => $this->resolveTenantId(),
             ]
         );
+
+        // Only on genuine creation — see bulkPullContacts()'s identical guard.
+        if ($customer->wasRecentlyCreated) {
+            $customer->update(['created_by' => 'GHL Sync']);
+        }
     }
 
     private function handleContactUpdated(array $payload): void
@@ -449,10 +461,10 @@ class GhlService
         // (GhlBookingService::createProductSaleInvoice()). Only these ever
         // have their own ghl_invoice_id with no booking_id; a booking-linked
         // transaction's invoice always belongs to the booking instead.
-        $transaction = Transaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
+        $productTransaction = ProductTransaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
 
-        if ($transaction) {
-            $this->markTransactionInvoiceStatus($transaction, $status);
+        if ($productTransaction) {
+            $this->markProductTransactionInvoiceStatus($productTransaction, $status);
         }
     }
 
@@ -461,11 +473,12 @@ class GhlService
         $booking->update(['ghl_invoice_status' => $status]);
 
         if ($status === 'paid') {
-            $booking->transactions()->whereNotIn('payment_status', ['paid'])->get()->each(
-                fn (Transaction $transaction) => $transaction->update([
-                    'payment_status' => 'paid',
-                    'invoice_status' => 'completed',
-                ])
+            // Resolved lazily to avoid a circular constructor dependency
+            // (GhlService -> RentalTransactionService -> GhlBookingService -> GhlService).
+            $rentalTransactionService = app(RentalTransactionService::class);
+
+            $booking->transactions()->whereNotIn('status', ['paid'])->get()->each(
+                fn (RentalTransaction $rentalTransaction) => $rentalTransactionService->syncPaidStatusFromGhl($rentalTransaction)
             );
 
             // Confirm for both customer online (`requested`) and staff cash
@@ -485,16 +498,14 @@ class GhlService
         }
     }
 
-    /** Transaction-typed sibling of markInvoiceStatus() — a booking-less "card" product sale has no booking/status to auto-confirm, just its own payment_status/invoice_status to flip. */
-    private function markTransactionInvoiceStatus(Transaction $transaction, string $status): void
+    /** ProductTransaction-typed sibling of markInvoiceStatus() — a booking-less "card" product sale has no booking/status to auto-confirm, just its own status/ghl_invoice_status to flip. */
+    private function markProductTransactionInvoiceStatus(ProductTransaction $productTransaction, string $status): void
     {
-        $transaction->update(['ghl_invoice_status' => $status]);
+        $productTransaction->update(['ghl_invoice_status' => $status]);
 
-        if ($status === 'paid' && $transaction->payment_status !== 'paid') {
-            $transaction->update([
-                'payment_status' => 'paid',
-                'invoice_status' => 'completed',
-            ]);
+        if ($status === 'paid' && ! $productTransaction->isPaid()) {
+            // Resolved lazily, same circular-dependency reason as above.
+            app(ProductTransactionService::class)->syncPaidStatusFromGhl($productTransaction);
         }
     }
 
@@ -517,7 +528,7 @@ class GhlService
         // requested forever. Also covers transactions marked paid without
         // ghl_invoice_status being updated yet.
         $locallyPaid = $booking->ghl_invoice_status === 'paid'
-            || $booking->transactions->contains(fn (Transaction $t) => $t->payment_status === 'paid');
+            || $booking->transactions->contains(fn (RentalTransaction $t) => $t->isPaid());
 
         if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
             try {
@@ -586,7 +597,7 @@ class GhlService
             $booking->loadMissing('transactions');
 
             $locallyPaid = $booking->ghl_invoice_status === 'paid'
-                || $booking->transactions->contains(fn (Transaction $t) => $t->payment_status === 'paid');
+                || $booking->transactions->contains(fn (RentalTransaction $t) => $t->isPaid());
 
             if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
                 try {
@@ -672,39 +683,41 @@ class GhlService
     }
 
     /**
-     * Transaction-typed sibling of reconcileInvoiceStatus() — self-heals a
+     * ProductTransaction-typed sibling of reconcileInvoiceStatus() — self-heals a
      * pending "card" POS product sale when the InvoicePaid webhook never
      * arrives, same rationale as the booking version. No autoConfirm
-     * equivalent needed here (a Transaction has no separate status/calendar
-     * booking to advance — payment_status/invoice_status are the whole
-     * story). Cheap no-op once already paid or when there's no invoice.
+     * equivalent needed here (a ProductTransaction has no separate
+     * status/calendar booking to advance — status/ghl_invoice_status are
+     * the whole story). Cheap no-op once already paid or when there's no
+     * invoice. Renamed from reconcileTransactionInvoiceStatus() as part of
+     * the 2026-08-10 transactions refactor.
      */
-    public function reconcileTransactionInvoiceStatus(Transaction $transaction): Transaction
+    public function reconcileProductTransactionInvoiceStatus(ProductTransaction $productTransaction): ProductTransaction
     {
-        if (! $transaction->ghl_invoice_id || $transaction->payment_status === 'paid') {
-            return $transaction;
+        if (! $productTransaction->ghl_invoice_id || $productTransaction->isPaid()) {
+            return $productTransaction;
         }
 
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
-            return $transaction;
+            return $productTransaction;
         }
 
         try {
-            $invoice = $this->client->get("invoices/{$transaction->ghl_invoice_id}", [
+            $invoice = $this->client->get("invoices/{$productTransaction->ghl_invoice_id}", [
                 'altId' => $locationId,
                 'altType' => 'location',
             ]);
         } catch (\Exception $e) {
-            return $transaction;
+            return $productTransaction;
         }
 
         $status = $invoice['status'] ?? null;
-        if ($status && $status !== $transaction->ghl_invoice_status) {
-            $this->markTransactionInvoiceStatus($transaction, $status);
+        if ($status && $status !== $productTransaction->ghl_invoice_status) {
+            $this->markProductTransactionInvoiceStatus($productTransaction, $status);
         }
 
-        return $transaction->fresh();
+        return $productTransaction->fresh();
     }
 
     private function resolveTenantId(): string

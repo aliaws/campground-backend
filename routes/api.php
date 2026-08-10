@@ -10,10 +10,12 @@ use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\ProductTransactionController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
+use App\Http\Controllers\Api\V1\RentalTransactionController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
@@ -21,7 +23,6 @@ use App\Http\Controllers\Api\V1\SiteMapController;
 use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
-use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -139,12 +140,14 @@ Route::prefix('v1')->group(function () {
         // Reports
         Route::get('/reports/summary', [ReportController::class, 'summary']);
 
-        // Transactions
-        Route::get('/transactions', [TransactionController::class, 'index']);
-        Route::post('/transactions', [TransactionController::class, 'store']);
-        Route::get('/transactions/{transaction}', [TransactionController::class, 'show']);
-        Route::patch('/transactions/{transaction}/payment-status', [TransactionController::class, 'updatePaymentStatus']);
-        Route::get('/transactions/{transaction}/invoice', [TransactionController::class, 'invoice']);
+        // Transactions — sole source of truth split across two tables as of
+        // the 2026-08-10 refactor (no more generic /transactions*).
+        Route::get('/rental-transactions', [RentalTransactionController::class, 'index']);
+        Route::get('/product-transactions', [ProductTransactionController::class, 'index']);
+        Route::post('/product-transactions', [ProductTransactionController::class, 'store']);
+        Route::get('/product-transactions/{productTransaction}', [ProductTransactionController::class, 'show']);
+        Route::patch('/product-transactions/{productTransaction}/payment-status', [ProductTransactionController::class, 'updatePaymentStatus']);
+        Route::get('/product-transactions/{productTransaction}/invoice', [ProductTransactionController::class, 'invoice']);
 
         // Categories
         Route::get('/categories', [CategoryController::class, 'index']);
@@ -200,6 +203,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken']);
         Route::get('/settings/engage/tokens', [SettingsController::class, 'getTokens']);
         Route::post('/settings/engage/tokens', [SettingsController::class, 'saveTokens']);
+        Route::post('/settings/engage/pull-ghl', [SettingsController::class, 'pullAllGhlData']);
+        Route::get('/settings/engage/sync-log', [SettingsController::class, 'getLatestSyncLog']);
         Route::get('/settings/countries', [SettingsController::class, 'getCountries']);
         Route::get('/settings/custom-fields', [SettingsController::class, 'getCustomFields']);
         Route::post('/settings/custom-fields', [SettingsController::class, 'storeCustomField']);
