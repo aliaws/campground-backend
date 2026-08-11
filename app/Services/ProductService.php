@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class ProductService
 {
-    private const EAGER = ['categories', 'rentals', 'defaultRental', 'amenities', 'features'];
+    private const EAGER = ['categories', 'rentals', 'rentals.serviceCategory', 'defaultRental', 'defaultRental.serviceCategory', 'amenities', 'features'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {

@@ -20,6 +20,7 @@ class ServiceCategory extends Model
         'name',
         'is_active',
         'ghl_category_id',
+        'engage_sync_status',
         'engage_last_synced_at',
         'tenant_id',
     ];

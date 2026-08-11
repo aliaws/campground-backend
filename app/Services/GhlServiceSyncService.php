@@ -198,13 +198,93 @@ class GhlServiceSyncService
             }
         }
 
+        // Delete-sync for whole listings, on top of finalizeListing()'s
+        // pre-existing per-variant pruning above. $bases (not $baseDetails)
+        // is deliberately the source of "seen" ids — it's every top-level
+        // listing this pull's single `calendars/services` call returned,
+        // independent of whether that listing's own *detail* fetch
+        // succeeded; a listing whose detail fetch merely failed this run is
+        // still very much present in GHL and must never be archived for
+        // that reason alone. Wrapped in its own try/catch so a bug here can
+        // never take down an otherwise-successful pull (matches this
+        // method's existing per-listing error-isolation).
+        $archivedListings = 0;
+        try {
+            $seenBaseGhlIds = $bases->pluck('_id')->filter()->values()->all();
+            $archivedListings = $this->archiveMissingRentalListings($tenantId, $seenBaseGhlIds);
+        } catch (\Exception $e) {
+            $errors[] = ['service_id' => null, 'name' => null, 'error' => 'Rental listing delete-sync failed: '.$e->getMessage()];
+            Log::error('GHL rental listing delete-sync failed', ['tenant_id' => $tenantId, 'error' => $e->getMessage()]);
+        }
+
         return [
             'pulled' => $pulled,
             'base_listings_pulled' => $baseListingsPulled,
             'variants_pulled' => $variantsPulled,
+            'archived_listings' => $archivedListings,
             'errors' => count($errors),
             'error_details' => $errors,
         ];
+    }
+
+    /**
+     * Delete-sync: a rental listing (a Product with product_rental_id set)
+     * whose GHL base service id no longer appears at all in this pull's
+     * top-level listing list is soft-deleted — Product already uses
+     * SoftDeletes, so this is fully reversible and never breaks a
+     * Booking/RentalTransaction foreign key that still points at it (soft
+     * delete hides the row from default queries without removing it or the
+     * data anything else references). Every ProductRental row under that
+     * listing (base + every variant) is also marked is_active=false and
+     * forgotten from GhlRentalGateway's live-detail cache, for defense in
+     * depth against any code path that queries ProductRental directly
+     * rather than through its (now soft-deleted, hidden-by-default) Product
+     * — upsertBaseListing()'s own restore step above is what undoes this if
+     * GHL brings the listing back on a later pull.
+     *
+     * Guarded on a non-empty $seenBaseGhlIds — see
+     * GhlProductSyncService::deactivateMissingCategories()'s doc comment
+     * for why a successful-but-empty response must never be trusted as
+     * "GHL now has zero rental listings."
+     */
+    private function archiveMissingRentalListings(string $tenantId, array $seenBaseGhlIds): int
+    {
+        if (empty($seenBaseGhlIds)) {
+            return 0;
+        }
+
+        $goneBaseRentals = ProductRental::where('tenant_id', $tenantId)
+            ->whereNotNull('ghl_id')
+            ->whereColumn('ghl_id', 'service_id')
+            ->whereNotIn('ghl_id', $seenBaseGhlIds)
+            ->get();
+
+        $archivedCount = 0;
+
+        foreach ($goneBaseRentals as $baseRental) {
+            $product = Product::withTrashed()->find($baseRental->product_id);
+
+            if (! $product || $product->trashed()) {
+                continue;
+            }
+
+            $product->delete();
+            $archivedCount++;
+
+            ProductRental::where('product_id', $product->id)
+                ->where('is_active', true)
+                ->update(['is_active' => false]);
+
+            $siblingGhlIds = ProductRental::where('product_id', $product->id)
+                ->whereNotNull('ghl_id')
+                ->pluck('ghl_id');
+
+            foreach ($siblingGhlIds as $ghlId) {
+                $this->gateway->forget($ghlId);
+            }
+        }
+
+        return $archivedCount;
     }
 
     /**
@@ -244,7 +324,7 @@ class GhlServiceSyncService
      */
     public function pullServiceCategories(string $tenantId): array
     {
-        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => [], 'note' => null];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => [], 'note' => null];
 
         $locationId = $this->client->getLocationId();
 
@@ -260,6 +340,7 @@ class GhlServiceSyncService
 
             $parsed = $this->parseServiceCategories($response);
             $skippedDeleted = 0;
+            $seenGhlIds = [];
 
             foreach ($parsed['items'] as $ghlCategory) {
                 $ghlId = $ghlCategory['_id'] ?? $ghlCategory['id'] ?? null;
@@ -267,16 +348,22 @@ class GhlServiceSyncService
                 // A category GHL has soft-deleted no longer really exists —
                 // skip it entirely rather than importing/updating a local
                 // row for it (matches finalizeListing()'s own treatment of
-                // rentals GHL no longer returns).
+                // rentals GHL no longer returns), and deliberately do NOT
+                // add it to $seenGhlIds below — an already-local row for
+                // this id must be treated as "gone" too (see
+                // deactivateMissingServiceCategories()).
                 if (! $ghlId || ($ghlCategory['deleted'] ?? false) === true) {
                     $skippedDeleted++;
 
                     continue;
                 }
 
+                $seenGhlIds[] = $ghlId;
+
                 $data = [
                     'name' => $ghlCategory['name'] ?? 'Untitled',
                     'is_active' => $ghlCategory['isActive'] ?? true,
+                    'engage_sync_status' => 'synced',
                     'engage_last_synced_at' => now(),
                     'tenant_id' => $tenantId,
                 ];
@@ -285,14 +372,47 @@ class GhlServiceSyncService
                     ->where('ghl_category_id', $ghlId)
                     ->first();
 
+                // A category created locally (via ServiceCategoryController::store())
+                // may not have made it to GHL yet — e.g. the outbound push in
+                // syncServiceCategoryToGhl() failed, or is still `pending` — while
+                // the *same* category was independently created directly in GHL and
+                // is only now being pulled in for the first time. Without this,
+                // that would create a true local duplicate (two rows, same name,
+                // only one ever getting a ghl_category_id). Link by an exact,
+                // case-insensitive name match against an as-yet-unlinked local row
+                // instead of creating a second one — mirrors the same
+                // duplicate-avoidance reasoning used on the push side (see
+                // syncServiceCategoryToGhl()'s own name-matching before POSTing).
+                if (! $category) {
+                    $category = ServiceCategory::where('tenant_id', $tenantId)
+                        ->whereNull('ghl_category_id')
+                        ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim($data['name']))])
+                        ->first();
+                }
+
                 if ($category) {
-                    $category->update($data);
+                    $category->update($data + ['ghl_category_id' => $ghlId]);
                 } else {
                     ServiceCategory::create($data + ['ghl_category_id' => $ghlId]);
                     $results['created']++;
                 }
 
                 $results['pulled']++;
+            }
+
+            // Only when the response shape was actually recognized — an
+            // unrecognized shape must never trigger deactivation (that's a
+            // parsing gap, not real GHL data). $parsed['items'] (the raw
+            // count GHL actually returned, before the deleted-skip filter
+            // above) — not count($seenGhlIds) — is what gates this: a
+            // response of "here are 3 categories, all marked deleted" is
+            // real, trustworthy GHL data (deactivate all 3 locally, even
+            // though $seenGhlIds ends up empty), completely different from
+            // "GHL returned 0 categories total" (the suspiciously-empty
+            // case every other delete-sync method in this codebase guards
+            // against — see deactivateMissingCategories()'s doc comment).
+            if ($parsed['recognized'] && count($parsed['items']) > 0) {
+                $results['deactivated'] = $this->deactivateMissingServiceCategories($tenantId, $seenGhlIds);
             }
 
             // Distinguishes three outcomes that all otherwise look
@@ -370,6 +490,199 @@ class GhlServiceSyncService
         return ['items' => [], 'recognized' => false];
     }
 
+    /**
+     * Delete-sync: a ServiceCategory previously pulled from GHL
+     * (ghl_category_id set) that no longer appears — genuinely absent, or
+     * present but marked `deleted: true` — in this pull's category list is
+     * deactivated (is_active=false), never hard-deleted. ServiceCategory
+     * has no SoftDeletes trait, and a hard DELETE would leave any
+     * ProductRental row still pointing at that raw ghl_category_id with a
+     * dangling reference (ServiceCategory::rentals() is keyed on the raw
+     * GHL id, not a real FK) — deactivation is safe and fully reversible,
+     * since a later pull's own upsert always re-writes `is_active` from
+     * live GHL data the moment the category reappears (see the loop above).
+     *
+     * Only ever touches rows that are themselves GHL-sourced
+     * (ghl_category_id IS NOT NULL) — a locally-created service category
+     * (if one ever exists) is never touched by this method.
+     *
+     * The caller gates this on `count($parsed['items']) > 0` (GHL actually
+     * returned real data this run — even if every item is marked deleted),
+     * not on `$seenGhlIds` being non-empty — those aren't the same
+     * condition here, unlike every other delete-sync method in this
+     * codebase: a response of "N categories, all deleted" legitimately
+     * produces an empty $seenGhlIds while still being fully trustworthy
+     * data, so this method itself does not re-guard on that emptiness (see
+     * GhlProductSyncService::deactivateMissingCategories()'s doc comment
+     * for the general "never trust a suspiciously-empty response" reasoning
+     * this codebase otherwise follows everywhere else).
+     */
+    private function deactivateMissingServiceCategories(string $tenantId, array $seenGhlIds): int
+    {
+        return ServiceCategory::where('tenant_id', $tenantId)
+            ->whereNotNull('ghl_category_id')
+            ->whereNotIn('ghl_category_id', $seenGhlIds)
+            ->where('is_active', true)
+            ->update(['is_active' => false]);
+    }
+
+    /**
+     * Push-sync (local -> GHL), the counterpart to pullServiceCategories()
+     * above. Creates via POST when the category has never been linked,
+     * updates via PUT `calendars/service-categories/{id}` when it has —
+     * same create-or-update shape as GhlProductSyncService::syncCategoryToGhl().
+     *
+     * **Live-verified limitation, not a guess**: a real call against this
+     * tenant's actual GHL connection confirmed `GET calendars/service-categories`
+     * works (see pullServiceCategories()'s own doc comment — the
+     * `calendars/groups.readonly` scope fix), but POST/PUT/DELETE against
+     * the same path currently return a real `401 "The token is not
+     * authorized for this scope"` — a write-scope gap, not a wrong endpoint.
+     * `calendars/groups.write` (added to GhlAuthService::DEFAULT_SCOPES
+     * alongside its readonly sibling) is the best-informed next candidate,
+     * unconfirmed until the connection is re-authorized (Engage Settings ->
+     * Authorize) and re-tested — a token refresh alone cannot add scopes to
+     * an existing grant.
+     *
+     * A second real, live-tested hypothesis was ruled out during this
+     * investigation: `calendars/service-categories`' own `associationId`
+     * field points at a `products/collections` id (confirmed by cross-
+     * referencing this tenant's real "Cabins" category against its real
+     * collections list) — but POSTing a brand-new test collection via the
+     * already-write-scoped `products/collections` endpoint did NOT cause it
+     * to appear as a service category on a follow-up pull, so collection
+     * creation alone doesn't establish whatever the real association
+     * mechanism is. That test collection was deleted immediately after
+     * (confirmed removed) — this method deliberately does NOT write through
+     * `products/collections` as a workaround, since the real linkage is
+     * unconfirmed and guessing wrong here risks creating an orphaned
+     * collection with no known relationship to any rental category.
+     *
+     * Deliberately non-blocking either way: this method throws on failure
+     * (matching syncCategoryToGhl()'s own contract) and leaves
+     * `engage_sync_status='error'` on the row, but the caller
+     * (ServiceCategoryController) always keeps the already-made local
+     * change — a write-scope 401 on GHL's side must never make local
+     * Service Category CRUD (which worked standalone before this feature)
+     * stop working.
+     */
+    public function syncServiceCategoryToGhl(ServiceCategory $category): ServiceCategory
+    {
+        $category->update(['engage_sync_status' => 'pending']);
+
+        $locationId = $this->client->getLocationId();
+
+        $payload = [
+            'name' => $category->name,
+            'locationId' => $locationId,
+            'isActive' => (bool) $category->is_active,
+            'industryType' => self::RENTAL_INDUSTRY,
+        ];
+
+        try {
+            $ghlId = $category->ghl_category_id ?: $this->findGhlServiceCategoryIdByName($category->name);
+
+            $response = $ghlId
+                ? $this->client->put("calendars/service-categories/{$ghlId}", $payload, [], self::SERVICE_CATEGORIES_API_VERSION)
+                : $this->client->post('calendars/service-categories', $payload, [], self::SERVICE_CATEGORIES_API_VERSION);
+
+            Log::info('GHL service-category sync response', ['response' => $response]);
+
+            $resolvedId = $ghlId ?: ($response['_id'] ?? $response['id'] ?? $response['serviceCategory']['_id'] ?? null);
+
+            $category->update([
+                'ghl_category_id' => $resolvedId,
+                'engage_sync_status' => 'synced',
+                'engage_last_synced_at' => now(),
+            ]);
+
+            return $category->fresh();
+        } catch (\Exception $e) {
+            Log::error('GHL service-category sync failed', [
+                'service_category_id' => $category->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $category->update(['engage_sync_status' => 'error']);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Mirrors GhlProductSyncService::deleteCategoryFromGhl() — no-ops when
+     * the category was never linked (nothing to delete on the GHL side).
+     * `altId`/`altType` are passed as query params on the DELETE call, not
+     * assumed — confirmed necessary via a real live test against this
+     * tenant's connection (a bare DELETE with no query params returned a
+     * real `422 "locationId/altId must be a string and it should exists"`).
+     */
+    public function deleteServiceCategoryFromGhl(ServiceCategory $category): void
+    {
+        if (! $category->ghl_category_id) {
+            return;
+        }
+
+        $locationId = $this->client->getLocationId();
+
+        try {
+            $this->client->delete("calendars/service-categories/{$category->ghl_category_id}", [
+                'altId' => $locationId,
+                'altType' => 'location',
+                'locationId' => $locationId,
+            ], self::SERVICE_CATEGORIES_API_VERSION);
+        } catch (\Exception $e) {
+            Log::error('GHL service-category delete failed', [
+                'service_category_id' => $category->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Duplicate-avoidance for syncServiceCategoryToGhl()'s create path: a
+     * category with the same name may already exist in GHL (created there
+     * directly, not yet pulled locally) — link to it via PUT instead of
+     * blindly POSTing a second, duplicate category with the same name.
+     * Mirrors this same "find by name before creating" precedent already
+     * used on the pull side (see pullServiceCategories()'s own name-match
+     * fallback) and the find-or-create idiom
+     * GhlProductSyncService::syncDefaultPriceToGhl() already uses for
+     * prices. Best-effort: a failed lookup here degrades to "just create
+     * it" rather than blocking the whole sync attempt.
+     */
+    private function findGhlServiceCategoryIdByName(string $name): ?string
+    {
+        try {
+            $response = $this->client->get('calendars/service-categories', [
+                'locationId' => $this->client->getLocationId(),
+                'industryType' => self::RENTAL_INDUSTRY,
+            ], self::SERVICE_CATEGORIES_API_VERSION);
+
+            $parsed = $this->parseServiceCategories($response);
+            $needle = mb_strtolower(trim($name));
+
+            foreach ($parsed['items'] as $item) {
+                if (($item['deleted'] ?? false) === true) {
+                    continue;
+                }
+
+                if (mb_strtolower(trim($item['name'] ?? '')) === $needle) {
+                    return $item['_id'] ?? $item['id'] ?? null;
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('GHL service-category name lookup failed (falling back to create)', [
+                'name' => $name,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
     private function serviceDetailRequest(string $ghlId, string $locationId): array
     {
         return [
@@ -405,8 +718,26 @@ class GhlServiceSyncService
         $existing = ProductRental::where('tenant_id', $tenantId)->where('ghl_id', $ghlId)->first();
 
         if ($existing) {
-            $product = $existing->product;
-            $product->update($productAttributes);
+            // $existing->product resolves to null when the product was
+            // soft-deleted by a prior delete-sync run
+            // (archiveMissingRentalListings() below) — Product's SoftDeletes
+            // global scope hides it from the relation by default. GHL
+            // still/again has this listing, so it must be restored rather
+            // than left permanently hidden (or, worse, calling update() on
+            // null a line below). The correct is_active state for the base
+            // row (and every variant) is written moments later by this same
+            // pull's own upsertRentalRow()/finalizeListing() calls, so
+            // nothing else needs forcing here.
+            $product = $existing->product ?? Product::withTrashed()->find($existing->product_id);
+
+            if ($product) {
+                if ($product->trashed()) {
+                    $product->restore();
+                }
+                $product->update($productAttributes);
+            } else {
+                $product = Product::create($productAttributes);
+            }
         } else {
             $product = Product::create($productAttributes);
         }

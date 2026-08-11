@@ -14,6 +14,7 @@ class ServiceCategoryResource extends JsonResource
             'name' => $this->name,
             'is_active' => $this->is_active,
             'ghl_category_id' => $this->ghl_category_id,
+            'engage_sync_status' => $this->engage_sync_status,
             'engage_last_synced_at' => $this->engage_last_synced_at,
             'rentals_count' => $this->whenCounted('rentals'),
             'tenant_id' => $this->tenant_id,

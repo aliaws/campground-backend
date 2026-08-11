@@ -12,11 +12,20 @@ use Illuminate\Http\Request;
 
 /**
  * Mirrors CategoryController (Product Categories), scoped to services/
- * rentals. Deliberately no syncToGhl()/bulkSync() — unlike Category, there's
- * no "push a locally-created category into GHL" use case here (a rental can
- * only ever be created via the GHL services pull, never through this app —
- * see StoreProductRequest's own note on that), so this controller only ever
- * pulls from GHL, never pushes to it.
+ * rentals.
+ *
+ * **2026-08-12 revision**: this controller's docblock previously said it
+ * was deliberately pull-only — "no push a locally-created category into
+ * GHL use case here" — reasoning that only ever applied to *rentals*
+ * themselves (which really can only be created via the GHL pull, see
+ * StoreProductRequest's own note). Service Categories are a different,
+ * standalone taxonomy an admin can legitimately create/rename/delete
+ * locally, and now push those changes outward too — see
+ * GhlServiceSyncService::syncServiceCategoryToGhl()/
+ * deleteServiceCategoryFromGhl() for the full design, including a real,
+ * live-verified current limitation (write scope not yet authorized on this
+ * connection). store()/update()/destroy() below never let that failure
+ * block the local operation — see each method's own comment for why.
  */
 class ServiceCategoryController extends Controller
 {
@@ -38,6 +47,20 @@ class ServiceCategoryController extends Controller
         ]);
     }
 
+    /**
+     * Creates the local row unconditionally first — this always succeeds
+     * exactly as it did before this feature, so a GHL-side failure below
+     * can never regress the local CRUD that already worked. The outbound
+     * push is then attempted best-effort: on success the row already
+     * carries its real `ghl_category_id`/`synced` status (set inside
+     * syncServiceCategoryToGhl() itself); on failure the row stays
+     * `error` and a clear, factual message is returned alongside the
+     * still-201 response so the frontend can surface a warning rather than
+     * silently reporting full success. The frontend can retry later via
+     * `POST /service-categories/{id}/sync-ghl` (syncToGhl() below), or the
+     * category will self-heal on the next "Pull from Lead Connector" if a
+     * matching category was independently created in GHL in the meantime.
+     */
     public function store(StoreServiceCategoryRequest $request): JsonResponse
     {
         $data = $request->validated();
@@ -45,10 +68,14 @@ class ServiceCategoryController extends Controller
 
         $category = ServiceCategory::create($data);
 
+        $syncError = $this->pushToGhl($category);
+
         return response()->json([
             'success' => true,
-            'data' => new ServiceCategoryResource($category),
-            'message' => 'Service category created.',
+            'data' => new ServiceCategoryResource($category->fresh()),
+            'message' => $syncError
+                ? "Service category created locally, but Lead Connector sync failed: {$syncError}"
+                : 'Service category created and synced to Lead Connector.',
         ], 201);
     }
 
@@ -67,6 +94,7 @@ class ServiceCategoryController extends Controller
         ]);
     }
 
+    /** Same "local always succeeds, GHL push is best-effort" contract as store() above. */
     public function update(StoreServiceCategoryRequest $request, ServiceCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->tenant_id !== $request->user()->tenant_id) {
@@ -75,17 +103,43 @@ class ServiceCategoryController extends Controller
 
         $serviceCategory->update($request->validated());
 
+        $syncError = $this->pushToGhl($serviceCategory);
+
         return response()->json([
             'success' => true,
             'data' => new ServiceCategoryResource($serviceCategory->fresh()->loadCount('rentals')),
-            'message' => 'Service category updated.',
+            'message' => $syncError
+                ? "Service category updated locally, but Lead Connector sync failed: {$syncError}"
+                : 'Service category updated and synced to Lead Connector.',
         ]);
     }
 
+    /**
+     * Deletes GHL-side first (when the category was ever linked), then
+     * local — the opposite ordering from store()/update(), deliberately:
+     * a delete is the one operation here with no later retry path once the
+     * local row is gone, so attempting the GHL side while there's still a
+     * local row to fall back on is safer than the reverse. If the GHL
+     * delete fails, the local delete still proceeds anyway (same
+     * "never let a GHL failure block already-working local functionality"
+     * rule as store()/update() — the alternative, refusing to delete
+     * locally at all while write access is scope-blocked, would make this
+     * button appear completely broken under today's real connection state)
+     * — but the response says so plainly rather than reporting a clean
+     * success, so a staff member knows to double check the Lead Connector
+     * side rather than assuming it's gone from both.
+     */
     public function destroy(Request $request, ServiceCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->tenant_id !== $request->user()->tenant_id) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
+        }
+
+        $syncError = null;
+        try {
+            $this->ghlServiceSyncService->deleteServiceCategoryFromGhl($serviceCategory);
+        } catch (\Exception $e) {
+            $syncError = $e->getMessage();
         }
 
         // No pivot to detach — a rental just falls back to "no category"
@@ -94,7 +148,51 @@ class ServiceCategoryController extends Controller
         // row matches that ghl_category_id anymore).
         $serviceCategory->delete();
 
-        return response()->json(['success' => true, 'message' => 'Service category deleted.']);
+        return response()->json([
+            'success' => true,
+            'message' => $syncError
+                ? "Service category deleted locally, but removing it from Lead Connector failed: {$syncError}"
+                : 'Service category deleted from both the local database and Lead Connector.',
+        ]);
+    }
+
+    /**
+     * Manual retry for a category stuck `error`/`not_synced` (e.g. because
+     * write scope wasn't authorized yet at creation time) — mirrors
+     * CategoryController::syncToGhl()'s single-record retry button.
+     */
+    public function syncToGhl(Request $request, ServiceCategory $serviceCategory): JsonResponse
+    {
+        if ($serviceCategory->tenant_id !== $request->user()->tenant_id) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
+        }
+
+        try {
+            $category = $this->ghlServiceSyncService->syncServiceCategoryToGhl($serviceCategory);
+
+            return response()->json([
+                'success' => true,
+                'data' => new ServiceCategoryResource($category->loadCount('rentals')),
+                'message' => 'Service category synced to Lead Connector.',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sync failed: '.$e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /** @return string|null the sync error message, or null on success */
+    private function pushToGhl(ServiceCategory $serviceCategory): ?string
+    {
+        try {
+            $this->ghlServiceSyncService->syncServiceCategoryToGhl($serviceCategory);
+
+            return null;
+        } catch (\Exception $e) {
+            return $e->getMessage();
+        }
     }
 
     public function pullFromGhl(Request $request): JsonResponse

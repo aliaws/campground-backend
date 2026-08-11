@@ -169,6 +169,7 @@ Route::prefix('v1')->group(function () {
         Route::put('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'update']);
         Route::delete('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'destroy']);
         Route::post('/service-categories/pull-ghl', [ServiceCategoryController::class, 'pullFromGhl']);
+        Route::post('/service-categories/{serviceCategory}/sync-ghl', [ServiceCategoryController::class, 'syncToGhl']);
 
         // Amenities (Services module — assigned to service listings via service_amenities)
         Route::get('/amenities', [AmenityController::class, 'index']);

@@ -146,10 +146,19 @@ class GhlService
             throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
         }
 
-        $results = ['pulled' => 0, 'created' => 0, 'updated' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'updated' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => []];
         $page = 0;
         $limit = 100;
         $total = null;
+        $seenGhlContactIds = [];
+        // Only true once every page has been fetched with no exception —
+        // see softDeleteMissingCustomers()'s doc comment for why this must
+        // gate the removal pass. A per-page fetch failure `break`s the loop
+        // below and this stays false, so a partial contact list (we only
+        // ever saw pages 1-2 of, say, 5) is never mistaken for "GHL's
+        // complete current contact list" and used to soft-delete every
+        // customer whose page we simply never reached.
+        $fetchComplete = true;
 
         do {
             try {
@@ -161,16 +170,36 @@ class GhlService
             } catch (\Exception $e) {
                 $results['errors']++;
                 $results['error_details'][] = ['page' => $page, 'error' => $e->getMessage()];
+                $fetchComplete = false;
                 break;
             }
 
             $contacts = $response['contacts'] ?? [];
 
             foreach ($contacts as $contact) {
+                if (! empty($contact['id'])) {
+                    // Recorded regardless of whether the local save below
+                    // succeeds — what matters for delete-sync purposes is
+                    // "does GHL still have this contact," independent of
+                    // any local persistence failure.
+                    $seenGhlContactIds[] = $contact['id'];
+                }
+
                 try {
                     $name = trim(
                         ($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')
                     ) ?: ($contact['name'] ?? 'Unknown');
+
+                    // A row soft-deleted by a prior delete-sync run
+                    // (softDeleteMissingCustomers() below) whose contact has
+                    // reappeared in GHL needs restoring first —
+                    // ghl_contact_id has no unique DB constraint, so without
+                    // this, updateOrCreate() below would find no *visible*
+                    // match (soft-deleted rows are excluded from default
+                    // queries) and silently create a genuine duplicate
+                    // Customer row for the same contact.
+                    $trashedMatch = Customer::onlyTrashed()->where('ghl_contact_id', $contact['id'])->first();
+                    $trashedMatch?->restore();
 
                     $customer = Customer::updateOrCreate(
                         ['ghl_contact_id' => $contact['id']],
@@ -213,7 +242,61 @@ class GhlService
             usleep(100000);
         } while ($page * $limit < $total && ! empty($contacts));
 
+        if ($fetchComplete) {
+            try {
+                $results['deactivated'] = $this->softDeleteMissingCustomers($tenantId, $seenGhlContactIds);
+            } catch (\Exception $e) {
+                $results['errors']++;
+                $results['error_details'][] = ['error' => 'Customer delete-sync failed: '.$e->getMessage()];
+                Log::error('GHL contact delete-sync failed', ['tenant_id' => $tenantId, 'error' => $e->getMessage()]);
+            }
+        }
+
         return $results;
+    }
+
+    /**
+     * Delete-sync: a Customer previously synced from GHL (ghl_contact_id
+     * set) that no longer appears in GHL's current, *fully*-fetched contact
+     * list is soft-deleted — never hard-deleted. Customer already uses
+     * SoftDeletes, so this is fully reversible (bulkPullContacts()'s own
+     * restore-then-updateOrCreate step above undoes it the moment the
+     * contact reappears) and, critically, never breaks a
+     * Booking/RentalTransaction/ProductTransaction foreign key that still
+     * points at the row — a soft delete only hides it from default queries
+     * (e.g. the staff Customers list), it never removes the row or any data
+     * that references it.
+     *
+     * Deliberately distinct from the staff-initiated
+     * CustomerService::hardDelete() flow (permanent, cancels any upcoming
+     * GHL booking first, requires explicit staff confirmation) — this
+     * automated sync path is intentionally much more conservative: it never
+     * permanently erases anything and never touches GHL itself.
+     *
+     * Guarded on a non-empty $seenGhlContactIds — see
+     * GhlProductSyncService::deactivateMissingCategories()'s doc comment
+     * for why a successful-but-empty fetch must never be trusted as "GHL
+     * has zero contacts now." Only ever runs when $fetchComplete (see
+     * caller) — a contact list that failed partway through pagination must
+     * never be treated as the complete current picture of who GHL still
+     * has.
+     */
+    private function softDeleteMissingCustomers(string $tenantId, array $seenGhlContactIds): int
+    {
+        if (empty($seenGhlContactIds)) {
+            return 0;
+        }
+
+        $stale = Customer::where('tenant_id', $tenantId)
+            ->whereNotNull('ghl_contact_id')
+            ->whereNotIn('ghl_contact_id', $seenGhlContactIds)
+            ->get();
+
+        foreach ($stale as $customer) {
+            $customer->delete();
+        }
+
+        return $stale->count();
     }
 
     public function bulkSyncContacts(string $tenantId): array

@@ -50,6 +50,22 @@ class GhlAuthService
         // grant. Re-test after re-authorizing; if it's still 401, the real
         // scope name differs and needs to come from GHL support/docs.
         'calendars/groups.readonly',
+        // Added 2026-08-12 for POST/PUT/DELETE calendars/service-categories
+        // (Category & Service GHL Sync — outbound category push). A real
+        // live call with every scope above already granted (including the
+        // readonly sibling, which does work for GET) still returned the
+        // same 401 "not authorized for this scope" on all three write
+        // verbs — confirmed live, not assumed. `calendars/groups.write` is
+        // the natural write-side pairing of the readonly scope directly
+        // above and the best-informed candidate, not a confirmed fix — same
+        // caveat as that entry: only takes effect after re-authorizing
+        // (Engage Settings -> Authorize), and if still 401 afterward the
+        // real scope name needs to come from GHL support/docs. Until then,
+        // GhlServiceSyncService::syncServiceCategoryToGhl()/
+        // deleteServiceCategoryFromGhl() fail closed but non-blocking —
+        // local Service Category CRUD keeps working either way, see that
+        // method's own doc comment.
+        'calendars/groups.write',
     ];
 
     public function getAuthorizationUrl(EngageSetting $setting, string $redirectUri): string
