@@ -208,6 +208,12 @@ class GhlServiceSyncService
     }
 
     /**
+     * `Version: v3` — confirmed via a real captured Postman request/response
+     * against this tenant's live account (2026-08-11), not guessed.
+     */
+    private const SERVICE_CATEGORIES_API_VERSION = 'v3';
+
+    /**
      * Pulls `GET calendars/service-categories` — the category taxonomy each
      * rental's `serviceCategoryId` (captured per-row in upsertRentalRow()
      * below) refers to. Mirrors GhlProductSyncService::pullCategoriesFromGhl()
@@ -215,26 +221,26 @@ class GhlServiceSyncService
      * idempotent (no duplicates), and a category that already exists locally
      * is updated in place rather than re-created.
      *
-     * The exact response shape could not be verified live against a real
-     * account while building this — this tenant's connected OAuth token
-     * returns `401 "The token is not authorized for this scope"` for this
-     * specific endpoint (confirmed via a direct GhlClient call: the sibling
-     * `calendars/services` call succeeds fine with the same token/location,
-     * so this is a genuine missing-scope gap on the GHL app's OAuth consent,
-     * not a bug in this method — re-authorizing the connection with an
-     * expanded scope should resolve it). `parseServiceCategories()` is
-     * therefore deliberately defensive: it tries every response-key
-     * convention already seen elsewhere in this codebase for a GHL list
-     * endpoint (`serviceCategories`, `categories`, `data`, or a bare array)
-     * rather than assuming one, and each category item is read via `_id ??
-     * id` / `name` the same way every other GHL list item in this file is.
-     * Offset/limit pagination is handled the same way
-     * fetchAllGhlCollections() does, in case this endpoint pages results —
-     * a single non-full page (the overwhelmingly likely case for a small
-     * category list) exits the loop after one request, so this adds no
-     * meaningful cost when the endpoint isn't actually paginated.
+     * Response shape confirmed live (2026-08-11, real captured
+     * request/response against this tenant's account, supplied by the
+     * user): `{ "serviceCategories": [{ "_id", "name", "isActive",
+     * "deleted", "slug", "locationId", "isSystemGenerated",
+     * "associationId", "associationType", ... }] }` — this superseded an
+     * earlier attempt that couldn't verify the shape live because the
+     * connection's OAuth token was missing scope for this endpoint (401);
+     * `calendars/groups.readonly` was added to GhlAuthService's requested
+     * scopes and the connection re-authorized, which resolved that.
+     * `parseServiceCategories()` still checks a couple of fallback keys
+     * defensively (cheap, harmless) but `serviceCategories` — already the
+     * first key tried — is the real, confirmed shape.
      *
-     * @return array{pulled: int, created: int, errors: int, error_details: array}
+     * **No pagination** — a real live call with `limit`/`offset` query
+     * params attached (mirroring GhlProductSyncService::fetchAllGhlCollections()'s
+     * pattern for the *different*, actually-paginated `products/collections`
+     * endpoint) returned `422 "property limit should not exist / property
+     * offset should not exist"`. This endpoint always returns the
+     * location's full category list in one response — confirmed by the
+     * same real captured request, which sends neither param.
      */
     public function pullServiceCategories(string $tenantId): array
     {
@@ -247,15 +253,25 @@ class GhlServiceSyncService
         }
 
         try {
-            foreach ($this->fetchAllGhlServiceCategories($locationId) as $ghlCategory) {
+            $response = $this->client->get('calendars/service-categories', [
+                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
+            ], self::SERVICE_CATEGORIES_API_VERSION);
+
+            foreach ($this->parseServiceCategories($response) as $ghlCategory) {
                 $ghlId = $ghlCategory['_id'] ?? $ghlCategory['id'] ?? null;
 
-                if (! $ghlId) {
+                // A category GHL has soft-deleted no longer really exists —
+                // skip it entirely rather than importing/updating a local
+                // row for it (matches finalizeListing()'s own treatment of
+                // rentals GHL no longer returns).
+                if (! $ghlId || ($ghlCategory['deleted'] ?? false) === true) {
                     continue;
                 }
 
                 $data = [
                     'name' => $ghlCategory['name'] ?? 'Untitled',
+                    'is_active' => $ghlCategory['isActive'] ?? true,
                     'engage_last_synced_at' => now(),
                     'tenant_id' => $tenantId,
                 ];
@@ -267,7 +283,7 @@ class GhlServiceSyncService
                 if ($category) {
                     $category->update($data);
                 } else {
-                    ServiceCategory::create($data + ['ghl_category_id' => $ghlId, 'is_active' => true]);
+                    ServiceCategory::create($data + ['ghl_category_id' => $ghlId]);
                     $results['created']++;
                 }
 
@@ -280,28 +296,6 @@ class GhlServiceSyncService
         }
 
         return $results;
-    }
-
-    private function fetchAllGhlServiceCategories(string $locationId): array
-    {
-        $all = [];
-        $offset = 0;
-        $limit = 100;
-
-        do {
-            $response = $this->client->get('calendars/service-categories', [
-                'locationId' => $locationId,
-                'industryType' => self::RENTAL_INDUSTRY,
-                'limit' => $limit,
-                'offset' => $offset,
-            ]);
-
-            $batch = $this->parseServiceCategories($response);
-            $all = array_merge($all, $batch);
-            $offset += $limit;
-        } while (count($batch) === $limit);
-
-        return $all;
     }
 
     /** See pullServiceCategories()'s doc comment for why this checks multiple keys. */
