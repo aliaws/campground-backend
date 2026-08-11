@@ -109,10 +109,20 @@ class ServiceCategoryController extends Controller
             ], 422);
         }
 
+        // `note` is set only on a 0-pulled, 0-error run — e.g. "Lead
+        // Connector has no categories configured for this location yet"
+        // or an unrecognized-response-shape diagnostic — folded into the
+        // same message the Pull button's Alert already shows, so a silent
+        // "0 pulled, no visible error" outcome always says *why*.
+        $message = "Pulled {$results['pulled']} service categories from Lead Connector ({$results['created']} new), {$results['errors']} errors.";
+        if (! empty($results['note'])) {
+            $message .= ' '.$results['note'];
+        }
+
         return response()->json([
             'success' => true,
             'data' => $results,
-            'message' => "Pulled {$results['pulled']} service categories from Lead Connector ({$results['created']} new), {$results['errors']} errors.",
+            'message' => $message,
         ]);
     }
 }

@@ -244,7 +244,7 @@ class GhlServiceSyncService
      */
     public function pullServiceCategories(string $tenantId): array
     {
-        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => [], 'note' => null];
 
         $locationId = $this->client->getLocationId();
 
@@ -258,7 +258,10 @@ class GhlServiceSyncService
                 'industryType' => self::RENTAL_INDUSTRY,
             ], self::SERVICE_CATEGORIES_API_VERSION);
 
-            foreach ($this->parseServiceCategories($response) as $ghlCategory) {
+            $parsed = $this->parseServiceCategories($response);
+            $skippedDeleted = 0;
+
+            foreach ($parsed['items'] as $ghlCategory) {
                 $ghlId = $ghlCategory['_id'] ?? $ghlCategory['id'] ?? null;
 
                 // A category GHL has soft-deleted no longer really exists —
@@ -266,6 +269,8 @@ class GhlServiceSyncService
                 // row for it (matches finalizeListing()'s own treatment of
                 // rentals GHL no longer returns).
                 if (! $ghlId || ($ghlCategory['deleted'] ?? false) === true) {
+                    $skippedDeleted++;
+
                     continue;
                 }
 
@@ -289,6 +294,45 @@ class GhlServiceSyncService
 
                 $results['pulled']++;
             }
+
+            // Distinguishes three outcomes that all otherwise look
+            // identical from the outside as a bare "pulled: 0, errors: 0"
+            // — the exact ambiguity a different environment's GHL account
+            // (never exercised locally) could hit: (a) a genuinely
+            // unrecognized response shape — a real problem, so this alone
+            // goes into `error_details` (which GhlFullSyncService::runPhase()
+            // treats as a phase error and reflects in the overall sync
+            // status); (b) every category GHL returned is soft-deleted; (c)
+            // GHL's list for this location is genuinely, legitimately empty
+            // (nothing configured there yet). (b) and (c) are normal,
+            // successful outcomes — not errors, and deliberately don't touch
+            // `error_details`/the overall sync status for that reason —
+            // but still need to be visible *somewhere*, so they're returned
+            // via `note` instead: ServiceCategoryController::pullFromGhl()
+            // folds it into the individual Pull button's own message, and
+            // it's always logged either way for a server-side check.
+            if ($results['pulled'] === 0 && $results['errors'] === 0) {
+                if (! $parsed['recognized']) {
+                    $note = 'GHL returned a response for calendars/service-categories in an unrecognized shape (top-level keys: '
+                        .implode(', ', array_keys($response)).') — 0 categories could be parsed from it.';
+                    $results['error_details'][] = ['error' => $note];
+                    $results['note'] = $note;
+                    Log::warning('GHL service-category response shape not recognized', [
+                        'tenant_id' => $tenantId,
+                        'top_level_keys' => array_keys($response),
+                    ]);
+                } elseif ($skippedDeleted > 0) {
+                    $results['note'] = "GHL returned {$skippedDeleted} service categor".($skippedDeleted === 1 ? 'y' : 'ies')
+                        .' for this location, but all of them are marked deleted — 0 usable categories were pulled.';
+                    Log::info('GHL service-category pull: every returned category was deleted', [
+                        'tenant_id' => $tenantId,
+                        'deleted_count' => $skippedDeleted,
+                    ]);
+                } else {
+                    $results['note'] = 'GHL returned an empty service-category list for this location — no categories are configured there yet.';
+                    Log::info('GHL service-category pull: location has zero categories configured', ['tenant_id' => $tenantId]);
+                }
+            }
         } catch (\Exception $e) {
             $results['errors']++;
             $results['error_details'][] = ['error' => 'GHL service-category list fetch failed: '.$e->getMessage()];
@@ -298,19 +342,32 @@ class GhlServiceSyncService
         return $results;
     }
 
-    /** See pullServiceCategories()'s doc comment for why this checks multiple keys. */
+    /**
+     * See pullServiceCategories()'s doc comment for why this checks
+     * multiple keys. `recognized` tells the caller whether a known shape
+     * was actually matched (even if the list inside it was empty) versus
+     * nothing matching at all — the two look identical as a bare array
+     * otherwise, and that distinction is what makes a silent zero-result
+     * pull on an unfamiliar GHL account diagnosable.
+     *
+     * @return array{items: array, recognized: bool}
+     */
     private function parseServiceCategories(array $response): array
     {
         foreach (['serviceCategories', 'categories', 'data'] as $key) {
             if (isset($response[$key]) && is_array($response[$key])) {
-                return $response[$key];
+                return ['items' => $response[$key], 'recognized' => true];
             }
         }
 
         // A bare top-level list (no wrapper key) — array_is_list() confirms
         // it's actually a plain array of items, not an associative payload
         // under some other key this loop didn't anticipate.
-        return array_is_list($response) ? $response : [];
+        if (array_is_list($response)) {
+            return ['items' => $response, 'recognized' => true];
+        }
+
+        return ['items' => [], 'recognized' => false];
     }
 
     private function serviceDetailRequest(string $ghlId, string $locationId): array
