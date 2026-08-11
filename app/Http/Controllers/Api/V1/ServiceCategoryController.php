@@ -213,6 +213,11 @@ class ServiceCategoryController extends Controller
         // same message the Pull button's Alert already shows, so a silent
         // "0 pulled, no visible error" outcome always says *why*.
         $message = "Pulled {$results['pulled']} service categories from Lead Connector ({$results['created']} new), {$results['errors']} errors.";
+        if (! empty($results['deleted'])) {
+            $noun = $results['deleted'] === 1 ? 'category' : 'categories';
+            $verb = $results['deleted'] === 1 ? 'was' : 'were';
+            $message .= " {$results['deleted']} {$noun} no longer in Lead Connector {$verb} removed.";
+        }
         if (! empty($results['note'])) {
             $message .= ' '.$results['note'];
         }

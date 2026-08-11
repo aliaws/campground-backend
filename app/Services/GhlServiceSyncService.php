@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductRental;
 use App\Models\ServiceCategory;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Pulls GHL Calendar Rentals into the minimal local schema: one Product per
@@ -324,7 +325,7 @@ class GhlServiceSyncService
      */
     public function pullServiceCategories(string $tenantId): array
     {
-        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => [], 'note' => null];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'deleted' => 0, 'error_details' => [], 'note' => null];
 
         $locationId = $this->client->getLocationId();
 
@@ -351,7 +352,7 @@ class GhlServiceSyncService
                 // rentals GHL no longer returns), and deliberately do NOT
                 // add it to $seenGhlIds below — an already-local row for
                 // this id must be treated as "gone" too (see
-                // deactivateMissingServiceCategories()).
+                // deleteMissingServiceCategories()).
                 if (! $ghlId || ($ghlCategory['deleted'] ?? false) === true) {
                     $skippedDeleted++;
 
@@ -401,18 +402,18 @@ class GhlServiceSyncService
             }
 
             // Only when the response shape was actually recognized — an
-            // unrecognized shape must never trigger deactivation (that's a
+            // unrecognized shape must never trigger deletion (that's a
             // parsing gap, not real GHL data). $parsed['items'] (the raw
             // count GHL actually returned, before the deleted-skip filter
             // above) — not count($seenGhlIds) — is what gates this: a
             // response of "here are 3 categories, all marked deleted" is
-            // real, trustworthy GHL data (deactivate all 3 locally, even
+            // real, trustworthy GHL data (delete all 3 locally, even
             // though $seenGhlIds ends up empty), completely different from
             // "GHL returned 0 categories total" (the suspiciously-empty
             // case every other delete-sync method in this codebase guards
             // against — see deactivateMissingCategories()'s doc comment).
             if ($parsed['recognized'] && count($parsed['items']) > 0) {
-                $results['deactivated'] = $this->deactivateMissingServiceCategories($tenantId, $seenGhlIds);
+                $results['deleted'] = $this->deleteMissingServiceCategories($tenantId, $seenGhlIds);
             }
 
             // Distinguishes three outcomes that all otherwise look
@@ -494,17 +495,35 @@ class GhlServiceSyncService
      * Delete-sync: a ServiceCategory previously pulled from GHL
      * (ghl_category_id set) that no longer appears — genuinely absent, or
      * present but marked `deleted: true` — in this pull's category list is
-     * deactivated (is_active=false), never hard-deleted. ServiceCategory
-     * has no SoftDeletes trait, and a hard DELETE would leave any
-     * ProductRental row still pointing at that raw ghl_category_id with a
-     * dangling reference (ServiceCategory::rentals() is keyed on the raw
-     * GHL id, not a real FK) — deactivation is safe and fully reversible,
-     * since a later pull's own upsert always re-writes `is_active` from
-     * live GHL data the moment the category reappears (see the loop above).
+     * permanently deleted from the local database.
+     *
+     * **2026-08-12 revision, user-directed**: this originally deactivated
+     * (`is_active=false`) rather than hard-deleted, matching every other
+     * entity's delete-sync in this codebase (Contacts/Products/Categories/
+     * Rentals all soft-delete or deactivate) — reported live as confusing
+     * ("why does a category that's gone from GHL still show up in the
+     * list?"), and the user explicitly chose real deletion over hiding
+     * inactive rows by default. This is safe specifically for
+     * ServiceCategory: a hard DELETE here does **not** leave a dangling
+     * reference anywhere — `ServiceCategory::rentals()` is keyed on the raw
+     * `ghl_category_id` string, not a real FK, so a `ProductRental` still
+     * pointing at a since-deleted category simply resolves that relation to
+     * `null` (falls back to "no category"), exactly the same as manually
+     * deleting a category via `ServiceCategoryController::destroy()`
+     * already does today. This one-directional change is scoped to
+     * ServiceCategory only — Contacts/Products/Categories/Rentals keep
+     * their existing soft-delete/deactivate behavior, unchanged, since only
+     * ServiceCategory's UX was reported as a problem.
+     *
+     * A category that reappears in GHL after being deleted here is simply
+     * created fresh on the next pull (or re-linked by name if a local-only
+     * row with the same name exists — see the name-match fallback above) —
+     * no restore-from-trash step is needed since there's no soft-delete
+     * state to restore from.
      *
      * Only ever touches rows that are themselves GHL-sourced
-     * (ghl_category_id IS NOT NULL) — a locally-created service category
-     * (if one ever exists) is never touched by this method.
+     * (ghl_category_id IS NOT NULL) — a locally-created service category is
+     * never touched by this method.
      *
      * The caller gates this on `count($parsed['items']) > 0` (GHL actually
      * returned real data this run — even if every item is marked deleted),
@@ -517,78 +536,81 @@ class GhlServiceSyncService
      * for the general "never trust a suspiciously-empty response" reasoning
      * this codebase otherwise follows everywhere else).
      */
-    private function deactivateMissingServiceCategories(string $tenantId, array $seenGhlIds): int
+    private function deleteMissingServiceCategories(string $tenantId, array $seenGhlIds): int
     {
         return ServiceCategory::where('tenant_id', $tenantId)
             ->whereNotNull('ghl_category_id')
             ->whereNotIn('ghl_category_id', $seenGhlIds)
-            ->where('is_active', true)
-            ->update(['is_active' => false]);
+            ->delete();
     }
 
     /**
      * Push-sync (local -> GHL), the counterpart to pullServiceCategories()
      * above. Creates via POST when the category has never been linked,
-     * updates via PUT `calendars/service-categories/{id}` when it has —
-     * same create-or-update shape as GhlProductSyncService::syncCategoryToGhl().
+     * updates via PUT `calendars/service-categories/{id}` when it has.
      *
-     * **Live-verified limitation, not a guess**: a real call against this
-     * tenant's actual GHL connection confirmed `GET calendars/service-categories`
-     * works (see pullServiceCategories()'s own doc comment — the
-     * `calendars/groups.readonly` scope fix), but POST/PUT/DELETE against
-     * the same path currently return a real `401 "The token is not
-     * authorized for this scope"` — a write-scope gap, not a wrong endpoint.
-     * `calendars/groups.write` (added to GhlAuthService::DEFAULT_SCOPES
-     * alongside its readonly sibling) is the best-informed next candidate,
-     * unconfirmed until the connection is re-authorized (Engage Settings ->
-     * Authorize) and re-tested — a token refresh alone cannot add scopes to
-     * an existing grant.
+     * **The real request shape, live-verified end to end 2026-08-12, not
+     * guessed**: an earlier version of this method returned a real `401
+     * "not authorized for this scope"` on every write attempt, which was
+     * originally (and, it turns out, incorrectly) diagnosed as a missing
+     * OAuth scope. The user supplied real captured requests from GHL's own
+     * dashboard UI showing the actual shape — confirmed live against this
+     * tenant's connection using the *same, already-granted* token (no
+     * re-authorization involved): a full create -> appear-on-pull -> delete
+     * round trip was run with a disposable, clearly-named test category and
+     * cleaned up after. Two asymmetric quirks, both real, both confirmed by
+     * the API's own validation error messages when they were missing/wrong:
+     *   - `industryType=rental` must be sent as a **query param** on every
+     *     write call (POST/PUT/DELETE), not just GET — omitting it is what
+     *     actually produced the original 401s, not a scope problem at all.
+     *   - POST requires `locationId` in the body (`422 "locationId can't be
+     *     undefined"` without it); PUT rejects that exact same field
+     *     (`422 "property locationId should not exist"` with it) — an
+     *     asymmetry easy to miss without testing both verbs for real.
+     *   - Both also require `slug` in the body — GHL does not derive one
+     *     from `name` automatically the way `products/collections` does.
+     * Response shape: the created/updated record comes back nested under a
+     * `serviceCategory` key (`{"serviceCategory": {"_id": ..., ...}}`), not
+     * at the top level.
      *
-     * A second real, live-tested hypothesis was ruled out during this
-     * investigation: `calendars/service-categories`' own `associationId`
-     * field points at a `products/collections` id (confirmed by cross-
-     * referencing this tenant's real "Cabins" category against its real
-     * collections list) — but POSTing a brand-new test collection via the
-     * already-write-scoped `products/collections` endpoint did NOT cause it
-     * to appear as a service category on a follow-up pull, so collection
-     * creation alone doesn't establish whatever the real association
-     * mechanism is. That test collection was deleted immediately after
-     * (confirmed removed) — this method deliberately does NOT write through
-     * `products/collections` as a workaround, since the real linkage is
-     * unconfirmed and guessing wrong here risks creating an orphaned
-     * collection with no known relationship to any rental category.
-     *
-     * Deliberately non-blocking either way: this method throws on failure
-     * (matching syncCategoryToGhl()'s own contract) and leaves
+     * Deliberately non-blocking regardless: this method still throws on
+     * failure (matching syncCategoryToGhl()'s own contract) and leaves
      * `engage_sync_status='error'` on the row, but the caller
      * (ServiceCategoryController) always keeps the already-made local
-     * change — a write-scope 401 on GHL's side must never make local
-     * Service Category CRUD (which worked standalone before this feature)
-     * stop working.
+     * change — any future GHL-side failure (network, a real permission
+     * change, etc.) must never make local Service Category CRUD stop
+     * working, exactly the same reasoning as before, just no longer
+     * describing today's actual, working default path.
      */
     public function syncServiceCategoryToGhl(ServiceCategory $category): ServiceCategory
     {
         $category->update(['engage_sync_status' => 'pending']);
 
         $locationId = $this->client->getLocationId();
-
-        $payload = [
-            'name' => $category->name,
-            'locationId' => $locationId,
-            'isActive' => (bool) $category->is_active,
-            'industryType' => self::RENTAL_INDUSTRY,
-        ];
+        $slug = Str::slug($category->name);
+        $query = ['industryType' => self::RENTAL_INDUSTRY];
 
         try {
             $ghlId = $category->ghl_category_id ?: $this->findGhlServiceCategoryIdByName($category->name);
 
-            $response = $ghlId
-                ? $this->client->put("calendars/service-categories/{$ghlId}", $payload, [], self::SERVICE_CATEGORIES_API_VERSION)
-                : $this->client->post('calendars/service-categories', $payload, [], self::SERVICE_CATEGORIES_API_VERSION);
+            if ($ghlId) {
+                $response = $this->client->put("calendars/service-categories/{$ghlId}", [
+                    'name' => $category->name,
+                    'slug' => $slug,
+                    'industryType' => self::RENTAL_INDUSTRY,
+                ], $query, self::SERVICE_CATEGORIES_API_VERSION);
+            } else {
+                $response = $this->client->post('calendars/service-categories', [
+                    'name' => $category->name,
+                    'slug' => $slug,
+                    'locationId' => $locationId,
+                    'industryType' => self::RENTAL_INDUSTRY,
+                ], $query, self::SERVICE_CATEGORIES_API_VERSION);
+            }
 
             Log::info('GHL service-category sync response', ['response' => $response]);
 
-            $resolvedId = $ghlId ?: ($response['_id'] ?? $response['id'] ?? $response['serviceCategory']['_id'] ?? null);
+            $resolvedId = $ghlId ?: ($response['serviceCategory']['_id'] ?? $response['_id'] ?? $response['id'] ?? null);
 
             $category->update([
                 'ghl_category_id' => $resolvedId,
@@ -610,12 +632,13 @@ class GhlServiceSyncService
     }
 
     /**
-     * Mirrors GhlProductSyncService::deleteCategoryFromGhl() — no-ops when
-     * the category was never linked (nothing to delete on the GHL side).
-     * `altId`/`altType` are passed as query params on the DELETE call, not
-     * assumed — confirmed necessary via a real live test against this
-     * tenant's connection (a bare DELETE with no query params returned a
-     * real `422 "locationId/altId must be a string and it should exists"`).
+     * Mirrors GhlProductSyncService::deleteCategoryFromGhl(). `industryType`
+     * as a query param — not `altId`/`altType`/`locationId`, which is what
+     * `products/collections`'s own DELETE needs — is what this endpoint
+     * actually requires; confirmed by a real live delete against a
+     * disposable test category created and cleaned up for exactly this
+     * check (see syncServiceCategoryToGhl()'s own doc comment for the full
+     * investigation).
      */
     public function deleteServiceCategoryFromGhl(ServiceCategory $category): void
     {
@@ -623,13 +646,9 @@ class GhlServiceSyncService
             return;
         }
 
-        $locationId = $this->client->getLocationId();
-
         try {
             $this->client->delete("calendars/service-categories/{$category->ghl_category_id}", [
-                'altId' => $locationId,
-                'altType' => 'location',
-                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
             ], self::SERVICE_CATEGORIES_API_VERSION);
         } catch (\Exception $e) {
             Log::error('GHL service-category delete failed', [
