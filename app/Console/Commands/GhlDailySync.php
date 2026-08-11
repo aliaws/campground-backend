@@ -35,11 +35,11 @@ class GhlDailySync extends Command
                     ."rentals={$log->total_rentals_pulled}, paid_bookings={$log->total_paid_bookings_pulled}, "
                     ."paid_invoices={$log->total_paid_invoices_pulled})");
 
-                Log::info('GHL daily sync completed', ['tenant_id' => $tenantId, 'sync_log_id' => $log->id, 'status' => $log->status]);
+                Log::info('Lead Connector daily sync completed', ['tenant_id' => $tenantId, 'sync_log_id' => $log->id, 'status' => $log->status]);
             } catch (\Throwable $e) {
                 // One tenant's failure never stops the others.
                 $this->error("Tenant {$tenantId} failed: {$e->getMessage()}");
-                Log::error('GHL daily sync failed for tenant', ['tenant_id' => $tenantId, 'error' => $e->getMessage()]);
+                Log::error('Lead Connector daily sync failed for tenant', ['tenant_id' => $tenantId, 'error' => $e->getMessage()]);
             }
         }
 

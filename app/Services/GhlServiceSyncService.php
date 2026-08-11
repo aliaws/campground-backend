@@ -6,6 +6,7 @@ use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\Product;
 use App\Models\ProductRental;
+use App\Models\ServiceCategory;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -204,6 +205,118 @@ class GhlServiceSyncService
             'errors' => count($errors),
             'error_details' => $errors,
         ];
+    }
+
+    /**
+     * Pulls `GET calendars/service-categories` — the category taxonomy each
+     * rental's `serviceCategoryId` (captured per-row in upsertRentalRow()
+     * below) refers to. Mirrors GhlProductSyncService::pullCategoriesFromGhl()
+     * exactly: `updateOrCreate` keyed on the GHL id makes repeated pulls
+     * idempotent (no duplicates), and a category that already exists locally
+     * is updated in place rather than re-created.
+     *
+     * The exact response shape could not be verified live against a real
+     * account while building this — this tenant's connected OAuth token
+     * returns `401 "The token is not authorized for this scope"` for this
+     * specific endpoint (confirmed via a direct GhlClient call: the sibling
+     * `calendars/services` call succeeds fine with the same token/location,
+     * so this is a genuine missing-scope gap on the GHL app's OAuth consent,
+     * not a bug in this method — re-authorizing the connection with an
+     * expanded scope should resolve it). `parseServiceCategories()` is
+     * therefore deliberately defensive: it tries every response-key
+     * convention already seen elsewhere in this codebase for a GHL list
+     * endpoint (`serviceCategories`, `categories`, `data`, or a bare array)
+     * rather than assuming one, and each category item is read via `_id ??
+     * id` / `name` the same way every other GHL list item in this file is.
+     * Offset/limit pagination is handled the same way
+     * fetchAllGhlCollections() does, in case this endpoint pages results —
+     * a single non-full page (the overwhelmingly likely case for a small
+     * category list) exits the loop after one request, so this adds no
+     * meaningful cost when the endpoint isn't actually paginated.
+     *
+     * @return array{pulled: int, created: int, errors: int, error_details: array}
+     */
+    public function pullServiceCategories(string $tenantId): array
+    {
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
+
+        $locationId = $this->client->getLocationId();
+
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        try {
+            foreach ($this->fetchAllGhlServiceCategories($locationId) as $ghlCategory) {
+                $ghlId = $ghlCategory['_id'] ?? $ghlCategory['id'] ?? null;
+
+                if (! $ghlId) {
+                    continue;
+                }
+
+                $data = [
+                    'name' => $ghlCategory['name'] ?? 'Untitled',
+                    'engage_last_synced_at' => now(),
+                    'tenant_id' => $tenantId,
+                ];
+
+                $category = ServiceCategory::where('tenant_id', $tenantId)
+                    ->where('ghl_category_id', $ghlId)
+                    ->first();
+
+                if ($category) {
+                    $category->update($data);
+                } else {
+                    ServiceCategory::create($data + ['ghl_category_id' => $ghlId, 'is_active' => true]);
+                    $results['created']++;
+                }
+
+                $results['pulled']++;
+            }
+        } catch (\Exception $e) {
+            $results['errors']++;
+            $results['error_details'][] = ['error' => 'GHL service-category list fetch failed: '.$e->getMessage()];
+            Log::error('GHL service-category list fetch failed', ['error' => $e->getMessage()]);
+        }
+
+        return $results;
+    }
+
+    private function fetchAllGhlServiceCategories(string $locationId): array
+    {
+        $all = [];
+        $offset = 0;
+        $limit = 100;
+
+        do {
+            $response = $this->client->get('calendars/service-categories', [
+                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
+                'limit' => $limit,
+                'offset' => $offset,
+            ]);
+
+            $batch = $this->parseServiceCategories($response);
+            $all = array_merge($all, $batch);
+            $offset += $limit;
+        } while (count($batch) === $limit);
+
+        return $all;
+    }
+
+    /** See pullServiceCategories()'s doc comment for why this checks multiple keys. */
+    private function parseServiceCategories(array $response): array
+    {
+        foreach (['serviceCategories', 'categories', 'data'] as $key) {
+            if (isset($response[$key]) && is_array($response[$key])) {
+                return $response[$key];
+            }
+        }
+
+        // A bare top-level list (no wrapper key) — array_is_list() confirms
+        // it's actually a plain array of items, not an associative payload
+        // under some other key this loop didn't anticipate.
+        return array_is_list($response) ? $response : [];
     }
 
     private function serviceDetailRequest(string $ghlId, string $locationId): array

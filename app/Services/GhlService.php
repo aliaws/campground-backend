@@ -191,7 +191,7 @@ class GhlService
                         // (e.g. staff-added or self-registered via public
                         // booking) just because a later contact sync
                         // happened to touch/update the same row.
-                        $customer->update(['created_by' => 'GHL Sync']);
+                        $customer->update(['created_by' => 'Lead Connector Sync']);
                     } else {
                         $results['updated']++;
                     }
@@ -375,7 +375,7 @@ class GhlService
 
         // Only on genuine creation — see bulkPullContacts()'s identical guard.
         if ($customer->wasRecentlyCreated) {
-            $customer->update(['created_by' => 'GHL Sync']);
+            $customer->update(['created_by' => 'Lead Connector Sync']);
         }
     }
 

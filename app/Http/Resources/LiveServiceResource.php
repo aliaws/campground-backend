@@ -62,6 +62,7 @@ class LiveServiceResource extends JsonResource
             'maxQuantity' => $baseDetail?->maxQuantity() ?? $product->quantity ?? 1,
             'images' => $baseVariant['images'] ?? $baseDetail?->images() ?? ($product->image ? [['url' => $product->image, 'name' => $product->name, 'position' => 0, '_id' => null]] : []),
             'serviceCategoryId' => $defaultRental?->service_category_id ?? $baseDetail?->serviceCategoryId(),
+            'serviceCategoryName' => $defaultRental?->serviceCategory?->name,
             'categoryName' => $product->categories?->first()?->name,
             'variantName' => $baseDetail?->variantName() ?? $defaultRental?->name ?? 'Regular',
             'isVariantsEnabled' => count($variants) > 1,

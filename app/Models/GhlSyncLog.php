@@ -15,6 +15,7 @@ class GhlSyncLog extends Model
         'triggered_by',
         'total_contacts_pulled',
         'total_categories_pulled',
+        'total_service_categories_pulled',
         'total_products_pulled',
         'total_services_pulled',
         'total_rentals_pulled',

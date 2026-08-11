@@ -45,6 +45,7 @@ class ServiceResource extends JsonResource
             'maxQuantity' => $product->quantity ?? 1,
             'images' => $product->image ? [['url' => $product->image, 'name' => $product->name, 'position' => 0, '_id' => null]] : [],
             'serviceCategoryId' => $defaultRental?->service_category_id,
+            'serviceCategoryName' => $defaultRental?->serviceCategory?->name,
             'categoryName' => $product->categories?->first()?->name,
             'variantName' => $defaultRental?->name ?? 'Regular',
             'isVariantsEnabled' => count($variants) > 1,

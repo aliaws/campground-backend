@@ -152,7 +152,7 @@ class BookingService
             try {
                 $this->ghlBookingService->createBooking($booking);
             } catch (\Exception $e) {
-                Log::error('GHL booking creation failed', [
+                Log::error('Lead Connector booking creation failed', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -163,7 +163,7 @@ class BookingService
                 $this->rentalTransactionService->createFromBooking($booking);
                 $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
             } catch (\Exception $e) {
-                Log::error('GHL Text2Pay invoice creation failed', [
+                Log::error('Lead Connector Text2Pay invoice creation failed', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -226,7 +226,7 @@ class BookingService
                 // Payment is already collected — confirm locally anyway so the
                 // booking never sticks at Paid + requested/pending in production
                 // when GHL is briefly unreachable or the slot sync fails.
-                Log::error('GHL calendar booking failed during auto-confirm after payment', [
+                Log::error('Lead Connector calendar booking failed during auto-confirm after payment', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -254,7 +254,7 @@ class BookingService
             try {
                 $this->ghlBookingService->createBooking($booking, skipPaymentEmail: true);
             } catch (\Exception $e) {
-                Log::error('GHL booking creation failed (cash pay retry)', [
+                Log::error('Lead Connector booking creation failed (cash pay retry)', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -285,7 +285,7 @@ class BookingService
         try {
             $this->ghlBookingService->updateBookingStatus($booking, $status);
         } catch (\Exception $e) {
-            Log::error('GHL booking status update failed', [
+            Log::error('Lead Connector booking status update failed', [
                 'booking_id' => $booking->id,
                 'error' => $e->getMessage(),
             ]);

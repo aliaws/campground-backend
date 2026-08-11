@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
@@ -18,6 +19,8 @@ use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
+    use FormatsPaginatedResponse;
+
     public function __construct(
         private GhlService $ghlService,
         private CustomerService $customerService,
@@ -44,7 +47,7 @@ class CustomerController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => CustomerResource::collection($customers),
+            'data' => $this->paginatedData($customers, CustomerResource::class),
             'message' => 'Customers retrieved.',
         ]);
     }
@@ -60,7 +63,7 @@ class CustomerController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer);
         } catch (\Exception $e) {
-            Log::error('GHL sync failed for new customer', [
+            Log::error('Lead Connector sync failed for new customer', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -96,7 +99,7 @@ class CustomerController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer->fresh());
         } catch (\Exception $e) {
-            Log::error('GHL sync failed for customer update', [
+            Log::error('Lead Connector sync failed for customer update', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -166,7 +169,7 @@ class CustomerController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => new CustomerResource($customer->fresh()),
-                'message' => 'Customer synced to GHL.',
+                'message' => 'Customer synced to Lead Connector.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -195,7 +198,7 @@ class CustomerController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $results,
-                'message' => "Pulled {$results['pulled']} contacts from GHL ({$results['created']} new, {$results['updated']} updated), {$results['errors']} errors.",
+                'message' => "Pulled {$results['pulled']} contacts from Lead Connector ({$results['created']} new, {$results['updated']} updated), {$results['errors']} errors.",
             ]);
         } catch (\Exception $e) {
             return response()->json([

@@ -177,7 +177,7 @@ class RentalTransactionService
                 (string) $rentalTransaction->payment_method,
             );
         } catch (\Exception $e) {
-            Log::error('GHL invoice payment recording failed', [
+            Log::error('Lead Connector invoice payment recording failed', [
                 'rental_transaction_id' => $rentalTransaction->id,
                 'booking_id' => $booking->id,
                 'ghl_invoice_id' => $booking->ghl_invoice_id,

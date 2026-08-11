@@ -15,6 +15,7 @@ class GhlSyncLogResource extends JsonResource
             'triggered_by' => $this->triggered_by,
             'total_contacts_pulled' => $this->total_contacts_pulled,
             'total_categories_pulled' => $this->total_categories_pulled,
+            'total_service_categories_pulled' => $this->total_service_categories_pulled,
             'total_products_pulled' => $this->total_products_pulled,
             'total_services_pulled' => $this->total_services_pulled,
             'total_rentals_pulled' => $this->total_rentals_pulled,
