@@ -68,7 +68,7 @@ class CustomerAccountService
         try {
             $this->ghlService->syncContactToGhl($customer);
         } catch (\Exception $e) {
-            Log::error('GHL sync failed for customer registration', [
+            Log::error('Lead Connector sync failed for customer registration', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\QuoteBookingRequest;
 use App\Http\Requests\StoreBookingRequest;
@@ -14,15 +15,17 @@ use App\Services\BookingService;
 use App\Services\GhlBookingService;
 use App\Services\GhlService;
 use App\Services\RentalResolver;
-use App\Services\TransactionService;
+use App\Services\RentalTransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class BookingController extends Controller
 {
+    use FormatsPaginatedResponse;
+
     public function __construct(
         private BookingService $bookingService,
-        private TransactionService $transactionService,
+        private RentalTransactionService $rentalTransactionService,
         private RentalResolver $rentalResolver,
         private GhlBookingService $ghlBookingService,
         private GhlService $ghlService,
@@ -60,7 +63,7 @@ class BookingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => BookingResource::collection($bookings),
+            'data' => $this->paginatedData($bookings, BookingResource::class),
             'message' => 'Bookings retrieved.',
         ]);
     }
@@ -139,7 +142,8 @@ class BookingController extends Controller
             // The autoConfirm=false ('card'/online) branch already creates its own
             // transaction inside BookingService::create() — creating one here too
             // would double it.
-            $transaction = $this->transactionService->autoCreateFromBooking($booking, $paymentMethod ?? 'card');
+            $transaction = $this->rentalTransactionService->createFromBooking($booking, $paymentMethod ?? 'card');
+            $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
             if ($paymentMethod === 'cash') {
                 // Always created local-only (see BookingService::create()'s
@@ -166,9 +170,9 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => $ghlSyncFailed
-                ? 'Booking saved, but syncing it to GHL failed (e.g. the slot may no longer be available there) — check the booking and retry via Confirm if needed.'
+                ? 'Booking saved, but syncing it to Lead Connector failed (e.g. the slot may no longer be available there) — check the booking and retry via Confirm if needed.'
                 : ($paymentMethod === 'cash'
-                    ? 'Booking saved locally. It will sync to GHL once you record the cash payment from the Bookings list.'
+                    ? 'Booking saved locally. It will sync to Lead Connector once you record the cash payment from the Bookings list.'
                     : 'Booking created.'),
         ], 201);
     }
@@ -203,7 +207,7 @@ class BookingController extends Controller
             'data' => new BookingResource($booking),
             'message' => $booking->ghl_booking_id
                 ? 'Payment recorded and booking confirmed.'
-                : 'Payment recorded, but the GHL calendar booking still failed to sync — check availability in GHL and try again.',
+                : 'Payment recorded, but the Lead Connector calendar booking still failed to sync — check availability in Lead Connector and try again.',
         ]);
     }
 

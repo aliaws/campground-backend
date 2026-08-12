@@ -23,14 +23,9 @@ class Feature extends Model
         ];
     }
 
-    public function productRentals(): BelongsToMany
-    {
-        return $this->belongsToMany(ProductRental::class, 'product_rental_features');
-    }
-
-    /** @deprecated Use productRentals() */
+    /** Service listings (Product rows with product_rental_id set) this feature is assigned to. */
     public function services(): BelongsToMany
     {
-        return $this->productRentals();
+        return $this->belongsToMany(Product::class, 'service_features');
     }
 }

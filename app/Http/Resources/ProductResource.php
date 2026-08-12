@@ -24,11 +24,15 @@ class ProductResource extends JsonResource
             'sku' => $this->sku,
             'quantity' => $this->quantity,
             'price' => $this->price !== null ? (float) $this->price : null,
-            // Base rental shares the product id (product_rentals.id === products.id).
-            // Kept for map/frontend callers that still key off product_rental_id.
-            'product_rental_id' => $this->isRental() ? $this->id : null,
-            'is_rental' => (bool) $this->is_rental,
+            'product_rental_id' => $this->product_rental_id,
             'from_price' => $this->when($this->isRental(), fn () => $this->fromPrice()),
+            // Services-module concept (Key Business Logic item 29) — resolved
+            // from the base rental's serviceCategory, same pattern as
+            // ServiceResource's serviceCategoryName. Only meaningful for a
+            // rental (isRental()); null otherwise since resolveBaseRental()
+            // simply has nothing to find on a non-rental product.
+            'service_category_id' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->service_category_id),
+            'service_category_name' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->serviceCategory?->name),
             'ghl_product_id' => $this->ghl_product_id,
             'ghl_image_url' => $this->ghl_image_url,
             'engage_sync_status' => $this->engage_sync_status,

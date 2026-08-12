@@ -6,32 +6,35 @@ use App\Models\Product;
 use App\Models\ProductRental;
 
 /**
- * Resolves the id the frontend sends for quotes/bookings. Accepts either a
- * base listing Product id or any ProductRental / variant Product id (shared
- * PK), and normalizes to (base listing Product, selected ProductRental).
+ * Resolves the `product_id` the frontend sends for quotes/bookings. The
+ * customer-facing UI's variant dropdown emits the base listing's PRODUCT id for the
+ * default variant and the PRODUCT_RENTALS id for every other variant — this
+ * accepts either (ULIDs never collide across tables) and normalizes to the
+ * (base product, rental variant) pair everything downstream works with.
  */
 class RentalResolver
 {
     /** @return array{0: Product, 1: ProductRental}|null */
     public function resolve(string $id, string $locationId): ?array
     {
-        $rental = ProductRental::query()
-            ->where('id', $id)
-            ->whereHas('product', fn ($q) => $q->where('engage_organization_location_id', $locationId))
-            ->first();
+        $product = Product::byLocation($locationId)->find($id);
 
-        if ($rental) {
-            $listingId = $rental->listingProductId() ?? $rental->id;
-            $listing = Product::byLocation($locationId)->find($listingId);
+        if ($product) {
+            $rental = $product->resolveBaseRental();
 
-            return ($listing && $rental) ? [$listing, $rental] : null;
+            return $rental ? [$product, $rental] : null;
         }
 
-        $product = Product::byLocation($locationId)->baseRentalListing()->find($id);
-        if ($product) {
-            $base = $product->resolveBaseRental();
+        // product_rentals has no location column of its own — scoped via
+        // its product relationship instead (see GhlServiceSyncService's
+        // identical pattern).
+        $rental = ProductRental::whereHas(
+            'product',
+            fn ($q) => $q->where('engage_organization_location_id', $locationId)
+        )->find($id);
 
-            return $base ? [$product, $base] : null;
+        if ($rental && $rental->product) {
+            return [$rental->product, $rental];
         }
 
         return null;

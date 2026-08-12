@@ -6,13 +6,14 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class TransactionItem extends Model
+class ProductTransactionItem extends Model
 {
     use HasUlids;
 
     protected $fillable = [
-        'transaction_id',
+        'product_transaction_id',
         'product_id',
+        'product_name_snapshot',
         'product_type',
         'quantity',
         'unit_price',
@@ -29,9 +30,9 @@ class TransactionItem extends Model
         ];
     }
 
-    public function transaction(): BelongsTo
+    public function productTransaction(): BelongsTo
     {
-        return $this->belongsTo(Transaction::class);
+        return $this->belongsTo(ProductTransaction::class);
     }
 
     public function product(): BelongsTo

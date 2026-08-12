@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
+use App\Http\Resources\CustomerArchiveResource;
 use App\Http\Resources\CustomerResource;
 use App\Models\Booking;
 use App\Models\Customer;
+use App\Models\CustomerArchive;
 use App\Models\User;
 use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
@@ -18,6 +21,8 @@ use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
+    use FormatsPaginatedResponse;
+
     public function __construct(
         private GhlService $ghlService,
         private CustomerService $customerService,
@@ -49,8 +54,69 @@ class CustomerController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => CustomerResource::collection($customers),
+            'data' => $this->paginatedData($customers, CustomerResource::class),
             'message' => 'Customers retrieved.',
+        ]);
+    }
+
+    /**
+     * Archived customers only — completely separate from index() above,
+     * which (like every other Customer query in this app) never includes
+     * soft-deleted/archived rows. Backs the staff "Customer Archive" page.
+     */
+    public function archived(Request $request): JsonResponse
+    {
+        $query = CustomerArchive::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId());
+
+        if ($request->search) {
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', "%{$request->search}%")
+                    ->orWhere('email', 'like', "%{$request->search}%")
+                    ->orWhere('phone', 'like', "%{$request->search}%");
+            });
+        }
+
+        $archived = $query->orderBy('archived_at', 'desc')->paginate($request->per_page ?? 15);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->paginatedData($archived, CustomerArchiveResource::class),
+            'message' => 'Archived customers retrieved.',
+        ]);
+    }
+
+    /**
+     * Manual staff-triggered restore from the Customer Archive page — the
+     * automated equivalent (matching by email, not GHL id) also happens on
+     * its own whenever a matching contact reappears via GHL sync, or the
+     * same email is used to create a customer again through the app; see
+     * CustomerService::restoreFromArchive()/findOrCreate().
+     */
+    public function restoreArchived(CustomerArchive $archive, Request $request): JsonResponse
+    {
+        if ($archive->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Archived customer not found.',
+            ], 404);
+        }
+
+        $customer = $this->customerService->restoreFromArchive($archive);
+
+        try {
+            $this->ghlService->syncContactToGhl($customer, $archive->engage_organization_location_id);
+        } catch (\Exception $e) {
+            Log::error('Lead Connector sync failed for restored customer', [
+                'customer_id' => $customer->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => new CustomerResource($customer->fresh()),
+            'message' => 'Customer restored.',
         ]);
     }
 
@@ -65,7 +131,7 @@ class CustomerController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer, $request->user()->resolveOrganizationLocationId());
         } catch (\Exception $e) {
-            Log::error('GHL sync failed for new customer', [
+            Log::error('Lead Connector sync failed for new customer', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -106,7 +172,7 @@ class CustomerController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer->fresh(), $request->user()->resolveOrganizationLocationId());
         } catch (\Exception $e) {
-            Log::error('GHL sync failed for customer update', [
+            Log::error('Lead Connector sync failed for customer update', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);
@@ -176,7 +242,7 @@ class CustomerController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => new CustomerResource($customer->fresh()),
-                'message' => 'Customer synced to GHL.',
+                'message' => 'Customer synced to Lead Connector.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -205,7 +271,7 @@ class CustomerController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $results,
-                'message' => "Pulled {$results['pulled']} contacts from GHL ({$results['created']} new, {$results['updated']} updated), {$results['errors']} errors.",
+                'message' => "Pulled {$results['pulled']} contacts from Lead Connector ({$results['created']} new, {$results['updated']} updated), {$results['errors']} errors.",
             ]);
         } catch (\Exception $e) {
             return response()->json([

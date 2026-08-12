@@ -4,8 +4,8 @@ namespace App\Services;
 
 use App\Models\Booking;
 use App\Models\ProductRental;
-use App\Models\Transaction;
-use App\Models\TransactionItem;
+use App\Models\ProductTransaction;
+use App\Models\RentalTransaction;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 
@@ -29,12 +29,29 @@ class ReportService
         ];
     }
 
+    /**
+     * Sums both ledgers — as of the 2026-08-10 transactions refactor a
+     * location's revenue spans two independent tables. Filters by `paid_at`
+     * (payment time) rather than the old `transactions.transaction_date`
+     * (creation time) — for cash sales these are simultaneous; for
+     * card/Text2Pay sales paid days after creation, this now means "today's
+     * revenue" = paid today, which is the more correct meaning for a
+     * revenue metric (confirmed acceptable — the shift was explicitly
+     * called out and approved before this refactor).
+     */
     private function todayRevenue(string $locationId, Carbon $today): float
     {
-        return (float) Transaction::where('engage_organization_location_id', $locationId)
-            ->where('payment_status', 'paid')
-            ->whereDate('transaction_date', $today)
-            ->sum('total_amount');
+        $rental = (float) RentalTransaction::where('engage_organization_location_id', $locationId)
+            ->where('status', 'paid')
+            ->whereDate('paid_at', $today)
+            ->sum('amount');
+
+        $product = (float) ProductTransaction::where('engage_organization_location_id', $locationId)
+            ->where('status', 'paid')
+            ->whereDate('paid_at', $today)
+            ->sum('amount');
+
+        return $rental + $product;
     }
 
     /** Confirmed & paid bookings active today, as a % of the location's active rental units. */
@@ -55,7 +72,7 @@ class ReportService
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', '<=', $today)
             ->whereDate('check_out_date', '>=', $today)
-            ->whereHas('transactions', fn ($q) => $q->where('payment_status', 'paid'))
+            ->whereHas('transactions', fn ($q) => $q->where('status', 'paid'))
             ->count();
 
         return (int) round(min($activeToday / $totalUnits, 1) * 100);
@@ -66,7 +83,7 @@ class ReportService
         return Booking::where('engage_organization_location_id', $locationId)
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', $today)
-            ->whereHas('transactions', fn ($q) => $q->where('payment_status', 'paid'))
+            ->whereHas('transactions', fn ($q) => $q->where('status', 'paid'))
             ->count();
     }
 
@@ -109,29 +126,33 @@ class ReportService
         );
     }
 
-    /** Revenue from paid transactions this week, grouped by the booked product's category. */
+    /**
+     * Revenue from paid rental transactions this week, grouped by the
+     * booked product's category. Simplified by the 2026-08-10 transactions
+     * refactor — a RentalTransaction row already IS one item (no separate
+     * items table for rentals, matching the pre-existing "always exactly
+     * one item per rental" invariant), so the old TransactionItem join is
+     * no longer needed.
+     */
     private function revenueByCategory(string $locationId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
     {
-        $items = TransactionItem::whereHas('transaction', function ($q) use ($locationId, $weekStart, $weekEnd) {
-            $q->where('engage_organization_location_id', $locationId)
-                ->where('payment_status', 'paid')
-                ->whereBetween('transaction_date', [$weekStart, $weekEnd]);
-        })
-            ->where('product_type', 'rental')
+        $rows = RentalTransaction::where('engage_organization_location_id', $locationId)
+            ->where('status', 'paid')
+            ->whereBetween('paid_at', [$weekStart, $weekEnd])
             ->with('product.categories')
             ->get();
 
         $grouped = [];
-        foreach ($items as $item) {
-            $product = $item->product;
+        foreach ($rows as $row) {
+            $product = $row->product;
             $categories = $product?->categories;
             $label = $categories && $categories->isNotEmpty()
                 ? $categories->first()->name
-                : ($product->name ?? 'Uncategorized');
+                : ($product->name ?? $row->rental_name ?? 'Uncategorized');
 
             $grouped[$label] ??= ['type' => $label, 'bookings' => 0, 'revenue' => 0.0];
             $grouped[$label]['bookings']++;
-            $grouped[$label]['revenue'] += (float) $item->unit_price * $item->quantity;
+            $grouped[$label]['revenue'] += (float) $row->amount;
         }
 
         $result = array_values($grouped);

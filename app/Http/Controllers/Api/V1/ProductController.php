@@ -76,8 +76,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $product->load(['categories', 'productRental', 'defaultRental']);
-        $product->loadRentalFamily();
+        $product->load(['categories', 'rentals', 'defaultRental']);
 
         return response()->json([
             'success' => true,
@@ -140,7 +139,7 @@ class ProductController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => new ProductResource($product->load(['categories'])),
-                'message' => 'Product synced to GHL.',
+                'message' => 'Product synced to Lead Connector.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -158,7 +157,7 @@ class ProductController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => new ProductResource($product),
-                'message' => 'Product pulled from GHL successfully.',
+                'message' => 'Product pulled from Lead Connector successfully.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -186,7 +185,7 @@ class ProductController extends Controller
         return response()->json([
             'success' => true,
             'data' => $results,
-            'message' => "Pulled {$results['pulled']} products from GHL ({$results['created']} new), {$results['errors']} errors.",
+            'message' => "Pulled {$results['pulled']} products from Lead Connector ({$results['created']} new), {$results['errors']} errors.",
         ]);
     }
 
@@ -232,7 +231,7 @@ class ProductController extends Controller
         return response()->json([
             'success' => true,
             'data' => $detail,
-            'message' => $detail ? 'Live stock retrieved.' : 'Product is not linked to a GHL product yet.',
+            'message' => $detail ? 'Live stock retrieved.' : 'Product is not linked to a Lead Connector product yet.',
         ]);
     }
 }

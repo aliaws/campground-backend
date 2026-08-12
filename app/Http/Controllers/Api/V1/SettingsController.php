@@ -3,15 +3,21 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreCustomFieldRequest;
 use App\Http\Requests\StoreEngageSettingRequest;
 use App\Http\Resources\CountryResource;
+use App\Http\Resources\CustomFieldResource;
 use App\Http\Resources\EngageSettingResource;
+use App\Http\Resources\GhlSyncLogResource;
 use App\Models\Country;
+use App\Models\CustomField;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
+use App\Models\GhlSyncLog;
 use App\Models\User;
 use App\Services\EngageTokenCache;
 use App\Services\GhlAuthService;
+use App\Services\GhlFullSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +29,7 @@ class SettingsController extends Controller
     public function __construct(
         private GhlAuthService $ghlAuthService,
         private EngageTokenCache $engageTokenCache,
+        private GhlFullSyncService $ghlFullSyncService,
     ) {}
 
     public function getEngage(Request $request): JsonResponse
@@ -98,7 +105,7 @@ class SettingsController extends Controller
 
     public function handleCallback(Request $request): mixed
     {
-        Log::info('GHL OAuth callback received', [
+        Log::info('Lead Connector OAuth callback received', [
             'all_params' => $request->all(),
             'query' => $request->query(),
         ]);
@@ -106,7 +113,7 @@ class SettingsController extends Controller
         $code = $request->input('code');
 
         if (! $code) {
-            Log::error('GHL OAuth callback missing params', [
+            Log::error('Lead Connector OAuth callback missing params', [
                 'code' => $code,
                 'url' => $request->fullUrl(),
             ]);
@@ -252,6 +259,32 @@ class SettingsController extends Controller
         ]);
     }
 
+    public function getCustomFields(Request $request): JsonResponse
+    {
+        $fields = CustomField::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+            ->when($request->entity_type, fn ($q, $v) => $q->where('entity_type', $v))
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => CustomFieldResource::collection($fields),
+            'message' => 'Custom fields retrieved.',
+        ]);
+    }
+
+    public function storeCustomField(StoreCustomFieldRequest $request): JsonResponse
+    {
+        $field = CustomField::create(
+            $request->validated() + ['engage_organization_location_id' => $request->user()->resolveOrganizationLocationId()]
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => new CustomFieldResource($field),
+            'message' => 'Custom field created.',
+        ], 201);
+    }
+
     private function resolveEngageSetting(User $user): ?EngageSetting
     {
         $locationId = $user->resolveOrganizationLocationId();
@@ -265,5 +298,53 @@ class SettingsController extends Controller
         }
 
         return EngageSetting::with('token')->first();
+    }
+
+    /**
+     * Runs synchronously (click → wait → see results), matching every other
+     * pull-ghl button in this app. A full pull (contacts + categories +
+     * products + services/rentals + all paid invoices) can take a couple of
+     * minutes on a large account — raising the time limit here only affects
+     * PHP's own limit; a reverse proxy with a shorter timeout in front of
+     * this server could still show the browser an error while the backend
+     * keeps running to completion regardless.
+     */
+    public function pullAllGhlData(Request $request): JsonResponse
+    {
+        set_time_limit(300);
+
+        $locationId = $request->user()->resolveOrganizationLocationId();
+
+        try {
+            $log = $this->ghlFullSyncService->pullAll($locationId, 'manual');
+
+            return response()->json([
+                'success' => $log->status !== 'failed',
+                'data' => new GhlSyncLogResource($log),
+                'message' => match ($log->status) {
+                    'success' => 'Lead Connector data pulled successfully.',
+                    'partial' => 'Lead Connector data pulled with some errors — see details.',
+                    default => 'Lead Connector data pull failed.',
+                },
+            ], $log->status === 'failed' ? 422 : 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Lead Connector data pull failed: '.$e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function getLatestSyncLog(Request $request): JsonResponse
+    {
+        $log = GhlSyncLog::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+            ->latest('started_at')
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'data' => $log ? new GhlSyncLogResource($log) : null,
+            'message' => $log ? 'Latest sync log retrieved.' : 'No sync has run yet.',
+        ]);
     }
 }

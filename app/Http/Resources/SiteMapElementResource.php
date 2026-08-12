@@ -2,7 +2,6 @@
 
 namespace App\Http\Resources;
 
-use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -11,8 +10,7 @@ class SiteMapElementResource extends JsonResource
     public function toArray(Request $request): array
     {
         $rental = $this->productRental;
-        $listingId = $rental?->listingProductId();
-        $product = $listingId ? Product::query()->find($listingId) : null;
+        $product = $rental?->product;
         $iconType = $this->iconType;
 
         return [

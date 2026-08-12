@@ -50,7 +50,7 @@ class BookingResource extends JsonResource
             'ghl_invoice_status' => $tx?->ghl_invoice_status,
             'ghl_invoice_url' => $tx?->ghl_invoice_url,
             'ghl_invoice_view_url' => $this->ghlInvoiceViewUrl(),
-            'transactions' => TransactionResource::collection($this->whenLoaded('transactions')),
+            'transactions' => BookingTransactionResource::collection($this->whenLoaded('transactions')),
             'created_by' => $this->created_by,
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,

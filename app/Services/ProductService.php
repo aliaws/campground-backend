@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
-use App\Support\LoadsRentalFamilies;
+use App\Models\ServiceCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -12,9 +12,7 @@ use Illuminate\Support\Str;
 
 class ProductService
 {
-    use LoadsRentalFamilies;
-
-    private const EAGER = ['categories', 'productRental', 'defaultRental', 'amenities', 'features'];
+    private const EAGER = ['categories', 'rentals', 'rentals.serviceCategory', 'defaultRental', 'defaultRental.serviceCategory', 'amenities', 'features'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -30,10 +28,9 @@ class ProductService
 
         if (array_key_exists('is_rental', $filters)) {
             if ((bool) $filters['is_rental']) {
-                // Manage Service / map: base listings only (not every variant product).
-                $query->baseRentalListing();
+                $query->whereNotNull('product_rental_id');
             } else {
-                $query->where('is_rental', false);
+                $query->whereNull('product_rental_id');
             }
         }
 
@@ -58,13 +55,9 @@ class ProductService
             $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
         }
 
-        $page = $query->with(self::EAGER)
+        return $query->with(self::EAGER)
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
-
-        $this->loadRentalFamilies($page->getCollection());
-
-        return $page;
     }
 
     public function create(array $data): Product
@@ -82,7 +75,7 @@ class ProductService
             $product->categories()->sync($categoryIds);
         }
 
-        return $this->eager($product);
+        return $product->load(self::EAGER);
     }
 
     public function update(Product $product, array $data): Product
@@ -98,6 +91,10 @@ class ProductService
             $product->categories()->sync($categoryIds);
         }
 
+        // Amenities/features are a Services-module concept (see service_amenities/
+        // service_features) — syncing is harmless to send for a non-rental product,
+        // but the goods form never sends these keys, so this only ever fires from
+        // the Manage Service edit form in practice.
         if ($amenityIds !== null) {
             $product->amenities()->sync($amenityIds);
         }
@@ -106,7 +103,7 @@ class ProductService
             $product->features()->sync($featureIds);
         }
 
-        return $this->eager($product->fresh());
+        return $product->fresh()->load(self::EAGER);
     }
 
     public function delete(Product $product): bool
@@ -114,46 +111,57 @@ class ProductService
         return $product->delete();
     }
 
-    public function generateUniqueSku(string $locationId, string $name): string
+    /**
+     * Auto-generates a SKU when one isn't explicitly provided on create —
+     * an uppercase-alnum-and-dash-only string, since this feeds directly
+     * into a Code 39 barcode (rendered client-side), which doesn't support
+     * lowercase letters or most punctuation. Retries on the rare per-tenant
+     * collision rather than trusting randomness alone. Public so
+     * GhlProductSyncService can assign one to a GHL-pulled stub product too.
+     */
+    public function generateUniqueSku(string $tenantId, string $name): string
     {
         $base = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name));
         $base = substr($base, 0, 6) ?: 'SKU';
 
         do {
             $candidate = $base.'-'.strtoupper(Str::random(4));
-            $exists = Product::where('engage_organization_location_id', $locationId)->where('sku', $candidate)->exists();
+            $exists = Product::where('engage_organization_location_id', $tenantId)->where('sku', $candidate)->exists();
         } while ($exists);
 
         return $candidate;
     }
 
-    public function generateMissingSkus(string $locationId): array
+    /**
+     * Backfills a SKU (and therefore a printable barcode, generated
+     * client-side from the SKU) onto every non-rental goods product in the
+     * tenant that doesn't have one yet — e.g. products created via a GHL
+     * pull before this feature existed, or via any path that bypassed
+     * create()'s auto-generation. Rentals/services are never touched: they
+     * have no SKU/barcode concept (see Product/ProductRental docs).
+     */
+    public function generateMissingSkus(string $tenantId): array
     {
-        $products = Product::byLocation($locationId)
-            ->where('is_rental', false)
+        $products = Product::byLocation($tenantId)
+            ->whereNull('product_rental_id')
             ->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', ''))
             ->get();
 
         foreach ($products as $product) {
-            $product->update(['sku' => $this->generateUniqueSku($locationId, $product->name)]);
+            $product->update(['sku' => $this->generateUniqueSku($tenantId, $product->name)]);
         }
 
         return ['updated' => $products->count()];
     }
 
-    public function findBySku(string $locationId, string $sku): ?Product
+    /** Exact-match SKU lookup for the Product Sales page's barcode scanner. */
+    public function findBySku(string $tenantId, string $sku): ?Product
     {
-        $product = Product::byLocation($locationId)
-            ->where('is_rental', false)
+        return Product::byLocation($tenantId)
+            ->whereNull('product_rental_id')
             ->where('sku', $sku)
             ->with(self::EAGER)
             ->first();
-
-        if ($product) {
-            $this->loadRentalFamilies([$product]);
-        }
-
-        return $product;
     }
 
     public function uploadImage(Product $product, UploadedFile $image): Product
@@ -164,12 +172,16 @@ class ProductService
         return $product->fresh();
     }
 
+    /**
+     * Bookable services for the storefront: GHL-linked rental listings only.
+     * Local-only fast query — live detail fetched on show/quote.
+     */
     public function listServices(array $filters = []): LengthAwarePaginator
     {
         $query = Product::byLocation($filters['engage_organization_location_id'])
-            ->baseRentalListing()
+            ->whereNotNull('product_rental_id')
             ->where('status', 'active')
-            ->with(['productRental', 'defaultRental', 'categories', 'amenities', 'features']);
+            ->with(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {
@@ -182,8 +194,27 @@ class ProductService
             $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
         }
 
+        // service_category_id is deliberately a distinct param from
+        // category_id above — that one filters the many-to-many Product
+        // Category taxonomy (product_categories pivot); this filters the
+        // Services-module ServiceCategory a rental belongs to. The filter
+        // value is the local ServiceCategory's own id (matching how
+        // category_id above is Category's id, not engage_collection_id),
+        // but product_rentals.service_category_id stores the *raw GHL* id —
+        // resolve local id -> ghl id first, same indirection
+        // ProductRental::serviceCategory() itself does for a single row.
+        if (! empty($filters['service_category_id'])) {
+            $ghlCategoryId = ServiceCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
+                ->where('id', $filters['service_category_id'])
+                ->value('ghl_category_id');
+
+            // An unmatched/local-only category (no ghl_category_id yet) has
+            // nothing to match against on product_rentals — force an empty
+            // result rather than silently ignoring the filter.
+            $query->whereHas('rentals', fn (Builder $q) => $q->where('service_category_id', $ghlCategoryId ?? '__none__'));
+        }
+
         $services = $query->get();
-        $this->loadRentalFamilies($services);
 
         if (isset($filters['min_price']) && $filters['min_price'] !== '') {
             $services = $services->filter(fn (Product $p) => ($p->fromPrice() ?? 0) >= (float) $filters['min_price']);
@@ -209,13 +240,5 @@ class ProductService
             $page,
             ['path' => LengthAwarePaginator::resolveCurrentPath()]
         );
-    }
-
-    private function eager(Product $product): Product
-    {
-        $product->load(self::EAGER);
-        $this->loadRentalFamilies([$product]);
-
-        return $product;
     }
 }

@@ -36,6 +36,36 @@ class GhlAuthService
         'calendars/events.readonly',
         'calendars/events.write',
         'calendars/resources.readonly',
+        // Added 2026-08-11 for GET calendars/service-categories (Service
+        // Categories feature) — that endpoint isn't in GHL's own published
+        // scope docs (confirmed by reading the live Scopes reference
+        // directly), but a real live call with every scope above already
+        // granted still returned 401 "not authorized for this scope", so
+        // something is missing. `calendars/groups.readonly` is the closest
+        // documented analog (GHL's own "Calendar Groups" concept — the
+        // closest existing publicly-documented parallel to a rental
+        // account's "service categories") and is the best-informed
+        // candidate, not a confirmed fix — it only takes effect once the
+        // GHL connection is re-authorized (Engage Settings -> Authorize),
+        // since a token refresh alone cannot add scopes to an existing
+        // grant. Re-test after re-authorizing; if it's still 401, the real
+        // scope name differs and needs to come from GHL support/docs.
+        'calendars/groups.readonly',
+        // 2026-08-12 correction: a `calendars/groups.write` scope was
+        // briefly added here on the theory that POST/PUT/DELETE
+        // calendars/service-categories 401ing was a missing-write-scope
+        // problem, mirroring the readonly entry above. Real live testing
+        // (create -> pull -> delete round trip, using this connection's
+        // *existing*, never-re-authorized token) proved that wrong: every
+        // write call succeeds today with zero scope changes — the actual
+        // cause of the original 401s was a missing `industryType=rental`
+        // query param on the write calls themselves (GET already sent it;
+        // POST/PUT/DELETE didn't). See
+        // GhlServiceSyncService::syncServiceCategoryToGhl()'s own doc
+        // comment for the full, now-confirmed request shape. Removed rather
+        // than left in place, since it was never actually needed and
+        // requesting an unnecessary scope only widens what a future
+        // re-authorization asks the user to grant.
     ];
 
     public function __construct(

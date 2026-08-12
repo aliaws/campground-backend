@@ -39,10 +39,12 @@ class Customer extends Model
         return $this->hasMany(Booking::class);
     }
 
-    public function transactions(): HasMany
-    {
-        return $this->hasMany(Transaction::class);
-    }
+    /**
+     * No `transactions()` relation — a customer's transaction history now
+     * spans two independent tables (RentalTransaction/ProductTransaction),
+     * which don't collapse into one HasMany. CustomerService::hardDelete()
+     * (the only place this used to be called) queries both directly.
+     */
 
     public function locationLinks(): HasMany
     {

@@ -262,7 +262,7 @@ class GhlProductSyncService
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
         $products = Product::byLocation($locationId)
-            ->where('is_rental', false)
+            ->whereNull('product_rental_id')
             ->where('status', 'active')
             ->get();
 
@@ -285,13 +285,20 @@ class GhlProductSyncService
 
     public function bulkPullFromGhl(string $locationId): array
     {
-        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => []];
 
         $rentalProductIds = array_flip($this->serviceSync->fetchRentalProductIds());
 
         try {
+            $seenGhlIds = [];
+
             foreach ($this->fetchAllGhlProducts() as $ghlProduct) {
                 $ghlId = $ghlProduct['_id'] ?? $ghlProduct['id'] ?? null;
+
+                if ($ghlId !== null) {
+                    $seenGhlIds[] = $ghlId;
+                }
+
                 if ($ghlId !== null && isset($rentalProductIds[$ghlId])) {
                     continue;
                 }
@@ -300,6 +307,8 @@ class GhlProductSyncService
                     $results['created']++;
                 }
             }
+
+            $results['deactivated'] = $this->deactivateMissingProducts($locationId, $seenGhlIds);
         } catch (\Exception $e) {
             $results['errors']++;
             $results['error_details'][] = ['error' => 'GHL product list fetch failed: '.$e->getMessage()];
@@ -307,7 +316,7 @@ class GhlProductSyncService
         }
 
         $products = Product::byLocation($locationId)
-            ->where('is_rental', false)
+            ->whereNull('product_rental_id')
             ->whereNotNull('ghl_product_id')
             ->get();
 
@@ -326,6 +335,44 @@ class GhlProductSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * Delete-sync: a regular-catalog Product previously pulled/synced from
+     * GHL (ghl_product_id set) that no longer appears in GHL's current
+     * product list is soft-deleted, not hard-deleted — Product already uses
+     * SoftDeletes, so this is fully reversible and safe against any
+     * ProductTransactionItem/category-pivot/cart reference still pointing
+     * at the row (a soft delete never removes the row or breaks a foreign
+     * key, it only hides it from default queries). Reappearance is handled
+     * by createLocalStubIfMissing()'s own restore step above.
+     *
+     * Scoped to `whereNull('product_rental_id')` — rental listings are
+     * handled separately by GhlServiceSyncService's own delete-sync
+     * (archiveMissingRentalListings()), never here.
+     *
+     * Guarded on a non-empty $seenGhlIds — see
+     * deactivateMissingCategories()'s doc comment above for why an
+     * empty/failed fetch must never be trusted as "GHL has zero products
+     * now."
+     */
+    private function deactivateMissingProducts(string $locationId, array $seenGhlIds): int
+    {
+        if (empty($seenGhlIds)) {
+            return 0;
+        }
+
+        $stale = Product::byLocation($locationId)
+            ->whereNull('product_rental_id')
+            ->whereNotNull('ghl_product_id')
+            ->whereNotIn('ghl_product_id', $seenGhlIds)
+            ->get();
+
+        foreach ($stale as $product) {
+            $product->delete();
+        }
+
+        return $stale->count();
     }
 
     public function bulkSyncCategories(string $locationId): array
@@ -362,9 +409,11 @@ class GhlProductSyncService
      */
     public function pullCategoriesFromGhl(string $locationId): array
     {
-        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => []];
 
         try {
+            $seenGhlIds = [];
+
             foreach ($this->fetchAllGhlCollections() as $ghlCollection) {
                 $ghlId = $ghlCollection['_id'] ?? $ghlCollection['id'] ?? null;
 
@@ -372,11 +421,18 @@ class GhlProductSyncService
                     continue;
                 }
 
+                $seenGhlIds[] = $ghlId;
+
                 $data = [
                     'name' => $ghlCollection['name'] ?? 'Untitled',
                     'slug' => $ghlCollection['slug'] ?? null,
                     'image' => empty($ghlCollection['image']) ? null : $ghlCollection['image'],
                     'engage_collection_id' => $ghlId,
+                    // GHL still has this collection right now — reactivate it
+                    // if a previous pull's delete-sync (below) had deactivated
+                    // it. Category has no `isActive` concept of its own on the
+                    // GHL side; "is in this pull's list" IS the signal.
+                    'is_active' => true,
                     'engage_sync_status' => 'synced',
                     'engage_last_synced_at' => now(),
                     'engage_organization_location_id' => $locationId,
@@ -389,12 +445,14 @@ class GhlProductSyncService
                 if ($category) {
                     $category->update($data);
                 } else {
-                    Category::create($data + ['is_active' => true, 'sort_order' => 0]);
+                    Category::create($data + ['sort_order' => 0]);
                     $results['created']++;
                 }
 
                 $results['pulled']++;
             }
+
+            $results['deactivated'] = $this->deactivateMissingCategories($locationId, $seenGhlIds);
         } catch (\Exception $e) {
             $results['errors']++;
             $results['error_details'][] = ['error' => 'GHL collection list fetch failed: '.$e->getMessage()];
@@ -402,6 +460,48 @@ class GhlProductSyncService
         }
 
         return $results;
+    }
+
+    /**
+     * Delete-sync: a Category previously pulled from GHL (engage_collection_id
+     * set) that no longer appears in GHL's current collection list is
+     * deactivated (is_active=false), never hard-deleted — Category has no
+     * SoftDeletes trait, and a hard DELETE here could break the
+     * product_categories pivot or a Products-page category filter mid-use.
+     * Deactivation is fully reversible (the very next pull reactivates it —
+     * see the `'is_active' => true` write above — the moment GHL has it
+     * again) and immediately removes it from every active-only
+     * filter/listing surface, which is what "no longer exists" means in
+     * practice for a taxonomy row with no bookings/transactions of its own.
+     *
+     * Only ever touches rows that are themselves GHL-sourced
+     * (engage_collection_id IS NOT NULL) — a locally-created category with
+     * no GHL id is never touched, since it was never something GHL could
+     * "still have" or "no longer have" to begin with.
+     *
+     * Guarded on a non-empty $seenGhlIds — this method is only ever reached
+     * once the fetch loop above has fully completed without throwing (an
+     * exception jumps straight to the catch block, this line is never
+     * reached), but a *successful-yet-suspiciously-empty* response is a
+     * real, distinct risk this codebase has already hit once this session
+     * (a different GHL endpoint returning an empty list under a shape bug).
+     * Trusting "0 items" as "GHL now has zero categories" would deactivate
+     * every local category from the cheapest possible failure mode, so it's
+     * deliberately not trusted — a genuine "GHL emptied its whole category
+     * list" case is left for staff to action manually, or resolves itself
+     * automatically the moment a real, non-empty pull happens again.
+     */
+    private function deactivateMissingCategories(string $locationId, array $seenGhlIds): int
+    {
+        if (empty($seenGhlIds)) {
+            return 0;
+        }
+
+        return Category::where('engage_organization_location_id', $locationId)
+            ->whereNotNull('engage_collection_id')
+            ->whereNotIn('engage_collection_id', $seenGhlIds)
+            ->where('is_active', true)
+            ->update(['is_active' => false]);
     }
 
     private function fetchAllGhlCollections(): array
@@ -517,8 +617,25 @@ class GhlProductSyncService
             return false;
         }
 
-        $exists = Product::withTrashed()
-            ->byLocation($locationId)
+        // A row soft-deleted by a prior delete-sync run
+        // (deactivateMissingProducts() below) whose product has reappeared
+        // in this GHL pull needs to be restored, not left permanently
+        // hidden — without this, updateOrCreate-style logic elsewhere would
+        // find no *visible* match (soft-deleted rows are excluded from
+        // default queries) and create a genuine duplicate row for the same
+        // ghl_product_id, since that column has no unique constraint.
+        // Restoring here is what lets bulkPullFromGhl()'s second loop
+        // (Product::byLocation()->...->get(), which only sees non-trashed
+        // rows) pick this product back up and refresh its data moments
+        // later in the same pull run.
+        $trashedMatch = Product::onlyTrashed()->byLocation($locationId)->where('ghl_product_id', $ghlId)->first();
+        if ($trashedMatch) {
+            $trashedMatch->restore();
+
+            return false;
+        }
+
+        $exists = Product::byLocation($locationId)
             ->where('ghl_product_id', $ghlId)
             ->exists();
 

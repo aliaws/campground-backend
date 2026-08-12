@@ -46,14 +46,13 @@ class ServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['productRental', 'defaultRental', 'categories', 'amenities', 'features']);
-        $product->loadRentalFamily();
+        $product->load(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
 
         try {
             $details = $this->gateway->fetchListingBundle($product);
 
             if (empty($details)) {
-                throw new \RuntimeException('No live GHL details available.');
+                throw new \RuntimeException('No live Lead Connector details available.');
             }
 
             $paymentsByGhlId = $this->gateway->fetchPaymentsMap($product, $details);
@@ -92,7 +91,7 @@ class ServiceController extends Controller
         return response()->json([
             'success' => true,
             'data' => $results,
-            'message' => "Pulled {$results['pulled']} services from GHL, {$results['errors']} errors.",
+            'message' => "Pulled {$results['pulled']} services from Lead Connector, {$results['errors']} errors.",
         ]);
     }
 }

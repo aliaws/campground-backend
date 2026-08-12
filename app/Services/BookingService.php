@@ -13,7 +13,7 @@ class BookingService
 {
     public function __construct(
         private GhlBookingService $ghlBookingService,
-        private TransactionService $transactionService,
+        private RentalTransactionService $rentalTransactionService,
         private BookingPriceCalculator $priceCalculator,
         private GhlRentalGateway $gateway,
         private RentalResolver $resolver,
@@ -152,7 +152,7 @@ class BookingService
             try {
                 $this->ghlBookingService->createBooking($booking);
             } catch (\Exception $e) {
-                Log::error('GHL booking creation failed', [
+                Log::error('Lead Connector booking creation failed', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -160,9 +160,10 @@ class BookingService
         } else {
             try {
                 $this->ghlBookingService->createText2PayInvoice($booking);
-                $this->transactionService->autoCreateFromBooking($booking);
+                $this->rentalTransactionService->createFromBooking($booking);
+                $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
             } catch (\Exception $e) {
-                Log::error('GHL Text2Pay invoice creation failed', [
+                Log::error('Lead Connector Text2Pay invoice creation failed', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -186,14 +187,15 @@ class BookingService
 
         $this->ghlBookingService->createBooking($booking);
         $booking->update(['status' => 'confirmed']);
-        $this->transactionService->autoCreateFromBooking($booking);
+        $this->rentalTransactionService->createFromBooking($booking);
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
     }
 
     /**
      * Auto-confirm a booking whose payment was just marked paid (webhook,
-     * invoice reconciliation, cash pay, or TransactionService::updatePaymentStatus).
+     * invoice reconciliation, cash pay, or RentalTransactionService::confirmPayment()).
      *
      * Applies to both customer/online (`requested`) and staff cash (`pending`)
      * bookings. Tries to create the real GHL calendar booking when missing,
@@ -224,7 +226,7 @@ class BookingService
                 // Payment is already collected — confirm locally anyway so the
                 // booking never sticks at Paid + requested/pending in production
                 // when GHL is briefly unreachable or the slot sync fails.
-                Log::error('GHL calendar booking failed during auto-confirm after payment', [
+                Log::error('Lead Connector calendar booking failed during auto-confirm after payment', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -252,18 +254,19 @@ class BookingService
             try {
                 $this->ghlBookingService->createBooking($booking, skipPaymentEmail: true);
             } catch (\Exception $e) {
-                Log::error('GHL booking creation failed (cash pay retry)', [
+                Log::error('Lead Connector booking creation failed (cash pay retry)', [
                     'booking_id' => $booking->id,
                     'error' => $e->getMessage(),
                 ]);
             }
             $booking = $booking->fresh() ?? $booking;
+            $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
         }
 
         $transaction = $booking->transactions()->latest()->first();
-        if ($transaction && $transaction->payment_status !== 'paid') {
-            // updatePaymentStatus() also auto-confirms the linked booking.
-            $this->transactionService->updatePaymentStatus($transaction, 'paid');
+        if ($transaction && ! $transaction->isPaid()) {
+            // confirmPayment() also auto-confirms the linked booking.
+            $this->rentalTransactionService->confirmPayment($transaction);
         } else {
             $this->autoConfirmAfterPayment($booking);
         }
@@ -282,7 +285,7 @@ class BookingService
         try {
             $this->ghlBookingService->updateBookingStatus($booking, $status);
         } catch (\Exception $e) {
-            Log::error('GHL booking status update failed', [
+            Log::error('Lead Connector booking status update failed', [
                 'booking_id' => $booking->id,
                 'error' => $e->getMessage(),
             ]);

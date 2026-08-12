@@ -159,7 +159,7 @@ class CustomerPortalController extends Controller
         try {
             $this->ghlService->syncContactToGhl($customer);
         } catch (\Throwable $e) {
-            Log::error('Customer profile GHL sync failed', [
+            Log::error('Customer profile Lead Connector sync failed', [
                 'customer_id' => $customer->id,
                 'error' => $e->getMessage(),
             ]);

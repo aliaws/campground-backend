@@ -38,10 +38,9 @@ class LiveServiceResource extends JsonResource
             ? ServiceVariantResource::fromDetail($product, $defaultRental, $baseDetail, $defaultRental, $basePayments)
             : null;
 
-        if (! $product->relationLoaded('rentals')) {
-            $product->loadRentalFamily();
-        }
-        $rentals = $product->rentals->where('is_active', true)->values();
+        $rentals = $product->relationLoaded('rentals')
+            ? $product->rentals->where('is_active', true)->values()
+            : $product->rentals()->where('is_active', true)->get();
 
         $sortedRentals = $rentals->sortBy(
             fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1
@@ -63,6 +62,7 @@ class LiveServiceResource extends JsonResource
             'maxQuantity' => $baseDetail?->maxQuantity() ?? $product->quantity ?? 1,
             'images' => $baseVariant['images'] ?? $baseDetail?->images() ?? ($product->image ? [['url' => $product->image, 'name' => $product->name, 'position' => 0, '_id' => null]] : []),
             'serviceCategoryId' => $defaultRental?->service_category_id ?? $baseDetail?->serviceCategoryId(),
+            'serviceCategoryName' => $defaultRental?->serviceCategory?->name,
             'categoryName' => $product->categories?->first()?->name,
             'variantName' => $baseDetail?->variantName() ?? $defaultRental?->name ?? 'Regular',
             'isVariantsEnabled' => count($variants) > 1,

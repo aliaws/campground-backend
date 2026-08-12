@@ -8,7 +8,7 @@ use App\Models\Booking;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\ProductRental;
-use App\Models\Transaction;
+use App\Models\ProductTransaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
@@ -200,25 +200,25 @@ class GhlBookingService
     }
 
     /**
-     * Create a GHL invoice for a booking-less Transaction — a direct POS
-     * product sale. Branches exactly like the booking flow's cash/card split
-     * (createBooking()'s $skipPaymentEmail/$recordPaymentAs):
+     * Create a GHL invoice for a booking-less ProductTransaction — a direct
+     * POS product sale. Branches exactly like the booking flow's cash/card
+     * split (createBooking()'s $skipPaymentEmail/$recordPaymentAs):
      *   - cash: paid in person already — invoice created as 'draft' (no
      *     email) and immediately recorded as paid via record-payment.
      *   - card: mirrors the booking "Online" flow — invoice created with
      *     action:'send' (emails the customer a real payment link) and left
-     *     unpaid; the sale's local payment_status was already set to
-     *     'pending' by TransactionService::create() for this case, and only
+     *     unpaid; the sale's local status was already set to 'pending' by
+     *     ProductTransactionService::create() for this case, and only
      *     flips to 'paid' later via the InvoicePaid webhook or
-     *     GhlService::reconcileTransactionInvoiceStatus()'s self-heal.
-     * Persists ghl_invoice_* onto the Transaction row (not a Booking — this
-     * is the Transaction-typed sibling of createText2PayInvoice()/
-     * recordInvoicePayment(), kept separate so those Booking-typed methods
-     * and their signatures stay untouched).
+     *     GhlService::reconcileProductTransactionInvoiceStatus()'s self-heal.
+     * Persists ghl_invoice_* onto the ProductTransaction row (not a Booking
+     * — this is the ProductTransaction-typed sibling of
+     * createText2PayInvoice()/recordInvoicePayment(), kept separate so
+     * those Booking-typed methods and their signatures stay untouched).
      *
      * @param  array<int, array{name:string, currency:string, amount:float, qty:int, product_id:?string, price_id:?string}>  $lineItems
      */
-    public function createProductSaleInvoice(Transaction $transaction, array $lineItems): void
+    public function createProductSaleInvoice(ProductTransaction $transaction, array $lineItems): void
     {
         if (empty($lineItems)) {
             return;
@@ -282,11 +282,11 @@ class GhlBookingService
         $this->persistTransactionInvoiceMetadata($transaction, $invoice, $response['invoiceUrl'] ?? null);
 
         if ($isCash && $invoiceId) {
-            $this->recordProductSaleInvoicePayment($transaction, $invoiceId, (float) $transaction->total_amount);
+            $this->recordProductSaleInvoicePayment($transaction, $invoiceId, (float) $transaction->amount);
         }
     }
 
-    private function recordProductSaleInvoicePayment(Transaction $transaction, string $invoiceId, float $amount): void
+    private function recordProductSaleInvoicePayment(ProductTransaction $transaction, string $invoiceId, float $amount): void
     {
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
@@ -310,7 +310,7 @@ class GhlBookingService
         }
     }
 
-    private function persistTransactionInvoiceMetadata(Transaction $transaction, array $invoice, ?string $invoiceUrl = null): void
+    private function persistTransactionInvoiceMetadata(ProductTransaction $transaction, array $invoice, ?string $invoiceUrl = null): void
     {
         $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
         $number = $invoice['invoiceNumber'] ?? null;

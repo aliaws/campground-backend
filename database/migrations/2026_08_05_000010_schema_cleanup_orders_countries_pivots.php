@@ -9,9 +9,21 @@ use Illuminate\Support\Str;
 /**
  * - Truncate products/rentals/bookings/transactions/site-maps data
  * - Reshape + seed countries
- * - Create orders; transactions morph to Booking|Order (drop booking_id)
- * - Drop booking ghl_invoice_*; drop sessions + custom_fields
- * - Rename service_amenities/features → product_rental_* (FK product_rental_id)
+ * - Drop sessions (unused — this app uses JWT/token auth, not session auth)
+ *
+ * **2026-08-12 merge revision**: this migration originally also created an
+ * `orders` table + morphed `transactions` to Booking|Order, dropped
+ * `bookings.ghl_invoice_*`, dropped `custom_fields`, and renamed
+ * `service_amenities`/`service_features` to `product_rental_*`. All four
+ * were reverted while merging `main` in — `main` independently replaced
+ * `transactions`/Order with `RentalTransaction`/`ProductTransaction`
+ * (adopted instead, see 2026_08_10_000007_drop_transactions_and_transaction_items_tables.php),
+ * still actively uses `bookings.ghl_invoice_*` (the whole payment-link/QR
+ * flow depends on it) and the `custom_fields` feature, and
+ * `service_amenities`/`service_features` (keyed by `product_id`) is
+ * main's actively-developed Amenities/Features system. Keeping this
+ * migration's own truncate/countries work, which doesn't collide with any
+ * of that.
  */
 return new class extends Migration
 {
@@ -19,10 +31,7 @@ return new class extends Migration
     {
         $this->truncateOperationalData();
         $this->reshapeAndSeedCountries();
-        $this->createOrdersAndMorphTransactions();
-        $this->dropBookingInvoiceColumns();
-        $this->dropSessionsAndCustomFields();
-        $this->renameAmenityFeaturePivots();
+        Schema::dropIfExists('sessions');
     }
 
     public function down(): void
@@ -97,77 +106,6 @@ return new class extends Migration
             ];
         }
         DB::table('countries')->insert($rows);
-    }
-
-    private function createOrdersAndMorphTransactions(): void
-    {
-        Schema::create('orders', function (Blueprint $table) {
-            $table->ulid('id')->primary();
-            $table->foreignUlid('customer_id')->constrained('customers')->cascadeOnDelete();
-            $table->string('status')->default('pending');
-            $table->decimal('total_amount', 12, 2)->default(0);
-            $table->string('engage_organization_location_id');
-            $table->ulid('created_by')->nullable();
-            $table->text('notes')->nullable();
-            $table->timestamps();
-            $table->softDeletes();
-
-            $table->index('engage_organization_location_id');
-            $table->index('status');
-        });
-
-        Schema::table('transactions', function (Blueprint $table) {
-            if (Schema::hasColumn('transactions', 'booking_id')) {
-                // booking_id may or may not have a named FK depending on history.
-                try {
-                    $table->dropForeign(['booking_id']);
-                } catch (\Throwable) {
-                    // index-only column
-                }
-                $table->dropColumn('booking_id');
-            }
-        });
-
-        Schema::table('transactions', function (Blueprint $table) {
-            $table->nullableUlidMorphs('transactionable');
-        });
-    }
-
-    private function dropBookingInvoiceColumns(): void
-    {
-        Schema::table('bookings', function (Blueprint $table) {
-            $table->dropColumn([
-                'ghl_invoice_id',
-                'ghl_invoice_number',
-                'ghl_invoice_status',
-                'ghl_invoice_url',
-            ]);
-        });
-    }
-
-    private function dropSessionsAndCustomFields(): void
-    {
-        Schema::dropIfExists('sessions');
-        Schema::dropIfExists('custom_fields');
-    }
-
-    private function renameAmenityFeaturePivots(): void
-    {
-        // Empty after truncate; recreate with product_rental_id for clarity.
-        Schema::dropIfExists('service_amenities');
-        Schema::dropIfExists('service_features');
-
-        Schema::create('product_rental_amenities', function (Blueprint $table) {
-            $table->foreignUlid('product_rental_id')->constrained('product_rentals')->cascadeOnDelete();
-            $table->foreignUlid('amenity_id')->constrained('amenities')->cascadeOnDelete();
-            $table->primary(['product_rental_id', 'amenity_id']);
-        });
-
-        Schema::create('product_rental_features', function (Blueprint $table) {
-            $table->foreignUlid('product_rental_id')->constrained('product_rentals')->cascadeOnDelete();
-            $table->foreignUlid('feature_id')->constrained('features')->cascadeOnDelete();
-            $table->primary(['product_rental_id', 'feature_id']);
-        });
     }
 
     /** @return list<array{name:string,iso2:string,dial_code:string,flag_emoji:string}> */

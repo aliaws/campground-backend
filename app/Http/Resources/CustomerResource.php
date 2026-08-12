@@ -23,6 +23,14 @@ class CustomerResource extends JsonResource
             'user_role' => $this->customerAccount?->primaryRole(),
             'user_roles' => $this->customerAccount?->roleList(),
             'user_status' => $this->customerAccount?->status,
+            // True when this customer is currently archived (soft-deleted —
+            // see "Customer Archive" under Key Business Logic). Lets a UI
+            // that resolved this customer via a withTrashed() relation
+            // (e.g. Booking/RentalTransaction::customer()) show an
+            // "Archived" badge instead of silently displaying a stale name
+            // with no indication the customer no longer has an active
+            // account.
+            'is_archived' => $this->trashed(),
             'created_by' => $this->created_by,
             'engage_organization_location_ids' => $this->when(
                 $this->relationLoaded('locationLinks'),
