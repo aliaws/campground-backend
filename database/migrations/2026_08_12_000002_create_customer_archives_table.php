@@ -10,7 +10,12 @@ return new class extends Migration
     {
         Schema::create('customer_archives', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->ulid('tenant_id');
+            // The location whose GHL contact sync determined this customer
+            // no longer exists there — a customer can belong to multiple
+            // locations (customers_locations junction), so archiving is
+            // scoped per location, not per customer. See
+            // CustomerService::archiveCustomer()'s doc comment.
+            $table->uuid('engage_organization_location_id');
             // The original customers.id — kept so restoreFromArchive() can
             // un-trash the exact same row (preserving every Booking/
             // RentalTransaction/ProductTransaction FK) instead of recreating
@@ -31,9 +36,11 @@ return new class extends Migration
             $table->string('archived_reason')->default('ghl_removed');
             $table->timestamps();
 
-            $table->index('tenant_id');
+            $table->index('engage_organization_location_id');
             $table->index('customer_id');
             $table->index('ghl_contact_id');
+            $table->foreign('engage_organization_location_id', 'customer_archives_eol_fk')
+                ->references('id')->on('engage_organization_locations')->restrictOnDelete();
         });
     }
 

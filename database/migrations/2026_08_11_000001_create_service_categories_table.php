@@ -18,7 +18,7 @@ return new class extends Migration
     {
         Schema::create('service_categories', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->ulid('tenant_id');
+            $table->uuid('engage_organization_location_id');
             $table->string('name');
             $table->boolean('is_active')->default(true);
             // Nullable + unique-per-tenant: a locally-created category (never
@@ -30,8 +30,10 @@ return new class extends Migration
             $table->timestamp('engage_last_synced_at')->nullable();
             $table->timestamps();
 
-            $table->index('tenant_id');
-            $table->unique(['tenant_id', 'ghl_category_id']);
+            $table->index('engage_organization_location_id');
+            $table->unique(['engage_organization_location_id', 'ghl_category_id']);
+            $table->foreign('engage_organization_location_id', 'service_categories_eol_fk')
+                ->references('id')->on('engage_organization_locations')->restrictOnDelete();
         });
     }
 

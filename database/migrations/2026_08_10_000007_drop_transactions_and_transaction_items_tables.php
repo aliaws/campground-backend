@@ -55,7 +55,7 @@ return new class extends Migration
             $table->string('payment_status');
             $table->string('invoice_status');
             $table->timestamp('transaction_date');
-            $table->ulid('tenant_id');
+            $table->uuid('engage_organization_location_id');
             $table->timestamps();
             $table->softDeletes();
             $table->string('ghl_invoice_id')->nullable();
@@ -68,7 +68,7 @@ return new class extends Migration
             $table->foreign('booking_id')->references('id')->on('bookings');
             $table->index('invoice_status');
             $table->index('payment_status');
-            $table->index('tenant_id');
+            $table->index('engage_organization_location_id');
             $table->index('customer_id');
             $table->index('booking_id');
             $table->index('ghl_invoice_id');

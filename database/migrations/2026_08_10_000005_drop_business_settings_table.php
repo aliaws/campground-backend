@@ -32,7 +32,7 @@ return new class extends Migration
     {
         Schema::create('business_settings', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->ulid('tenant_id')->unique();
+            $table->uuid('engage_organization_location_id')->unique();
             $table->string('business_name')->nullable();
             $table->string('logo_path')->nullable();
             $table->json('address')->nullable();

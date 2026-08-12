@@ -58,7 +58,7 @@ class BookingController extends Controller
         $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
-                : $booking->load(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+                : $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
         }));
 
         return response()->json([
@@ -157,14 +157,14 @@ class BookingController extends Controller
                 // lie and mark it 'confirmed'.
                 $ghlSyncFailed = true;
             }
-        } elseif (! $booking->primaryTransaction()?->ghl_invoice_url) {
+        } elseif (! $booking->ghl_invoice_url) {
             // Online/'card' path: createText2PayInvoice() also swallows its own
             // failures — if it didn't produce a payment link, the staff payment
             // page would otherwise silently show nothing.
             $ghlSyncFailed = true;
         }
 
-        $booking->load(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+        $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
@@ -183,7 +183,7 @@ class BookingController extends Controller
         // publicly reachable webhook URL in local dev) — the staff invoice page
         // polls this endpoint waiting for ghl_invoice_status to flip to paid.
         $booking = $this->ghlService->reconcileInvoiceStatus($booking);
-        $booking->load(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+        $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
@@ -200,7 +200,7 @@ class BookingController extends Controller
         }
 
         $booking = $this->bookingService->payCash($booking);
-        $booking->loadMissing(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+        $booking->loadMissing(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
@@ -230,7 +230,7 @@ class BookingController extends Controller
             ], 422);
         }
 
-        $booking->loadMissing(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+        $booking->loadMissing(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,
@@ -301,7 +301,7 @@ class BookingController extends Controller
             ], 422);
         }
 
-        $booking->loadMissing(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions']);
+        $booking->loadMissing(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
         return response()->json([
             'success' => true,

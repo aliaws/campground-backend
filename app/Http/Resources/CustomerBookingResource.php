@@ -10,8 +10,6 @@ class CustomerBookingResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $tx = $this->primaryTransaction();
-
         return [
             'id' => $this->id,
             'product_name' => $this->whenLoaded('product', fn () => $this->product->name),
@@ -24,8 +22,8 @@ class CustomerBookingResource extends JsonResource
             'total_amount' => (float) $this->total_amount,
             'security_deposit_amount' => (float) $this->security_deposit_amount,
             'status' => $this->status,
-            'payment_url' => $tx?->ghl_invoice_url,
-            'payment_status' => $tx?->ghl_invoice_status,
+            'payment_url' => $this->ghl_invoice_url,
+            'payment_status' => $this->ghl_invoice_status,
             'invoice_view_url' => $this->ghlInvoiceViewUrl(),
             'created_at' => $this->created_at,
         ];

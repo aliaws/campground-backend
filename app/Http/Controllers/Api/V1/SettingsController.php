@@ -117,6 +117,7 @@ class SettingsController extends Controller
                 'code' => $code,
                 'url' => $request->fullUrl(),
             ]);
+
             return $this->callbackRedirect('error=missing_params');
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\OrganizationLocationResolver;
 use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -45,7 +46,6 @@ class Customer extends Model
      * which don't collapse into one HasMany. CustomerService::hardDelete()
      * (the only place this used to be called) queries both directly.
      */
-
     public function locationLinks(): HasMany
     {
         return $this->hasMany(CustomerLocation::class);
@@ -69,7 +69,7 @@ class Customer extends Model
 
     public function ghlContactIdFor(?string $locationId = null): ?string
     {
-        $locationId ??= \App\Services\OrganizationLocationResolver::resolveDefaultLocationId();
+        $locationId ??= OrganizationLocationResolver::resolveDefaultLocationId();
 
         $link = $this->relationLoaded('locationLinks')
             ? $this->locationLinks->firstWhere('engage_organization_location_id', $locationId)

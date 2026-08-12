@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('ghl_sync_logs', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->ulid('tenant_id');
+            $table->uuid('engage_organization_location_id');
             $table->string('status')->default('success'); // success | failed | partial
             $table->string('triggered_by')->default('manual'); // manual | scheduled
 
@@ -31,8 +31,10 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index('tenant_id');
-            $table->index(['tenant_id', 'created_at']);
+            $table->index('engage_organization_location_id');
+            $table->index(['engage_organization_location_id', 'created_at']);
+            $table->foreign('engage_organization_location_id', 'ghl_sync_logs_eol_fk')
+                ->references('id')->on('engage_organization_locations')->restrictOnDelete();
         });
     }
 

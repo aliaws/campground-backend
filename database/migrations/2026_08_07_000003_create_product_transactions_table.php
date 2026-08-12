@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('product_transactions', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->ulid('tenant_id');
+            $table->uuid('engage_organization_location_id');
 
             $table->string('ghl_invoice_id')->nullable();
 
@@ -34,8 +34,10 @@ return new class extends Migration
 
             $table->foreign('customer_id')->references('id')->on('customers')->nullOnDelete();
 
-            $table->unique(['tenant_id', 'ghl_invoice_id']);
-            $table->index('tenant_id');
+            $table->unique(['engage_organization_location_id', 'ghl_invoice_id']);
+            $table->index('engage_organization_location_id');
+            $table->foreign('engage_organization_location_id', 'product_transactions_eol_fk')
+                ->references('id')->on('engage_organization_locations')->restrictOnDelete();
         });
     }
 

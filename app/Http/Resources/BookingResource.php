@@ -13,8 +13,6 @@ class BookingResource extends JsonResource
             return [];
         }
 
-        $tx = $this->primaryTransaction();
-
         return [
             'id' => $this->id,
             'customer' => new CustomerResource($this->whenLoaded('customer')),
@@ -43,12 +41,10 @@ class BookingResource extends JsonResource
             'status' => $this->status,
             'ghl_opportunity_id' => $this->ghl_opportunity_id,
             'ghl_booking_id' => $this->ghl_booking_id,
-            // Invoice fields live on the primary Transaction — exposed here so
-            // the frontend keeps the same booking payload shape.
-            'ghl_invoice_id' => $tx?->ghl_invoice_id,
-            'ghl_invoice_number' => $tx?->ghl_invoice_number,
-            'ghl_invoice_status' => $tx?->ghl_invoice_status,
-            'ghl_invoice_url' => $tx?->ghl_invoice_url,
+            'ghl_invoice_id' => $this->ghl_invoice_id,
+            'ghl_invoice_number' => $this->ghl_invoice_number,
+            'ghl_invoice_status' => $this->ghl_invoice_status,
+            'ghl_invoice_url' => $this->ghl_invoice_url,
             'ghl_invoice_view_url' => $this->ghlInvoiceViewUrl(),
             'transactions' => BookingTransactionResource::collection($this->whenLoaded('transactions')),
             'created_by' => $this->created_by,

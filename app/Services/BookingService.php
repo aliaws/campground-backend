@@ -43,7 +43,7 @@ class BookingService
             $query->where('check_out_date', '<=', $filters['date_to']);
         }
 
-        return $query->with(['customer.customerAccount', 'product.productRental', 'productRental', 'transactions'])
+        return $query->with(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }
