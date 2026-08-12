@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Auth\JwtGuard;
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlWebhookHandler;
+use App\Services\GhlLocationContext;
 use App\Services\GhlService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -16,8 +17,10 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->singleton(GhlClient::class, function () {
-            return new GhlClient;
+        $this->app->singleton(GhlLocationContext::class);
+
+        $this->app->singleton(GhlClient::class, function ($app) {
+            return new GhlClient($app->make(GhlLocationContext::class));
         });
 
         $this->app->singleton(GhlWebhookHandler::class, function ($app) {

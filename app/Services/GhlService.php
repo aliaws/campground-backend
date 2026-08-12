@@ -226,6 +226,47 @@ class GhlService
                         if ($archive) {
                             app(CustomerService::class)->restoreFromArchive($archive, $contact['id']);
                             $restored = true;
+                        } else {
+                            // Not archived, but an active Customer at this
+                            // location may already exist under this email
+                            // with no ghl_contact_id link yet (or a stale
+                            // one) — e.g. a customer created locally before
+                            // ever syncing, or a link that was lost outside
+                            // the normal archive/restore path. customers.email
+                            // is globally unique, so falling through to
+                            // Customer::create() below would otherwise throw
+                            // a duplicate-key error instead of silently
+                            // creating a duplicate — re-linking here is what
+                            // makes the sync self-healing rather than just
+                            // failing loudly on every subsequent run.
+                            $existingLink = CustomerLocation::where('engage_organization_location_id', $locationId)
+                                ->whereHas('customer', function ($q) use ($email) {
+                                    $q->whereRaw('LOWER(email) = ?', [strtolower($email)]);
+                                })
+                                ->first();
+
+                            if ($existingLink) {
+                                $existingLink->update(['ghl_contact_id' => $contact['id']]);
+                                $restored = true;
+                            } else {
+                                // No location link at all yet, but a Customer
+                                // with this email may still exist globally
+                                // (e.g. created for a different location, or
+                                // a pre-location-model legacy row) — attach
+                                // this location to it instead of colliding
+                                // with the global unique(email) constraint.
+                                $existingCustomer = Customer::withTrashed()
+                                    ->whereRaw('LOWER(email) = ?', [strtolower($email)])
+                                    ->first();
+
+                                if ($existingCustomer) {
+                                    if ($existingCustomer->trashed()) {
+                                        $existingCustomer->restore();
+                                    }
+                                    $existingCustomer->attachLocation($locationId, $contact['id']);
+                                    $restored = true;
+                                }
+                            }
                         }
                     }
 
@@ -494,7 +535,7 @@ class GhlService
     private function handleContactCreated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
+        $locationId = OrganizationLocationResolver::resolveFromGhlLocationId($this->webhookGhlLocationId($payload, $contact));
         $email = $contact['email'] ?? null;
 
         // Mirrors bulkPullContacts()'s email-first archive restore — a
@@ -540,7 +581,7 @@ class GhlService
     private function handleContactUpdated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
+        $locationId = OrganizationLocationResolver::resolveFromGhlLocationId($this->webhookGhlLocationId($payload, $contact));
         $email = $contact['email'] ?? null;
 
         // Same email-first archive restore as handleContactCreated() above
@@ -574,6 +615,20 @@ class GhlService
             'ghl_sync_status' => 'synced',
             'ghl_last_synced_at' => now(),
         ]);
+    }
+
+    /**
+     * GHL's own sub-account id for this webhook, tried at every shape this
+     * codebase has already seen a GHL payload use elsewhere (top-level, or
+     * nested under the event's own object) — defensive, since GHL's exact
+     * webhook shape isn't guaranteed identical across event types and this
+     * has never been confirmed against a real multi-location payload.
+     */
+    private function webhookGhlLocationId(array $payload, array $nested): ?string
+    {
+        $id = $payload['locationId'] ?? $nested['locationId'] ?? $payload['location_id'] ?? null;
+
+        return is_string($id) && $id !== '' ? $id : null;
     }
 
     private function handleOpportunityCreated(array $payload): void

@@ -5,7 +5,9 @@ namespace App\Integrations\GHL;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
 use App\Services\GhlAuthService;
+use App\Services\GhlLocationContext;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 
 class GhlClient
@@ -37,15 +39,79 @@ class GhlClient
 
     private ?EngageToken $token = null;
 
-    public function __construct(?string $oauthStateKey = null)
-    {
-        $this->setting = EngageSetting::with('token')->first();
+    /**
+     * The location id credentials were last resolved for — a real string,
+     * null (deliberately resolved with no location context), or the
+     * sentinel below meaning "never resolved yet." Needed because null is
+     * itself a legitimate, distinct resolution outcome (falls back to
+     * the historical ::first() behavior), so it can't double as "unresolved."
+     */
+    private string|null|false $resolvedForLocationId = false;
 
-        if ($this->setting) {
-            $this->baseUrl = $this->setting->api_base_url ?: self::SERVICES_BASE_URL;
-            $this->token = $this->setting->token
-                ?? EngageToken::query()->where('engage_setting_id', $this->setting->id)->first();
-            $this->accessToken = $this->token?->access_token;
+    /**
+     * GhlClient is bound as a container *singleton* (AppServiceProvider) —
+     * one instance lives for an entire request or console command, which is
+     * exactly why credentials must never be resolved once, eagerly, in the
+     * constructor: GhlDailySync/GhlFullSyncService::pullAll() process
+     * *multiple* locations in a single process, and every previous version
+     * of this class kept using whichever location's token it happened to
+     * resolve first for the rest of that run — silently pulling/pushing
+     * one organization's Lead Connector data using another organization's
+     * connection. Credentials are now resolved lazily, on first real use,
+     * keyed off GhlLocationContext's current value, and re-resolved
+     * whenever that value changes (see ensureCredentials()).
+     */
+    public function __construct(private GhlLocationContext $locationContext) {}
+
+    /**
+     * Resolves (or re-resolves) which organization's Lead Connector
+     * connection this client talks as, called at the top of every method
+     * that actually reads credentials or fires a request.
+     *
+     * Resolution order: (1) GhlLocationContext's explicit value, set by
+     * GhlFullSyncService::pullAll() for each location it processes in turn;
+     * (2) the currently authenticated staff user's own organization, for
+     * the (vastly more common) case of a normal HTTP request triggering a
+     * sync/push action — covers every controller that never explicitly
+     * sets the context; (3) falls back to the original ::first() behavior
+     * only when neither is available (a console context with no location
+     * option, or a single-organization deployment), preserving prior
+     * behavior exactly for that case.
+     */
+    private function ensureCredentials(): void
+    {
+        $locationId = $this->locationContext->get() ?? $this->authenticatedUserLocationId();
+
+        if ($this->resolvedForLocationId === $locationId) {
+            return;
+        }
+
+        $token = $locationId
+            ? EngageToken::with('setting')->where('engage_organization_location_id', $locationId)->first()
+            : null;
+
+        if ($token && $token->setting) {
+            $this->token = $token;
+            $this->setting = $token->setting;
+        } else {
+            $this->setting = EngageSetting::with('token')->first();
+            $this->token = $this->setting?->token
+                ?? ($this->setting ? EngageToken::query()->where('engage_setting_id', $this->setting->id)->first() : null);
+        }
+
+        $this->baseUrl = $this->setting?->api_base_url ?: self::SERVICES_BASE_URL;
+        $this->accessToken = $this->token?->access_token;
+        $this->resolvedForLocationId = $locationId;
+    }
+
+    private function authenticatedUserLocationId(): ?string
+    {
+        try {
+            $user = Auth::guard('api')->user();
+
+            return $user?->resolveOrganizationLocationId();
+        } catch (\Throwable) {
+            return null;
         }
     }
 
@@ -81,26 +147,36 @@ class GhlClient
 
     public function getLocationId(): ?string
     {
+        $this->ensureCredentials();
+
         return $this->token?->location_id;
     }
 
     public function getUserId(): ?string
     {
+        $this->ensureCredentials();
+
         return $this->token?->user_id;
     }
 
     public function getTimezone(): string
     {
+        $this->ensureCredentials();
+
         return $this->setting?->timezone ?: 'America/New_York';
     }
 
     public function getSetting(): ?EngageSetting
     {
+        $this->ensureCredentials();
+
         return $this->setting;
     }
 
     public function getToken(): ?EngageToken
     {
+        $this->ensureCredentials();
+
         return $this->token;
     }
 
@@ -123,6 +199,8 @@ class GhlClient
      */
     public function poolGet(array $requests, ?string $version = null): array
     {
+        $this->ensureCredentials();
+
         if (! $this->accessToken) {
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
@@ -200,6 +278,8 @@ class GhlClient
         ?string $version = null,
         ?string $baseUrl = null,
     ): array {
+        $this->ensureCredentials();
+
         if (! $this->accessToken) {
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }
@@ -247,6 +327,8 @@ class GhlClient
      */
     public function uploadFile(string $filePath, string $filename, string $mimeType = 'application/octet-stream'): array
     {
+        $this->ensureCredentials();
+
         if (! $this->accessToken) {
             throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
         }

@@ -51,6 +51,22 @@ class Customer extends Model
         return $this->hasMany(CustomerLocation::class);
     }
 
+    /**
+     * True when this customer has a real link to the given organization —
+     * Customer has no direct engage_organization_location_id column of its
+     * own (a customer can span multiple organizations via
+     * customers_locations), so every controller action taking a
+     * route-bound Customer must check this rather than a simple column
+     * comparison, or a staff member could view/edit/delete another
+     * organization's customer just by knowing/guessing its id.
+     */
+    public function belongsToLocation(string $locationId): bool
+    {
+        return $this->relationLoaded('locationLinks')
+            ? $this->locationLinks->contains('engage_organization_location_id', $locationId)
+            : $this->locationLinks()->where('engage_organization_location_id', $locationId)->exists();
+    }
+
     public function organizationLocations(): BelongsToMany
     {
         return $this->belongsToMany(

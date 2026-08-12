@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Auth\JwtGuard;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
@@ -25,7 +26,7 @@ class AuthController extends Controller
             'status' => User::STATUS_ACTIVE,
         ]);
 
-        $token = SessionJwt::issue($user);
+        $token = $this->issueTokenFor($user);
 
         return response()->json([
             'success' => true,
@@ -62,7 +63,7 @@ class AuthController extends Controller
             ], 403);
         }
 
-        $token = SessionJwt::issue($user);
+        $token = $this->issueTokenFor($user);
 
         return response()->json([
             'success' => true,
@@ -74,9 +75,79 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * A user linked to exactly one organization gets scoped to it
+     * immediately at login — no extra step for the common case. A user
+     * linked to more than one (or none yet) gets an unscoped token;
+     * resolveOrganizationLocationId() falls back to its pre-existing
+     * "first linked, else default" behavior for any request made before
+     * they explicitly pick one via POST /auth/select-organization, so
+     * nothing breaks for a multi-org user who never bothers to pick.
+     *
+     * Also stamps the choice onto $user itself (not just the token) so the
+     * UserResource built from this same request/object correctly reports
+     * organization_selected — JwtGuard only ever does that for a *later*
+     * request that comes back in with the token, not for the object this
+     * very login/register call already has in hand.
+     */
+    private function issueTokenFor(User $user): string
+    {
+        $ids = $user->locationLinks()->pluck('engage_organization_location_id');
+        $locationId = $ids->count() === 1 ? $ids->first() : null;
+
+        $user->setActiveLocationId($locationId);
+
+        return SessionJwt::issue($user, $locationId);
+    }
+
+    /**
+     * Lets a multi-organization user (or one who wants to switch) choose
+     * which organization's data the rest of their session should be scoped
+     * to. Re-issues a fresh token carrying that choice as the JWT's `loc`
+     * claim; every subsequent request's resolveOrganizationLocationId()
+     * then resolves to it directly. Revokes the old token so a stale
+     * unscoped/differently-scoped one can't keep being used afterward.
+     */
+    public function selectOrganization(Request $request): JsonResponse
+    {
+        $request->validate([
+            'engage_organization_location_id' => ['required', 'string'],
+        ]);
+
+        $user = $request->user();
+        $locationId = $request->input('engage_organization_location_id');
+
+        if (! $user->belongsToLocation($locationId)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have access to that organization.',
+            ], 403);
+        }
+
+        /** @var JwtGuard $guard */
+        $guard = Auth::guard('api');
+        $jti = $guard->currentJti();
+        $exp = $guard->currentTokenExp();
+        if ($jti && $exp) {
+            SessionJwt::revoke($jti, $exp);
+        }
+
+        $token = SessionJwt::issue($user, $locationId);
+        $user->setActiveLocationId($locationId);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user' => new UserResource($user),
+                'token' => $token,
+            ],
+            'message' => 'Organization selected.',
+        ]);
+    }
+
     public function logout(Request $request): JsonResponse
     {
-        /** @var \App\Auth\JwtGuard $guard */
+        /** @var JwtGuard $guard */
         $guard = Auth::guard('api');
         $jti = $guard->currentJti();
         $exp = $guard->currentTokenExp();

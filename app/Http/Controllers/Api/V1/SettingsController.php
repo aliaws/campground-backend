@@ -111,6 +111,7 @@ class SettingsController extends Controller
         ]);
 
         $code = $request->input('code');
+        $state = $request->input('state');
 
         if (! $code) {
             Log::error('Lead Connector OAuth callback missing params', [
@@ -121,9 +122,20 @@ class SettingsController extends Controller
             return $this->callbackRedirect('error=missing_params');
         }
 
-        $setting = EngageSetting::with('token')->first();
+        // Matched by the state param GHL echoes back (see getAuthorizeUrl(),
+        // which sends $setting->oauth_state_key as `state`) — this is what
+        // ties the callback to the *specific organization* that started this
+        // OAuth flow. Without it, a bare ::first() would land whichever
+        // organization happens to have the lowest-id EngageSetting row,
+        // silently attaching another organization's Lead Connector tokens to
+        // the wrong one whenever more than one is connected.
+        $setting = $state
+            ? EngageSetting::with('token')->where('oauth_state_key', $state)->first()
+            : null;
 
         if (! $setting) {
+            Log::error('Lead Connector OAuth callback: no matching organization for state', ['state' => $state]);
+
             return $this->callbackRedirect('error=settings_not_found');
         }
 
@@ -286,6 +298,14 @@ class SettingsController extends Controller
         ], 201);
     }
 
+    /**
+     * Scoped strictly to $user's own organization — must never fall back to
+     * "some other organization's settings" when this one hasn't configured
+     * Lead Connector yet, or a staff member would see another
+     * organization's client_id/business info on their own (blank) Engage
+     * Settings page. Returning null here is the correct "not configured
+     * yet" signal every caller already handles.
+     */
     private function resolveEngageSetting(User $user): ?EngageSetting
     {
         $locationId = $user->resolveOrganizationLocationId();
@@ -294,11 +314,7 @@ class SettingsController extends Controller
             ->where('engage_organization_location_id', $locationId)
             ->first();
 
-        if ($token?->setting) {
-            return $token->setting->loadMissing('token');
-        }
-
-        return EngageSetting::with('token')->first();
+        return $token?->setting?->loadMissing('token');
     }
 
     /**

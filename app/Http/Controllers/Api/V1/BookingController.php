@@ -177,8 +177,12 @@ class BookingController extends Controller
         ], 201);
     }
 
-    public function show(Booking $booking): JsonResponse
+    public function show(Request $request, Booking $booking): JsonResponse
     {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
         // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
         // publicly reachable webhook URL in local dev) — the staff invoice page
         // polls this endpoint waiting for ghl_invoice_status to flip to paid.
@@ -283,8 +287,12 @@ class BookingController extends Controller
     }
 
     /** Staff confirms a customer-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
-    public function confirm(Booking $booking): JsonResponse
+    public function confirm(Request $request, Booking $booking): JsonResponse
     {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
         try {
             $booking = $this->bookingService->confirm($booking);
         } catch (\InvalidArgumentException $e) {

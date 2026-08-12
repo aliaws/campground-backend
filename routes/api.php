@@ -34,6 +34,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:api');
     Route::get('/auth/me', [AuthController::class, 'me'])->middleware('auth:api');
+    Route::post('/auth/select-organization', [AuthController::class, 'selectOrganization'])->middleware('auth:api');
 
     // Webhooks (no auth - GHL calls these)
     Route::post('/webhooks/ghl', [WebhookController::class, 'ghl']);

@@ -74,8 +74,12 @@ class ProductController extends Controller
         ], 201);
     }
 
-    public function show(Product $product): JsonResponse
+    public function show(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         $product->load(['categories', 'rentals', 'defaultRental']);
 
         return response()->json([
@@ -87,6 +91,10 @@ class ProductController extends Controller
 
     public function update(UpdateProductRequest $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         $product = $this->productService->update($product, $request->validated());
 
         return response()->json([
@@ -96,8 +104,12 @@ class ProductController extends Controller
         ]);
     }
 
-    public function destroy(Product $product): JsonResponse
+    public function destroy(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         $this->productService->delete($product);
 
         return response()->json(['success' => true, 'message' => 'Product deleted.']);
@@ -105,6 +117,10 @@ class ProductController extends Controller
 
     public function uploadImage(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         $request->validate(['image' => 'required|image|max:2048']);
         $product = $this->productService->uploadImage($product, $request->file('image'));
 
@@ -117,6 +133,10 @@ class ProductController extends Controller
 
     public function attachCategories(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         $request->validate([
             'category_ids' => ['required', 'array'],
             'category_ids.*' => ['string', 'exists:categories,id'],
@@ -131,8 +151,12 @@ class ProductController extends Controller
         ]);
     }
 
-    public function syncToGhl(Product $product): JsonResponse
+    public function syncToGhl(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         try {
             $product = $this->ghlProductSyncService->syncProductToGhl($product);
 
@@ -149,8 +173,12 @@ class ProductController extends Controller
         }
     }
 
-    public function pullFromGhl(Product $product): JsonResponse
+    public function pullFromGhl(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         try {
             $product = $this->ghlProductSyncService->pullFromGhl($product);
 
@@ -216,8 +244,12 @@ class ProductController extends Controller
      * GhlRentalGateway). Returns null data when the product isn't linked to
      * a GHL product yet.
      */
-    public function ghlStock(Product $product): JsonResponse
+    public function ghlStock(Request $request, Product $product): JsonResponse
     {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
         try {
             $detail = $this->ghlProductGateway->fetchDefaultPriceDetail($product);
         } catch (\Exception $e) {
@@ -233,5 +265,21 @@ class ProductController extends Controller
             'data' => $detail,
             'message' => $detail ? 'Live stock retrieved.' : 'Product is not linked to a Lead Connector product yet.',
         ]);
+    }
+
+    /**
+     * Route-model binding (Product $product) fetches by id alone, with no
+     * tenant scoping — every action taking a bound Product must call this
+     * first, or a staff member from a different organization could view/
+     * modify/delete/sync another organization's product just by knowing or
+     * guessing its id.
+     */
+    private function denyUnlessOwned(Request $request, Product $product): ?JsonResponse
+    {
+        if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Product not found.'], 404);
+        }
+
+        return null;
     }
 }

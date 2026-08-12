@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Services\OrganizationLocationResolver;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -30,6 +31,22 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
+
+    /**
+     * The organization/location the *current request's token* is scoped to
+     * (see SessionJwt's `loc` claim + JwtGuard::user()) — a real declared
+     * property, not a magic/Eloquent attribute, so it's never persisted,
+     * never serialized, and never touches mass assignment. Deliberately not
+     * set by default: only JwtGuard sets it, after authenticating a real
+     * request, so this has no effect on a User instance used outside an
+     * HTTP request (factories, tests, tinker, console commands).
+     */
+    protected ?string $activeLocationId = null;
+
+    public function setActiveLocationId(?string $locationId): void
+    {
+        $this->activeLocationId = $locationId;
+    }
 
     public const STATUS_PENDING = 'pending';
 
@@ -137,7 +154,7 @@ class User extends Authenticatable
         }
 
         try {
-            return \App\Services\OrganizationLocationResolver::resolveDefaultLocationId();
+            return OrganizationLocationResolver::resolveDefaultLocationId();
         } catch (\Throwable) {
             return null;
         }
@@ -168,15 +185,51 @@ class User extends Authenticatable
 
     /**
      * Active Engage organization location for scoping business data.
+     *
+     * Prefers the location the current request's token was explicitly
+     * scoped to (set by JwtGuard from the JWT's `loc` claim once the user
+     * has picked an organization — see POST /auth/select-organization) as
+     * long as the user still actually belongs to it. Falls back to
+     * primaryLocationId()'s pre-existing "first linked, else system
+     * default" behavior otherwise — so a single-organization user, a
+     * pre-selection token, or any call site outside an HTTP request
+     * (console, tests) all resolve exactly as they did before this existed.
      */
     public function resolveOrganizationLocationId(): string
     {
+        if ($this->hasSelectedActiveLocation()) {
+            return $this->activeLocationId;
+        }
+
         $id = $this->primaryLocationId();
         if (! is_string($id) || $id === '') {
             throw new \RuntimeException('User is not linked to an organization location.');
         }
 
         return $id;
+    }
+
+    /** Same preference order as resolveOrganizationLocationId(), but null-safe for display purposes (UserResource) rather than throwing. */
+    public function activeOrPrimaryLocationId(): ?string
+    {
+        if ($this->hasSelectedActiveLocation()) {
+            return $this->activeLocationId;
+        }
+
+        return $this->primaryLocationId();
+    }
+
+    /**
+     * True only when the current request's token was explicitly scoped to
+     * an organization the user still belongs to (via POST
+     * /auth/select-organization, or auto-embedded at login for a
+     * single-organization user) — as opposed to just falling back to
+     * "whichever location happens to be linked first." This is the signal
+     * the frontend uses to know whether to show the organization picker.
+     */
+    public function hasSelectedActiveLocation(): bool
+    {
+        return $this->activeLocationId !== null && $this->belongsToLocation($this->activeLocationId);
     }
 
     public function createdByUser(): BelongsTo

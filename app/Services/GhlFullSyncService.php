@@ -66,9 +66,36 @@ class GhlFullSyncService
         private GhlServiceSyncService $serviceSyncService,
         private RentalTransactionService $rentalTransactionService,
         private ProductTransactionService $productTransactionService,
+        private GhlLocationContext $locationContext,
     ) {}
 
+    /**
+     * Pins GhlClient (a container singleton — see AppServiceProvider/
+     * GhlClient::ensureCredentials()) to $tenantId's own Lead Connector
+     * connection for the whole duration of this call, so every GHL request
+     * this phase makes — including deep inside productSyncService/
+     * serviceSyncService/ghlService, all resolved once at construction and
+     * sharing this same GhlClient instance — uses the right organization's
+     * access token. Critical specifically because GhlDailySync loops this
+     * across *multiple* locations in one process: without pinning the
+     * context per call, every location after the first would silently
+     * keep using whichever location's token GhlClient happened to resolve
+     * first. Always reset in finally so nothing leaks into whatever runs
+     * next in this process (the next location in the same loop, or a
+     * later, unrelated request if this were ever invoked mid-request).
+     */
     public function pullAll(string $tenantId, string $triggeredBy = 'manual'): GhlSyncLog
+    {
+        $this->locationContext->set($tenantId);
+
+        try {
+            return $this->pullAllForLocation($tenantId, $triggeredBy);
+        } finally {
+            $this->locationContext->set(null);
+        }
+    }
+
+    private function pullAllForLocation(string $tenantId, string $triggeredBy): GhlSyncLog
     {
         $log = GhlSyncLog::create([
             'engage_organization_location_id' => $tenantId,
