@@ -116,6 +116,11 @@ Route::prefix('v1')->group(function () {
         // Customers
         Route::get('/customers', [CustomerController::class, 'index']);
         Route::post('/customers', [CustomerController::class, 'store']);
+        // Must be registered before GET/POST /customers/{customer}* below —
+        // otherwise "archived" would be swallowed by the {customer} wildcard
+        // binding (same routing-order gotcha as /products/lookup-by-sku).
+        Route::get('/customers/archived', [CustomerController::class, 'archived']);
+        Route::post('/customers/archived/{archive}/restore', [CustomerController::class, 'restoreArchived']);
         Route::get('/customers/{customer}', [CustomerController::class, 'show']);
         Route::put('/customers/{customer}', [CustomerController::class, 'update']);
         Route::get('/customers/{customer}/deletion-preview', [CustomerController::class, 'deletionPreview']);

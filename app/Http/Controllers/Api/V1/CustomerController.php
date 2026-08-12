@@ -6,9 +6,11 @@ use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
+use App\Http\Resources\CustomerArchiveResource;
 use App\Http\Resources\CustomerResource;
 use App\Models\Booking;
 use App\Models\Customer;
+use App\Models\CustomerArchive;
 use App\Models\User;
 use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
@@ -49,6 +51,67 @@ class CustomerController extends Controller
             'success' => true,
             'data' => $this->paginatedData($customers, CustomerResource::class),
             'message' => 'Customers retrieved.',
+        ]);
+    }
+
+    /**
+     * Archived customers only — completely separate from index() above,
+     * which (like every other Customer query in this app) never includes
+     * soft-deleted/archived rows. Backs the staff "Customer Archive" page.
+     */
+    public function archived(Request $request): JsonResponse
+    {
+        $query = CustomerArchive::where('tenant_id', $request->user()->tenant_id);
+
+        if ($request->search) {
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', "%{$request->search}%")
+                    ->orWhere('email', 'like', "%{$request->search}%")
+                    ->orWhere('phone', 'like', "%{$request->search}%");
+            });
+        }
+
+        $archived = $query->orderBy('archived_at', 'desc')->paginate($request->per_page ?? 15);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->paginatedData($archived, CustomerArchiveResource::class),
+            'message' => 'Archived customers retrieved.',
+        ]);
+    }
+
+    /**
+     * Manual staff-triggered restore from the Customer Archive page — the
+     * automated equivalent (matching by email, not GHL id) also happens on
+     * its own whenever a matching contact reappears via GHL sync, or the
+     * same email is used to create a customer again through the app; see
+     * CustomerService::restoreFromArchive()/findOrCreate().
+     */
+    public function restoreArchived(CustomerArchive $archive, Request $request): JsonResponse
+    {
+        if ($archive->tenant_id !== $request->user()->tenant_id) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Archived customer not found.',
+            ], 404);
+        }
+
+        $customer = $this->customerService->restoreFromArchive($archive);
+
+        try {
+            $this->ghlService->syncContactToGhl($customer);
+        } catch (\Exception $e) {
+            Log::error('Lead Connector sync failed for restored customer', [
+                'customer_id' => $customer->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => new CustomerResource($customer->fresh()),
+            'message' => 'Customer restored.',
         ]);
     }
 

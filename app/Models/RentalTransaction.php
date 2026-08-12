@@ -57,7 +57,8 @@ class RentalTransaction extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        // withTrashed() — same reasoning as Booking::customer(), see there.
+        return $this->belongsTo(Customer::class)->withTrashed();
     }
 
     public function product(): BelongsTo
