@@ -248,7 +248,7 @@ class ProductTransactionService
                     $resolved['allow_out_of_stock_purchases'],
                 );
             } catch (\Exception $e) {
-                Log::error('GHL inventory update failed after product sale', [
+                Log::error('Lead Connector inventory update failed after product sale', [
                     'product_transaction_id' => $productTransaction->id,
                     'product_id' => $item->product_id,
                     'error' => $e->getMessage(),
@@ -278,7 +278,7 @@ class ProductTransactionService
 
             $this->ghlBookingService->createProductSaleInvoice($productTransaction, $lineItems);
         } catch (\Exception $e) {
-            Log::error('GHL invoice creation failed for product sale', [
+            Log::error('Lead Connector invoice creation failed for product sale', [
                 'product_transaction_id' => $productTransaction->id,
                 'error' => $e->getMessage(),
             ]);

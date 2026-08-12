@@ -81,6 +81,7 @@ class GhlFullSyncService
         $counts = [
             'total_contacts_pulled' => 0,
             'total_categories_pulled' => 0,
+            'total_service_categories_pulled' => 0,
             'total_products_pulled' => 0,
             'total_services_pulled' => 0,
             'total_rentals_pulled' => 0,
@@ -107,6 +108,20 @@ class GhlFullSyncService
             $this->runPhase('products', $phaseErrors, function () use ($tenantId, &$counts) {
                 $result = $this->productSyncService->bulkPullFromGhl($tenantId);
                 $counts['total_products_pulled'] = $result['pulled'] ?? 0;
+
+                return $result;
+            });
+
+            // Runs before 'services' (not before 'products', to avoid
+            // reordering the pre-existing contacts→categories→products
+            // sequence) — each rental's `service_category_id` is a raw GHL
+            // id captured during the 'services' phase below; the local
+            // ServiceCategory rows this phase creates/updates must already
+            // exist for that id to resolve to a name anywhere it's
+            // displayed/filtered on afterward.
+            $this->runPhase('service_categories', $phaseErrors, function () use ($tenantId, &$counts) {
+                $result = $this->serviceSyncService->pullServiceCategories($tenantId);
+                $counts['total_service_categories_pulled'] = $result['pulled'] ?? 0;
 
                 return $result;
             });
@@ -574,11 +589,11 @@ class GhlFullSyncService
                 'ghl_invoice_number' => $invoice['invoiceNumber'] ?? null,
                 'ghl_invoice_status' => 'paid',
                 'tenant_id' => $tenantId,
-                'notes' => 'Synced from GoHighLevel via Pull Data — this booking was made directly through GHL, not through this app.',
-                'created_by' => 'GHL Sync',
+                'notes' => 'Synced from Lead Connector via Pull Data — this booking was made directly through Lead Connector, not through this app.',
+                'created_by' => 'Lead Connector Sync',
             ]);
 
-            Log::info('Created local Booking from synced GHL rental invoice', [
+            Log::info('Created local Booking from synced Lead Connector rental invoice', [
                 'booking_id' => $booking->id,
                 'ghl_invoice_id' => $ghlInvoiceId,
             ]);

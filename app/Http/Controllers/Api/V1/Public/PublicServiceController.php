@@ -26,7 +26,7 @@ class PublicServiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = array_merge(
-            $request->only(['search', 'category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']),
+            $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']),
             ['tenant_id' => TenantResolver::resolveDefault()]
         );
 
@@ -59,13 +59,13 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
+        $product->load(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
 
         try {
             $details = $this->gateway->fetchListingBundle($product);
 
             if (empty($details)) {
-                throw new \RuntimeException('No live GHL details available.');
+                throw new \RuntimeException('No live Lead Connector details available.');
             }
 
             $paymentsByGhlId = $this->gateway->fetchPaymentsMap($product, $details);

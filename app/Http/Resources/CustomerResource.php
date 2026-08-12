@@ -20,6 +20,14 @@ class CustomerResource extends JsonResource
             'ghl_last_synced_at' => $this->ghl_last_synced_at,
             'user_role' => $this->customerAccount?->role,
             'user_status' => $this->customerAccount?->customer_status,
+            // True when this customer is currently archived (soft-deleted —
+            // see "Customer Archive" under Key Business Logic). Lets a UI
+            // that resolved this customer via a withTrashed() relation
+            // (e.g. Booking/RentalTransaction::customer()) show an
+            // "Archived" badge instead of silently displaying a stale name
+            // with no indication the customer no longer has an active
+            // account.
+            'is_archived' => $this->trashed(),
             'created_by' => $this->created_by,
             'tenant_id' => $this->tenant_id,
             'created_at' => $this->created_at,

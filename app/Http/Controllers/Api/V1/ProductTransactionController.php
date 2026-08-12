@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductTransactionRequest;
 use App\Http\Requests\UpdateProductTransactionPaymentStatusRequest;
@@ -22,6 +23,8 @@ use Illuminate\Http\Request;
  */
 class ProductTransactionController extends Controller
 {
+    use FormatsPaginatedResponse;
+
     public function __construct(
         private ProductTransactionService $productTransactionService,
         private GhlService $ghlService,
@@ -51,7 +54,7 @@ class ProductTransactionController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => ProductTransactionResource::collection($productTransactions),
+            'data' => $this->paginatedData($productTransactions, ProductTransactionResource::class),
             'message' => 'Product transactions retrieved.',
         ]);
     }

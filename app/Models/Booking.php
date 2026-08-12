@@ -57,7 +57,12 @@ class Booking extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        // withTrashed() so a booking's customer info still resolves after
+        // the customer is archived (soft-deleted) — otherwise the default
+        // belongsTo query excludes it and every list showing this relation
+        // (Bookings, Rental Transactions) falls back to "Unknown". See
+        // "Customer Archive" under Key Business Logic.
+        return $this->belongsTo(Customer::class)->withTrashed();
     }
 
     public function product(): BelongsTo

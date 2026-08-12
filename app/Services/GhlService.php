@@ -146,10 +146,19 @@ class GhlService
             throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
         }
 
-        $results = ['pulled' => 0, 'created' => 0, 'updated' => 0, 'errors' => 0, 'error_details' => []];
+        $results = ['pulled' => 0, 'created' => 0, 'updated' => 0, 'restored' => 0, 'errors' => 0, 'deactivated' => 0, 'error_details' => []];
         $page = 0;
         $limit = 100;
         $total = null;
+        $seenGhlContactIds = [];
+        // Only true once every page has been fetched with no exception —
+        // see softDeleteMissingCustomers()'s doc comment for why this must
+        // gate the removal pass. A per-page fetch failure `break`s the loop
+        // below and this stays false, so a partial contact list (we only
+        // ever saw pages 1-2 of, say, 5) is never mistaken for "GHL's
+        // complete current contact list" and used to soft-delete every
+        // customer whose page we simply never reached.
+        $fetchComplete = true;
 
         do {
             try {
@@ -161,22 +170,63 @@ class GhlService
             } catch (\Exception $e) {
                 $results['errors']++;
                 $results['error_details'][] = ['page' => $page, 'error' => $e->getMessage()];
+                $fetchComplete = false;
                 break;
             }
 
             $contacts = $response['contacts'] ?? [];
 
             foreach ($contacts as $contact) {
+                if (! empty($contact['id'])) {
+                    // Recorded regardless of whether the local save below
+                    // succeeds — what matters for delete-sync purposes is
+                    // "does GHL still have this contact," independent of
+                    // any local persistence failure.
+                    $seenGhlContactIds[] = $contact['id'];
+                }
+
                 try {
                     $name = trim(
                         ($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')
                     ) ?: ($contact['name'] ?? 'Unknown');
+                    $email = $contact['email'] ?? null;
+
+                    // A customer archived by a prior delete-sync run (see
+                    // softDeleteMissingCustomers()/archiveCustomer() below)
+                    // whose contact has reappeared in GHL needs restoring
+                    // first. Matched by EMAIL, not ghl_contact_id — a contact
+                    // removed and re-added in GHL is assigned a brand-new id,
+                    // so an id-based match would never find the archived
+                    // row and updateOrCreate() below would silently create a
+                    // genuine duplicate Customer instead. Only checked when
+                    // there's no already-active customer for this contact id
+                    // (the common case), to avoid an extra query per row on
+                    // every sync.
+                    $hasActiveMatch = Customer::where('tenant_id', $tenantId)
+                        ->where('ghl_contact_id', $contact['id'])
+                        ->exists();
+
+                    if (! $hasActiveMatch) {
+                        $archive = $email ? app(CustomerService::class)->findArchiveByEmail($tenantId, $email) : null;
+
+                        if ($archive) {
+                            app(CustomerService::class)->restoreFromArchive($archive, $contact['id']);
+                        } else {
+                            // Legacy fallback — a row archived before this
+                            // feature existed (no archive snapshot) or a
+                            // contact with no email (can't be matched by
+                            // email at all) is still restorable the old way,
+                            // as long as its ghl_contact_id happens to match.
+                            $trashedMatch = Customer::onlyTrashed()->where('ghl_contact_id', $contact['id'])->first();
+                            $trashedMatch?->restore();
+                        }
+                    }
 
                     $customer = Customer::updateOrCreate(
                         ['ghl_contact_id' => $contact['id']],
                         [
                             'name' => $name,
-                            'email' => $contact['email'] ?? null,
+                            'email' => $email,
                             'phone' => $contact['phone'] ?? null,
                             'ghl_sync_status' => 'synced',
                             'ghl_last_synced_at' => now(),
@@ -191,7 +241,9 @@ class GhlService
                         // (e.g. staff-added or self-registered via public
                         // booking) just because a later contact sync
                         // happened to touch/update the same row.
-                        $customer->update(['created_by' => 'GHL Sync']);
+                        $customer->update(['created_by' => 'Lead Connector Sync']);
+                    } elseif (! $hasActiveMatch) {
+                        $results['restored']++;
                     } else {
                         $results['updated']++;
                     }
@@ -213,7 +265,65 @@ class GhlService
             usleep(100000);
         } while ($page * $limit < $total && ! empty($contacts));
 
+        if ($fetchComplete) {
+            try {
+                $results['deactivated'] = $this->softDeleteMissingCustomers($tenantId, $seenGhlContactIds);
+            } catch (\Exception $e) {
+                $results['errors']++;
+                $results['error_details'][] = ['error' => 'Customer delete-sync failed: '.$e->getMessage()];
+                Log::error('GHL contact delete-sync failed', ['tenant_id' => $tenantId, 'error' => $e->getMessage()]);
+            }
+        }
+
         return $results;
+    }
+
+    /**
+     * Delete-sync: a Customer previously synced from GHL (ghl_contact_id
+     * set) that no longer appears in GHL's current, *fully*-fetched contact
+     * list is archived via CustomerService::archiveCustomer() — moved into
+     * the customer_archives table and soft-deleted, never hard-deleted.
+     * Customer already uses SoftDeletes, so this is fully reversible
+     * (bulkPullContacts()'s own email-match restore step above undoes it
+     * the moment a same-email contact reappears) and, critically, never
+     * breaks a Booking/RentalTransaction/ProductTransaction foreign key
+     * that still points at the row — a soft delete only hides it from
+     * default queries (e.g. the staff Customers list), it never removes the
+     * row or any data that references it. See archiveCustomer()'s own doc
+     * comment for the full reasoning.
+     *
+     * Deliberately distinct from the staff-initiated
+     * CustomerService::hardDelete() flow (permanent, cancels any upcoming
+     * GHL booking first, requires explicit staff confirmation) — this
+     * automated sync path is intentionally much more conservative: it never
+     * permanently erases anything and never touches GHL itself.
+     *
+     * Guarded on a non-empty $seenGhlContactIds — see
+     * GhlProductSyncService::deactivateMissingCategories()'s doc comment
+     * for why a successful-but-empty fetch must never be trusted as "GHL
+     * has zero contacts now." Only ever runs when $fetchComplete (see
+     * caller) — a contact list that failed partway through pagination must
+     * never be treated as the complete current picture of who GHL still
+     * has.
+     */
+    private function softDeleteMissingCustomers(string $tenantId, array $seenGhlContactIds): int
+    {
+        if (empty($seenGhlContactIds)) {
+            return 0;
+        }
+
+        $stale = Customer::where('tenant_id', $tenantId)
+            ->whereNotNull('ghl_contact_id')
+            ->whereNotIn('ghl_contact_id', $seenGhlContactIds)
+            ->get();
+
+        $customerService = app(CustomerService::class);
+
+        foreach ($stale as $customer) {
+            $customerService->archiveCustomer($customer);
+        }
+
+        return $stale->count();
     }
 
     public function bulkSyncContacts(string $tenantId): array
@@ -360,36 +470,81 @@ class GhlService
     private function handleContactCreated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
+        $email = $contact['email'] ?? null;
+        $tenantId = $this->resolveTenantId();
+
+        // Mirrors bulkPullContacts()'s email-first archive restore — a
+        // webhook-driven "contact created" for a previously-archived
+        // customer's email must restore the original row, not create a
+        // duplicate, exactly like the bulk pull. See
+        // CustomerService::findArchiveByEmail()'s doc comment for why this
+        // is matched by email rather than ghl_contact_id.
+        $hasActiveMatch = Customer::where('tenant_id', $tenantId)
+            ->where('ghl_contact_id', $contact['id'])
+            ->exists();
+
+        if (! $hasActiveMatch) {
+            $archive = $email ? app(CustomerService::class)->findArchiveByEmail($tenantId, $email) : null;
+
+            if ($archive) {
+                app(CustomerService::class)->restoreFromArchive($archive, $contact['id']);
+            } else {
+                $trashedMatch = Customer::onlyTrashed()->where('ghl_contact_id', $contact['id'])->first();
+                $trashedMatch?->restore();
+            }
+        }
 
         $customer = Customer::updateOrCreate(
             ['ghl_contact_id' => $contact['id']],
             [
                 'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
-                'email' => $contact['email'] ?? null,
+                'email' => $email,
                 'phone' => $contact['phone'] ?? null,
                 'ghl_sync_status' => 'synced',
                 'ghl_last_synced_at' => now(),
-                'tenant_id' => $this->resolveTenantId(),
+                'tenant_id' => $tenantId,
             ]
         );
 
         // Only on genuine creation — see bulkPullContacts()'s identical guard.
         if ($customer->wasRecentlyCreated) {
-            $customer->update(['created_by' => 'GHL Sync']);
+            $customer->update(['created_by' => 'Lead Connector Sync']);
         }
     }
 
     private function handleContactUpdated(array $payload): void
     {
         $contact = $payload['contact'] ?? $payload;
+        $email = $contact['email'] ?? null;
+        $tenantId = $this->resolveTenantId();
+
+        // Same email-first archive restore as handleContactCreated() above
+        // — GHL can fire contact.updated rather than contact.created for a
+        // contact that was recreated after being deleted, so this needs the
+        // identical restore check, not just handleContactCreated().
+        $hasActiveMatch = Customer::where('tenant_id', $tenantId)
+            ->where('ghl_contact_id', $contact['id'])
+            ->exists();
+
+        if (! $hasActiveMatch) {
+            $archive = $email ? app(CustomerService::class)->findArchiveByEmail($tenantId, $email) : null;
+
+            if ($archive) {
+                app(CustomerService::class)->restoreFromArchive($archive, $contact['id']);
+            } else {
+                $trashedMatch = Customer::onlyTrashed()->where('ghl_contact_id', $contact['id'])->first();
+                $trashedMatch?->restore();
+            }
+        }
 
         Customer::where('ghl_contact_id', $contact['id'])
             ->update([
                 'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
-                'email' => $contact['email'] ?? null,
+                'email' => $email,
                 'phone' => $contact['phone'] ?? null,
                 'ghl_sync_status' => 'synced',
                 'ghl_last_synced_at' => now(),
+                'tenant_id' => $tenantId,
             ]);
     }
 

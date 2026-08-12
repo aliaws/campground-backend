@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\ServiceCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -11,7 +12,7 @@ use Illuminate\Support\Str;
 
 class ProductService
 {
-    private const EAGER = ['categories', 'rentals', 'defaultRental', 'amenities', 'features'];
+    private const EAGER = ['categories', 'rentals', 'rentals.serviceCategory', 'defaultRental', 'defaultRental.serviceCategory', 'amenities', 'features'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -180,7 +181,7 @@ class ProductService
         $query = Product::byTenant($filters['tenant_id'])
             ->whereNotNull('product_rental_id')
             ->where('status', 'active')
-            ->with(['rentals', 'defaultRental', 'categories', 'amenities', 'features']);
+            ->with(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {
@@ -191,6 +192,26 @@ class ProductService
 
         if (! empty($filters['category_id'])) {
             $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
+        }
+
+        // service_category_id is deliberately a distinct param from
+        // category_id above — that one filters the many-to-many Product
+        // Category taxonomy (product_categories pivot); this filters the
+        // Services-module ServiceCategory a rental belongs to. The filter
+        // value is the local ServiceCategory's own id (matching how
+        // category_id above is Category's id, not engage_collection_id),
+        // but product_rentals.service_category_id stores the *raw GHL* id —
+        // resolve local id -> ghl id first, same indirection
+        // ProductRental::serviceCategory() itself does for a single row.
+        if (! empty($filters['service_category_id'])) {
+            $ghlCategoryId = ServiceCategory::where('tenant_id', $filters['tenant_id'])
+                ->where('id', $filters['service_category_id'])
+                ->value('ghl_category_id');
+
+            // An unmatched/local-only category (no ghl_category_id yet) has
+            // nothing to match against on product_rentals — force an empty
+            // result rather than silently ignoring the filter.
+            $query->whereHas('rentals', fn (Builder $q) => $q->where('service_category_id', $ghlCategoryId ?? '__none__'));
         }
 
         $services = $query->get();

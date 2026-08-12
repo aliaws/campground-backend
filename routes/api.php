@@ -13,10 +13,12 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
+use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
 use App\Http\Controllers\Api\V1\RentalTransactionController;
 use App\Http\Controllers\Api\V1\ReportController;
+use App\Http\Controllers\Api\V1\ServiceCategoryController;
 use App\Http\Controllers\Api\V1\ServiceController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\SiteMapController;
@@ -46,6 +48,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/services/variant/{id}', [PublicServiceController::class, 'variant']);
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
             Route::get('/categories', [PublicCategoryController::class, 'index']);
+            Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
 
@@ -113,6 +116,11 @@ Route::prefix('v1')->group(function () {
         // Customers
         Route::get('/customers', [CustomerController::class, 'index']);
         Route::post('/customers', [CustomerController::class, 'store']);
+        // Must be registered before GET/POST /customers/{customer}* below —
+        // otherwise "archived" would be swallowed by the {customer} wildcard
+        // binding (same routing-order gotcha as /products/lookup-by-sku).
+        Route::get('/customers/archived', [CustomerController::class, 'archived']);
+        Route::post('/customers/archived/{archive}/restore', [CustomerController::class, 'restoreArchived']);
         Route::get('/customers/{customer}', [CustomerController::class, 'show']);
         Route::put('/customers/{customer}', [CustomerController::class, 'update']);
         Route::get('/customers/{customer}/deletion-preview', [CustomerController::class, 'deletionPreview']);
@@ -158,6 +166,15 @@ Route::prefix('v1')->group(function () {
         Route::post('/categories/{category}/sync-ghl', [CategoryController::class, 'syncToGhl']);
         Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
         Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
+
+        // Service Categories (Services module — scoped to product_rentals, mirrors Categories above)
+        Route::get('/service-categories', [ServiceCategoryController::class, 'index']);
+        Route::post('/service-categories', [ServiceCategoryController::class, 'store']);
+        Route::get('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'show']);
+        Route::put('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'update']);
+        Route::delete('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'destroy']);
+        Route::post('/service-categories/pull-ghl', [ServiceCategoryController::class, 'pullFromGhl']);
+        Route::post('/service-categories/{serviceCategory}/sync-ghl', [ServiceCategoryController::class, 'syncToGhl']);
 
         // Amenities (Services module — assigned to service listings via service_amenities)
         Route::get('/amenities', [AmenityController::class, 'index']);

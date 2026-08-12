@@ -88,7 +88,7 @@ class SettingsController extends Controller
 
     public function handleCallback(Request $request): mixed
     {
-        \Illuminate\Support\Facades\Log::info('GHL OAuth callback received', [
+        \Illuminate\Support\Facades\Log::info('Lead Connector OAuth callback received', [
             'all_params' => $request->all(),
             'query' => $request->query(),
         ]);
@@ -97,7 +97,7 @@ class SettingsController extends Controller
         $tenantId = $request->input('state');
 
         if (!$code || !$tenantId) {
-            \Illuminate\Support\Facades\Log::error('GHL OAuth callback missing params', [
+            \Illuminate\Support\Facades\Log::error('Lead Connector OAuth callback missing params', [
                 'code' => $code,
                 'state' => $tenantId,
                 'url' => $request->fullUrl(),
@@ -276,15 +276,15 @@ class SettingsController extends Controller
                 'success' => $log->status !== 'failed',
                 'data' => new GhlSyncLogResource($log),
                 'message' => match ($log->status) {
-                    'success' => 'GHL data pulled successfully.',
-                    'partial' => 'GHL data pulled with some errors — see details.',
-                    default => 'GHL data pull failed.',
+                    'success' => 'Lead Connector data pulled successfully.',
+                    'partial' => 'Lead Connector data pulled with some errors — see details.',
+                    default => 'Lead Connector data pull failed.',
                 },
             ], $log->status === 'failed' ? 422 : 200);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'GHL data pull failed: '.$e->getMessage(),
+                'message' => 'Lead Connector data pull failed: '.$e->getMessage(),
             ], 422);
         }
     }

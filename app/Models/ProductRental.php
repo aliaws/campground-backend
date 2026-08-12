@@ -48,6 +48,12 @@ class ProductRental extends Model
         return $this->belongsTo(Product::class);
     }
 
+    /** Keyed on the raw GHL category id stored here, not a local FK column — see ServiceCategory::rentals(). */
+    public function serviceCategory(): BelongsTo
+    {
+        return $this->belongsTo(ServiceCategory::class, 'service_category_id', 'ghl_category_id');
+    }
+
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);

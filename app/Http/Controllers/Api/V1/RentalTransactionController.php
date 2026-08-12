@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\RentalTransactionResource;
 use App\Models\RentalTransaction;
@@ -18,6 +19,8 @@ use Illuminate\Http\Request;
  */
 class RentalTransactionController extends Controller
 {
+    use FormatsPaginatedResponse;
+
     public function index(Request $request): JsonResponse
     {
         $perPage = (int) $request->input('per_page', 50);
@@ -29,7 +32,7 @@ class RentalTransactionController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => RentalTransactionResource::collection($transactions),
+            'data' => $this->paginatedData($transactions, RentalTransactionResource::class),
             'message' => 'Rental transactions retrieved.',
         ]);
     }

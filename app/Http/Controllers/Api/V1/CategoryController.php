@@ -94,7 +94,7 @@ class CategoryController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => new CategoryResource($category),
-                'message' => 'Category synced to GHL.',
+                'message' => 'Category synced to Lead Connector.',
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -122,7 +122,7 @@ class CategoryController extends Controller
         return response()->json([
             'success' => true,
             'data' => $results,
-            'message' => "Pulled {$results['pulled']} categories from GHL ({$results['created']} new), {$results['errors']} errors.",
+            'message' => "Pulled {$results['pulled']} categories from Lead Connector ({$results['created']} new), {$results['errors']} errors.",
         ]);
     }
 }
