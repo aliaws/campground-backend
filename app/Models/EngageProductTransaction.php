@@ -68,7 +68,7 @@ class EngageProductTransaction extends Model
 
     public function items(): HasMany
     {
-        return $this->hasMany(EngageProductTransactionItem::class);
+        return $this->hasMany(EngageProductTransactionItem::class, 'product_transaction_id');
     }
 
     public function isPaid(): bool

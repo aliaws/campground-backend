@@ -39,7 +39,7 @@ class EngageCustomer extends Model
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(EngageBooking::class);
+        return $this->hasMany(EngageBooking::class, 'customer_id');
     }
 
     /**
@@ -50,7 +50,7 @@ class EngageCustomer extends Model
      */
     public function locationLinks(): HasMany
     {
-        return $this->hasMany(EngageCustomerLocation::class);
+        return $this->hasMany(EngageCustomerLocation::class, 'customer_id');
     }
 
     /**

@@ -83,25 +83,25 @@ class EngageProduct extends Model
 
     public function categories(): BelongsToMany
     {
-        return $this->belongsToMany(EngageCategory::class, 'engage_product_categories');
+        return $this->belongsToMany(EngageCategory::class, 'engage_product_categories', 'product_id', 'category_id');
     }
 
     /** Amenities assigned to this service listing (Services module concept — see product_rental_amenities). */
     public function amenities(): BelongsToMany
     {
-        return $this->belongsToMany(Amenity::class, 'product_rental_amenities');
+        return $this->belongsToMany(Amenity::class, 'product_rental_amenities', 'product_id', 'amenity_id');
     }
 
     /** Features assigned to this service listing (Services module concept — see product_rental_features). */
     public function features(): BelongsToMany
     {
-        return $this->belongsToMany(Feature::class, 'product_rental_features');
+        return $this->belongsToMany(Feature::class, 'product_rental_features', 'product_id', 'feature_id');
     }
 
     /** All rental variants of this listing (the default/base row included). */
     public function rentals(): HasMany
     {
-        return $this->hasMany(EngageProductRental::class);
+        return $this->hasMany(EngageProductRental::class, 'product_id');
     }
 
     /** The default (base listing) rental variant — FK may be stale until next pull. */
@@ -130,7 +130,7 @@ class EngageProduct extends Model
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(EngageBooking::class);
+        return $this->hasMany(EngageBooking::class, 'product_id');
     }
 
     public function transactionItems(): HasMany

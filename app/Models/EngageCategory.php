@@ -34,6 +34,6 @@ class EngageCategory extends Model
 
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany(EngageProduct::class, 'engage_product_categories');
+        return $this->belongsToMany(EngageProduct::class, 'engage_product_categories', 'category_id', 'product_id');
     }
 }
