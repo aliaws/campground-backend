@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-class Category extends Model
+class EngageCategory extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_categories';
 
     protected $fillable = [
         'name',
@@ -32,6 +34,6 @@ class Category extends Model
 
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany(Product::class, 'product_categories');
+        return $this->belongsToMany(EngageProduct::class, 'engage_product_categories', 'category_id', 'product_id');
     }
 }

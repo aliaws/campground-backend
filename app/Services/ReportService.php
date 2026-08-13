@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
-use App\Models\Booking;
-use App\Models\ProductRental;
-use App\Models\ProductTransaction;
-use App\Models\RentalTransaction;
+use App\Models\EngageBooking;
+use App\Models\EngageProductRental;
+use App\Models\EngageProductTransaction;
+use App\Models\EngageRentalTransaction;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 
@@ -41,12 +41,12 @@ class ReportService
      */
     private function todayRevenue(string $locationId, Carbon $today): float
     {
-        $rental = (float) RentalTransaction::where('engage_organization_location_id', $locationId)
+        $rental = (float) EngageRentalTransaction::where('engage_organization_location_id', $locationId)
             ->where('status', 'paid')
             ->whereDate('paid_at', $today)
             ->sum('amount');
 
-        $product = (float) ProductTransaction::where('engage_organization_location_id', $locationId)
+        $product = (float) EngageProductTransaction::where('engage_organization_location_id', $locationId)
             ->where('status', 'paid')
             ->whereDate('paid_at', $today)
             ->sum('amount');
@@ -57,7 +57,7 @@ class ReportService
     /** Confirmed & paid bookings active today, as a % of the location's active rental units. */
     private function occupancyPct(string $locationId, Carbon $today): int
     {
-        $totalUnits = ProductRental::whereHas(
+        $totalUnits = EngageProductRental::whereHas(
             'product',
             fn ($q) => $q->where('engage_organization_location_id', $locationId)
         )
@@ -68,7 +68,7 @@ class ReportService
             return 0;
         }
 
-        $activeToday = Booking::where('engage_organization_location_id', $locationId)
+        $activeToday = EngageBooking::where('engage_organization_location_id', $locationId)
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', '<=', $today)
             ->whereDate('check_out_date', '>=', $today)
@@ -80,7 +80,7 @@ class ReportService
 
     private function checkinsToday(string $locationId, Carbon $today): int
     {
-        return Booking::where('engage_organization_location_id', $locationId)
+        return EngageBooking::where('engage_organization_location_id', $locationId)
             ->where('status', 'confirmed')
             ->whereDate('check_in_date', $today)
             ->whereHas('transactions', fn ($q) => $q->where('status', 'paid'))
@@ -90,7 +90,7 @@ class ReportService
     /** Average nights across all non-cancelled bookings (reflects real demand, not just paid ones). */
     private function avgStayNights(string $locationId): float
     {
-        $bookings = Booking::where('engage_organization_location_id', $locationId)
+        $bookings = EngageBooking::where('engage_organization_location_id', $locationId)
             ->where('status', '!=', 'cancelled')
             ->get(['check_in_date', 'check_out_date']);
 
@@ -99,7 +99,7 @@ class ReportService
         }
 
         $nights = $bookings->map(
-            fn (Booking $b) => max($b->check_in_date->diffInDays($b->check_out_date), 1)
+            fn (EngageBooking $b) => max($b->check_in_date->diffInDays($b->check_out_date), 1)
         );
 
         return round($nights->avg(), 1);
@@ -108,7 +108,7 @@ class ReportService
     /** Bookings created per weekday (Mon-Sun) within the current week. */
     private function bookingsThisWeek(string $locationId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
     {
-        $rows = Booking::where('engage_organization_location_id', $locationId)
+        $rows = EngageBooking::where('engage_organization_location_id', $locationId)
             ->whereBetween('created_at', [$weekStart, $weekEnd])
             ->get(['created_at']);
 
@@ -136,7 +136,7 @@ class ReportService
      */
     private function revenueByCategory(string $locationId, CarbonInterface $weekStart, CarbonInterface $weekEnd): array
     {
-        $rows = RentalTransaction::where('engage_organization_location_id', $locationId)
+        $rows = EngageRentalTransaction::where('engage_organization_location_id', $locationId)
             ->where('status', 'paid')
             ->whereBetween('paid_at', [$weekStart, $weekEnd])
             ->with('product.categories')

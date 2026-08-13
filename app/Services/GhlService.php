@@ -3,11 +3,11 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
-use App\Models\Booking;
-use App\Models\Customer;
-use App\Models\CustomerLocation;
-use App\Models\ProductTransaction;
-use App\Models\RentalTransaction;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
+use App\Models\EngageCustomerLocation;
+use App\Models\EngageProductTransaction;
+use App\Models\EngageRentalTransaction;
 use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
 
@@ -17,7 +17,7 @@ class GhlService
         private GhlClient $client,
     ) {}
 
-    public function syncContactToGhl(Customer $customer, ?string $orgLocationId = null): ?string
+    public function syncContactToGhl(EngageCustomer $customer, ?string $orgLocationId = null): ?string
     {
         $orgLocationId ??= OrganizationLocationResolver::resolveDefaultLocationId();
 
@@ -131,7 +131,7 @@ class GhlService
         }
     }
 
-    public function updateContactInGhl(Customer $customer): void
+    public function updateContactInGhl(EngageCustomer $customer): void
     {
         $this->syncContactToGhl($customer);
     }
@@ -215,7 +215,7 @@ class GhlService
                     // re-attaches the customer's CustomerLocation row for
                     // this location with this ghl_contact_id, so the lookup
                     // right below will find it.
-                    $hasActiveMatch = CustomerLocation::where('engage_organization_location_id', $locationId)
+                    $hasActiveMatch = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
                         ->where('ghl_contact_id', $contact['id'])
                         ->exists();
                     $restored = false;
@@ -234,12 +234,12 @@ class GhlService
                             // ever syncing, or a link that was lost outside
                             // the normal archive/restore path. customers.email
                             // is globally unique, so falling through to
-                            // Customer::create() below would otherwise throw
+                            // EngageCustomer::create() below would otherwise throw
                             // a duplicate-key error instead of silently
                             // creating a duplicate — re-linking here is what
                             // makes the sync self-healing rather than just
                             // failing loudly on every subsequent run.
-                            $existingLink = CustomerLocation::where('engage_organization_location_id', $locationId)
+                            $existingLink = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
                                 ->whereHas('customer', function ($q) use ($email) {
                                     $q->whereRaw('LOWER(email) = ?', [strtolower($email)]);
                                 })
@@ -255,7 +255,7 @@ class GhlService
                                 // a pre-location-model legacy row) — attach
                                 // this location to it instead of colliding
                                 // with the global unique(email) constraint.
-                                $existingCustomer = Customer::withTrashed()
+                                $existingCustomer = EngageCustomer::withTrashed()
                                     ->whereRaw('LOWER(email) = ?', [strtolower($email)])
                                     ->first();
 
@@ -270,10 +270,10 @@ class GhlService
                         }
                     }
 
-                    $link = CustomerLocation::where('engage_organization_location_id', $locationId)
+                    $link = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
                         ->where('ghl_contact_id', $contact['id'])
                         ->first();
-                    $customer = $link ? Customer::find($link->customer_id) : null;
+                    $customer = $link ? EngageCustomer::find($link->customer_id) : null;
 
                     if ($customer) {
                         $customer->update([
@@ -290,7 +290,7 @@ class GhlService
                             $results['updated']++;
                         }
                     } else {
-                        $customer = Customer::create([
+                        $customer = EngageCustomer::create([
                             'name' => $name,
                             'email' => $email,
                             'phone' => $contact['phone'] ?? null,
@@ -366,7 +366,7 @@ class GhlService
             return 0;
         }
 
-        $staleLinks = CustomerLocation::where('engage_organization_location_id', $locationId)
+        $staleLinks = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
             ->whereNotNull('ghl_contact_id')
             ->whereNotIn('ghl_contact_id', $seenGhlContactIds)
             ->get();
@@ -374,7 +374,7 @@ class GhlService
         $customerService = app(CustomerService::class);
 
         foreach ($staleLinks as $link) {
-            $customer = Customer::find($link->customer_id);
+            $customer = EngageCustomer::find($link->customer_id);
             if ($customer) {
                 $customerService->archiveCustomer($customer, $locationId);
             }
@@ -387,7 +387,7 @@ class GhlService
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $customers = Customer::whereHas(
+        $customers = EngageCustomer::whereHas(
             'locationLinks',
             fn ($q) => $q->where('engage_organization_location_id', $locationId)
         )->get();
@@ -412,7 +412,7 @@ class GhlService
     }
 
     /** Delete the linked GHL contact. Non-blocking: failures are logged, never thrown, so the local delete always proceeds. */
-    public function deleteContactFromGhl(Customer $customer, ?string $locationId = null): void
+    public function deleteContactFromGhl(EngageCustomer $customer, ?string $locationId = null): void
     {
         $ghlContactId = $customer->ghlContactIdFor($locationId);
 
@@ -431,7 +431,7 @@ class GhlService
         }
     }
 
-    public function createOpportunity(Booking $booking): ?string
+    public function createOpportunity(EngageBooking $booking): ?string
     {
         $customer = $booking->customer;
 
@@ -469,7 +469,7 @@ class GhlService
         }
     }
 
-    public function updateOpportunityStage(Booking $booking, string $stage): void
+    public function updateOpportunityStage(EngageBooking $booking, string $stage): void
     {
         if (! $booking->ghl_opportunity_id) {
             return;
@@ -544,7 +544,7 @@ class GhlService
         // duplicate, exactly like the bulk pull. See
         // CustomerService::findArchiveByEmail()'s doc comment for why this
         // is matched by email rather than ghl_contact_id.
-        $hasActiveMatch = CustomerLocation::where('engage_organization_location_id', $locationId)
+        $hasActiveMatch = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
             ->where('ghl_contact_id', $contact['id'])
             ->exists();
 
@@ -556,7 +556,7 @@ class GhlService
             }
         }
 
-        $link = CustomerLocation::where('engage_organization_location_id', $locationId)
+        $link = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
             ->where('ghl_contact_id', $contact['id'])
             ->first();
         $fields = [
@@ -568,13 +568,13 @@ class GhlService
         ];
 
         if ($link) {
-            Customer::where('id', $link->customer_id)->update($fields);
+            EngageCustomer::where('id', $link->customer_id)->update($fields);
 
             return;
         }
 
         // Only on genuine creation — see bulkPullContacts()'s identical guard.
-        $customer = Customer::create($fields + ['created_by' => 'Lead Connector Sync']);
+        $customer = EngageCustomer::create($fields + ['created_by' => 'Lead Connector Sync']);
         $customer->attachLocation($locationId, $contact['id']);
     }
 
@@ -588,7 +588,7 @@ class GhlService
         // — GHL can fire contact.updated rather than contact.created for a
         // contact that was recreated after being deleted, so this needs the
         // identical restore check, not just handleContactCreated().
-        $hasActiveMatch = CustomerLocation::where('engage_organization_location_id', $locationId)
+        $hasActiveMatch = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
             ->where('ghl_contact_id', $contact['id'])
             ->exists();
 
@@ -600,7 +600,7 @@ class GhlService
             }
         }
 
-        $link = CustomerLocation::where('engage_organization_location_id', $locationId)
+        $link = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
             ->where('ghl_contact_id', $contact['id'])
             ->first();
 
@@ -608,7 +608,7 @@ class GhlService
             return;
         }
 
-        Customer::where('id', $link->customer_id)->update([
+        EngageCustomer::where('id', $link->customer_id)->update([
             'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
             'email' => $email,
             'phone' => $contact['phone'] ?? null,
@@ -637,10 +637,10 @@ class GhlService
         $contactId = $opportunity['contactId'] ?? null;
 
         if ($contactId) {
-            $link = CustomerLocation::where('ghl_contact_id', $contactId)->first();
-            $customer = $link ? Customer::find($link->customer_id) : null;
+            $link = EngageCustomerLocation::where('ghl_contact_id', $contactId)->first();
+            $customer = $link ? EngageCustomer::find($link->customer_id) : null;
             if ($customer) {
-                Booking::where('customer_id', $customer->id)
+                EngageBooking::where('customer_id', $customer->id)
                     ->whereNull('ghl_opportunity_id')
                     ->latest()
                     ->first()
@@ -661,7 +661,7 @@ class GhlService
                 'lost' => 'cancelled',
             ];
 
-            $booking = Booking::where('ghl_opportunity_id', $opportunity['id'])->first();
+            $booking = EngageBooking::where('ghl_opportunity_id', $opportunity['id'])->first();
             if ($booking && $status && isset($stageMap[$status])) {
                 $booking->update(['status' => $stageMap[$status]]);
             }
@@ -688,7 +688,7 @@ class GhlService
             return;
         }
 
-        $booking = Booking::where('ghl_invoice_id', $ghlInvoiceId)->first();
+        $booking = EngageBooking::where('ghl_invoice_id', $ghlInvoiceId)->first();
 
         if ($booking) {
             $this->markInvoiceStatus($booking, $status);
@@ -700,14 +700,14 @@ class GhlService
         // (GhlBookingService::createProductSaleInvoice()). Only these ever
         // have their own ghl_invoice_id with no booking_id; a booking-linked
         // transaction's invoice always belongs to the booking instead.
-        $productTransaction = ProductTransaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
+        $productTransaction = EngageProductTransaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
 
         if ($productTransaction) {
             $this->markProductTransactionInvoiceStatus($productTransaction, $status);
         }
     }
 
-    private function markInvoiceStatus(Booking $booking, string $status): void
+    private function markInvoiceStatus(EngageBooking $booking, string $status): void
     {
         $booking->update(['ghl_invoice_status' => $status]);
 
@@ -717,7 +717,7 @@ class GhlService
             $rentalTransactionService = app(RentalTransactionService::class);
 
             $booking->transactions()->whereNotIn('status', ['paid'])->get()->each(
-                fn (RentalTransaction $rentalTransaction) => $rentalTransactionService->syncPaidStatusFromGhl($rentalTransaction)
+                fn (EngageRentalTransaction $rentalTransaction) => $rentalTransactionService->syncPaidStatusFromGhl($rentalTransaction)
             );
 
             // Confirm for both customer online (`requested`) and staff cash
@@ -738,7 +738,7 @@ class GhlService
     }
 
     /** ProductTransaction-typed sibling of markInvoiceStatus() — a booking-less "card" product sale has no booking/status to auto-confirm, just its own status/ghl_invoice_status to flip. */
-    private function markProductTransactionInvoiceStatus(ProductTransaction $productTransaction, string $status): void
+    private function markProductTransactionInvoiceStatus(EngageProductTransaction $productTransaction, string $status): void
     {
         $productTransaction->update(['ghl_invoice_status' => $status]);
 
@@ -756,7 +756,7 @@ class GhlService
      * deployment, which is the common case in local dev). Cheap no-op once
      * already paid or when there's no invoice to check.
      */
-    public function reconcileInvoiceStatus(Booking $booking): Booking
+    public function reconcileInvoiceStatus(EngageBooking $booking): EngageBooking
     {
         $booking->loadMissing('transactions');
 
@@ -767,7 +767,7 @@ class GhlService
         // requested forever. Also covers transactions marked paid without
         // ghl_invoice_status being updated yet.
         $locallyPaid = $booking->ghl_invoice_status === 'paid'
-            || $booking->transactions->contains(fn (RentalTransaction $t) => $t->isPaid());
+            || $booking->transactions->contains(fn (EngageRentalTransaction $t) => $t->isPaid());
 
         if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
             try {
@@ -823,7 +823,7 @@ class GhlService
      * has its own real GHL calendar-booking side effects per booking and
      * is uncommon enough that batching it isn't worth the added risk.
      *
-     * @param  iterable<Booking>  $bookings
+     * @param  iterable<EngageBooking>  $bookings
      * @return array<int, Booking> reconciled bookings, same order as input
      */
     public function reconcileInvoiceStatusBatch(iterable $bookings): array
@@ -836,7 +836,7 @@ class GhlService
             $booking->loadMissing('transactions');
 
             $locallyPaid = $booking->ghl_invoice_status === 'paid'
-                || $booking->transactions->contains(fn (RentalTransaction $t) => $t->isPaid());
+                || $booking->transactions->contains(fn (EngageRentalTransaction $t) => $t->isPaid());
 
             if ($locallyPaid && in_array($booking->status, ['requested', 'pending'], true)) {
                 try {
@@ -931,7 +931,7 @@ class GhlService
      * invoice. Renamed from reconcileTransactionInvoiceStatus() as part of
      * the 2026-08-10 transactions refactor.
      */
-    public function reconcileProductTransactionInvoiceStatus(ProductTransaction $productTransaction): ProductTransaction
+    public function reconcileProductTransactionInvoiceStatus(EngageProductTransaction $productTransaction): EngageProductTransaction
     {
         if (! $productTransaction->ghl_invoice_id || $productTransaction->isPaid()) {
             return $productTransaction;

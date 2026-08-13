@@ -9,7 +9,7 @@ use App\Http\Requests\StoreBookingRequest;
 use App\Http\Requests\UpdateBookingCheckInOutRequest;
 use App\Http\Requests\UpdateBookingStatusRequest;
 use App\Http\Resources\BookingResource;
-use App\Models\Booking;
+use App\Models\EngageBooking;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
@@ -55,7 +55,7 @@ class BookingController extends Controller
         // same instance untouched, so no extra queries are added for the
         // rest of the page.
         $reconciled = $this->ghlService->reconcileInvoiceStatusBatch($bookings->getCollection());
-        $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
+        $bookings->setCollection(collect($reconciled)->map(function (EngageBooking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
                 : $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
@@ -177,7 +177,7 @@ class BookingController extends Controller
         ], 201);
     }
 
-    public function show(Request $request, Booking $booking): JsonResponse
+    public function show(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
@@ -197,7 +197,7 @@ class BookingController extends Controller
     }
 
     /** Marks a cash "pay later" reservation as paid; self-heals a missing GHL calendar booking first (see BookingService::payCash()). */
-    public function payCash(Request $request, Booking $booking): JsonResponse
+    public function payCash(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
@@ -215,7 +215,7 @@ class BookingController extends Controller
         ]);
     }
 
-    public function updateStatus(UpdateBookingStatusRequest $request, Booking $booking): JsonResponse
+    public function updateStatus(UpdateBookingStatusRequest $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
@@ -243,7 +243,7 @@ class BookingController extends Controller
         ]);
     }
 
-    public function updateCheckInOut(UpdateBookingCheckInOutRequest $request, Booking $booking): JsonResponse
+    public function updateCheckInOut(UpdateBookingCheckInOutRequest $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
@@ -271,7 +271,7 @@ class BookingController extends Controller
      * own invoice page requires a logged-in GHL session and 403s otherwise, so
      * we don't link out to it.
      */
-    public function invoice(Request $request, Booking $booking): JsonResponse
+    public function invoice(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
@@ -287,7 +287,7 @@ class BookingController extends Controller
     }
 
     /** Staff confirms a customer-submitted request: syncs the contact to GHL, creates the booking/invoice, sends the payment email. */
-    public function confirm(Request $request, Booking $booking): JsonResponse
+    public function confirm(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);

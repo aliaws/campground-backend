@@ -10,9 +10,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Product extends Model
+class EngageProduct extends Model
 {
     use HasFactory, HasUlids, SoftDeletes;
+
+    protected $table = 'engage_products';
 
     protected $fillable = [
         'name',
@@ -81,41 +83,41 @@ class Product extends Model
 
     public function categories(): BelongsToMany
     {
-        return $this->belongsToMany(Category::class, 'product_categories');
+        return $this->belongsToMany(EngageCategory::class, 'engage_product_categories', 'product_id', 'category_id');
     }
 
-    /** Amenities assigned to this service listing (Services module concept — see service_amenities). */
+    /** Amenities assigned to this service listing (Services module concept — see product_rental_amenities). */
     public function amenities(): BelongsToMany
     {
-        return $this->belongsToMany(Amenity::class, 'service_amenities');
+        return $this->belongsToMany(Amenity::class, 'product_rental_amenities', 'product_id', 'amenity_id');
     }
 
-    /** Features assigned to this service listing (Services module concept — see service_features). */
+    /** Features assigned to this service listing (Services module concept — see product_rental_features). */
     public function features(): BelongsToMany
     {
-        return $this->belongsToMany(Feature::class, 'service_features');
+        return $this->belongsToMany(Feature::class, 'product_rental_features', 'product_id', 'feature_id');
     }
 
     /** All rental variants of this listing (the default/base row included). */
     public function rentals(): HasMany
     {
-        return $this->hasMany(ProductRental::class);
+        return $this->hasMany(EngageProductRental::class, 'product_id');
     }
 
     /** The default (base listing) rental variant — FK may be stale until next pull. */
     public function defaultRental(): BelongsTo
     {
-        return $this->belongsTo(ProductRental::class, 'product_rental_id');
+        return $this->belongsTo(EngageProductRental::class, 'product_rental_id');
     }
 
     /**
      * GHL base listing row: calendar service where variantId was null
      * (ghl_id === service_id on the local row).
      */
-    public function resolveBaseRental(): ?ProductRental
+    public function resolveBaseRental(): ?EngageProductRental
     {
         if ($this->relationLoaded('rentals')) {
-            $base = $this->rentals->first(fn (ProductRental $r) => $r->isBaseListing());
+            $base = $this->rentals->first(fn (EngageProductRental $r) => $r->isBaseListing());
             if ($base) {
                 return $base;
             }
@@ -128,7 +130,7 @@ class Product extends Model
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(Booking::class);
+        return $this->hasMany(EngageBooking::class, 'product_id');
     }
 
     public function transactionItems(): HasMany

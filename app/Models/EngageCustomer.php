@@ -3,7 +3,7 @@
 namespace App\Models;
 
 use App\Services\OrganizationLocationResolver;
-use Database\Factories\CustomerFactory;
+use Database\Factories\EngageCustomerFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,10 +12,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Customer extends Model
+class EngageCustomer extends Model
 {
-    /** @use HasFactory<CustomerFactory> */
+    /** @use HasFactory<EngageCustomerFactory> */
     use HasFactory, HasUlids, SoftDeletes;
+
+    protected $table = 'engage_customers';
 
     protected $fillable = [
         'name',
@@ -37,18 +39,18 @@ class Customer extends Model
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(Booking::class);
+        return $this->hasMany(EngageBooking::class, 'customer_id');
     }
 
     /**
      * No `transactions()` relation — a customer's transaction history now
-     * spans two independent tables (RentalTransaction/ProductTransaction),
+     * spans two independent tables (EngageRentalTransaction/EngageProductTransaction),
      * which don't collapse into one HasMany. CustomerService::hardDelete()
      * (the only place this used to be called) queries both directly.
      */
     public function locationLinks(): HasMany
     {
-        return $this->hasMany(CustomerLocation::class);
+        return $this->hasMany(EngageCustomerLocation::class, 'customer_id');
     }
 
     /**
@@ -71,7 +73,7 @@ class Customer extends Model
     {
         return $this->belongsToMany(
             EngageOrganizationLocation::class,
-            'customers_locations',
+            'engage_customers_locations',
             'customer_id',
             'engage_organization_location_id'
         )->withPivot(['id', 'ghl_contact_id'])->withTimestamps();
@@ -94,7 +96,7 @@ class Customer extends Model
         return $link?->ghl_contact_id;
     }
 
-    public function setGhlContactIdFor(string $locationId, ?string $ghlContactId): CustomerLocation
+    public function setGhlContactIdFor(string $locationId, ?string $ghlContactId): EngageCustomerLocation
     {
         $link = $this->locationLinks()->firstOrNew([
             'engage_organization_location_id' => $locationId,
@@ -106,7 +108,7 @@ class Customer extends Model
         return $link;
     }
 
-    public function attachLocation(string $locationId, ?string $ghlContactId = null): CustomerLocation
+    public function attachLocation(string $locationId, ?string $ghlContactId = null): EngageCustomerLocation
     {
         return $this->setGhlContactIdFor($locationId, $ghlContactId);
     }

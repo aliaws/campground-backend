@@ -48,7 +48,7 @@ class EngageOrganizationLocation extends Model
     {
         return $this->belongsToMany(
             User::class,
-            'users_locations',
+            'engage_users_locations',
             'engage_organization_location_id',
             'user_id'
         )->withTimestamps();
@@ -57,8 +57,8 @@ class EngageOrganizationLocation extends Model
     public function customers(): BelongsToMany
     {
         return $this->belongsToMany(
-            Customer::class,
-            'customers_locations',
+            EngageCustomer::class,
+            'engage_customers_locations',
             'engage_organization_location_id',
             'customer_id'
         )->withPivot(['id', 'ghl_contact_id'])->withTimestamps();

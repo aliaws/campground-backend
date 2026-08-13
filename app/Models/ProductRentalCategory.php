@@ -12,9 +12,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * (calendars/service-categories' `_id`), not `engage_collection_id`
  * (products/collections), and relates to rentals rather than products.
  */
-class ServiceCategory extends Model
+class ProductRentalCategory extends Model
 {
     use HasUlids;
+
+    protected $table = 'product_rental_categories';
 
     protected $fillable = [
         'name',
@@ -40,6 +42,6 @@ class ServiceCategory extends Model
      */
     public function rentals(): HasMany
     {
-        return $this->hasMany(ProductRental::class, 'service_category_id', 'ghl_category_id');
+        return $this->hasMany(EngageProductRental::class, 'service_category_id', 'ghl_category_id');
     }
 }

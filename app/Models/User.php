@@ -32,6 +32,8 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
+    protected $table = 'engage_users';
+
     /**
      * The organization/location the *current request's token* is scoped to
      * (see SessionJwt's `loc` claim + JwtGuard::user()) — a real declared
@@ -124,19 +126,19 @@ class User extends Authenticatable
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(EngageCustomer::class);
     }
 
     public function locationLinks(): HasMany
     {
-        return $this->hasMany(UserLocation::class);
+        return $this->hasMany(EngageUserLocation::class);
     }
 
     public function organizationLocations(): BelongsToMany
     {
         return $this->belongsToMany(
             EngageOrganizationLocation::class,
-            'users_locations',
+            'engage_users_locations',
             'user_id',
             'engage_organization_location_id'
         )->withTimestamps();
@@ -177,7 +179,7 @@ class User extends Authenticatable
 
     public function attachLocation(string $locationId): void
     {
-        UserLocation::query()->firstOrCreate([
+        EngageUserLocation::query()->firstOrCreate([
             'user_id' => $this->id,
             'engage_organization_location_id' => $locationId,
         ]);
@@ -239,7 +241,7 @@ class User extends Authenticatable
 
     public function verifications(): HasMany
     {
-        return $this->hasMany(UserVerification::class);
+        return $this->hasMany(EngageUserVerification::class);
     }
 
     /** @return list<string> */

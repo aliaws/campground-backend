@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Concerns\FormatsPaginatedResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\RentalTransactionResource;
-use App\Models\RentalTransaction;
+use App\Models\EngageRentalTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -25,7 +25,7 @@ class RentalTransactionController extends Controller
     {
         $perPage = (int) $request->input('per_page', 50);
 
-        $transactions = RentalTransaction::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+        $transactions = EngageRentalTransaction::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->with(['customer', 'product', 'booking'])
             ->latest('paid_at')
             ->paginate($perPage);

@@ -20,7 +20,7 @@ class StoreStaffRequest extends FormRequest
 
         return [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'unique:users,email'],
+            'email' => ['required', 'email', 'unique:engage_users,email'],
             'password' => ['required', 'confirmed', Password::min(8)],
             'role' => ['required', 'string', Rule::in($allowed ?: User::ASSIGNABLE_STAFF_ROLES)],
         ];

@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCategoryRequest;
 use App\Http\Resources\CategoryResource;
-use App\Models\Category;
+use App\Models\EngageCategory;
 use App\Services\GhlProductSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,7 +19,7 @@ class CategoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $categories = Category::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+        $categories = EngageCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->withCount('products')
             ->orderBy('sort_order')
             ->orderBy('name')
@@ -41,7 +41,7 @@ class CategoryController extends Controller
             $data['slug'] = Str::slug($data['name']);
         }
 
-        $category = Category::create($data);
+        $category = EngageCategory::create($data);
 
         return response()->json([
             'success' => true,
@@ -50,7 +50,7 @@ class CategoryController extends Controller
         ], 201);
     }
 
-    public function show(Category $category): JsonResponse
+    public function show(EngageCategory $category): JsonResponse
     {
         $category->loadCount('products');
 
@@ -61,7 +61,7 @@ class CategoryController extends Controller
         ]);
     }
 
-    public function update(StoreCategoryRequest $request, Category $category): JsonResponse
+    public function update(StoreCategoryRequest $request, EngageCategory $category): JsonResponse
     {
         $data = $request->validated();
 
@@ -78,7 +78,7 @@ class CategoryController extends Controller
         ]);
     }
 
-    public function destroy(Category $category): JsonResponse
+    public function destroy(EngageCategory $category): JsonResponse
     {
         $category->products()->detach();
         $category->delete();
@@ -86,7 +86,7 @@ class CategoryController extends Controller
         return response()->json(['success' => true, 'message' => 'Category deleted.']);
     }
 
-    public function syncToGhl(Category $category): JsonResponse
+    public function syncToGhl(EngageCategory $category): JsonResponse
     {
         try {
             $category = $this->ghlProductSyncService->syncCategoryToGhl($category);

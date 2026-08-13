@@ -20,9 +20,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * `items()` relation (`ProductTransactionItem`) going forward — the
  * legacy `items` JSON column is kept but frozen (no longer written).
  */
-class ProductTransaction extends Model
+class EngageProductTransaction extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_product_transactions';
 
     protected $fillable = [
         'engage_organization_location_id',
@@ -56,17 +58,17 @@ class ProductTransaction extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(EngageCustomer::class);
     }
 
     public function booking(): BelongsTo
     {
-        return $this->belongsTo(Booking::class);
+        return $this->belongsTo(EngageBooking::class);
     }
 
     public function items(): HasMany
     {
-        return $this->hasMany(ProductTransactionItem::class);
+        return $this->hasMany(EngageProductTransactionItem::class, 'product_transaction_id');
     }
 
     public function isPaid(): bool

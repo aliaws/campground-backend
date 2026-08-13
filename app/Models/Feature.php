@@ -26,6 +26,6 @@ class Feature extends Model
     /** Service listings (Product rows with product_rental_id set) this feature is assigned to. */
     public function services(): BelongsToMany
     {
-        return $this->belongsToMany(Product::class, 'service_features');
+        return $this->belongsToMany(EngageProduct::class, 'product_rental_features', 'feature_id', 'product_id');
     }
 }

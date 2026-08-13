@@ -7,9 +7,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Booking extends Model
+class EngageBooking extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_bookings';
 
     protected $fillable = [
         'customer_id',
@@ -62,22 +64,22 @@ class Booking extends Model
         // belongsTo query excludes it and every list showing this relation
         // (Bookings, Rental Transactions) falls back to "Unknown". See
         // "Customer Archive" under Key Business Logic.
-        return $this->belongsTo(Customer::class)->withTrashed();
+        return $this->belongsTo(EngageCustomer::class)->withTrashed();
     }
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(EngageProduct::class);
     }
 
     /** The rental variant that was booked (null on legacy/local-only rows). */
     public function productRental(): BelongsTo
     {
-        return $this->belongsTo(ProductRental::class);
+        return $this->belongsTo(EngageProductRental::class);
     }
 
     /**
-     * Retargeted to RentalTransaction as of the 2026-08-10 transactions
+     * Retargeted to EngageRentalTransaction as of the 2026-08-10 transactions
      * refactor (was Transaction — that generic table/model no longer
      * exists). The relation name itself is deliberately kept as
      * `transactions` rather than renamed to `rentalTransactions` — this is
@@ -87,7 +89,7 @@ class Booking extends Model
      */
     public function transactions(): HasMany
     {
-        return $this->hasMany(RentalTransaction::class);
+        return $this->hasMany(EngageRentalTransaction::class, 'booking_id');
     }
 
     public function isPending(): bool

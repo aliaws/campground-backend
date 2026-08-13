@@ -2,8 +2,8 @@
 
 namespace App\Http\Resources;
 
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
@@ -16,7 +16,7 @@ class ServiceResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        /** @var Product $product */
+        /** @var EngageProduct $product */
         $product = $this->resource;
         $defaultRental = $product->resolveBaseRental();
 
@@ -25,7 +25,7 @@ class ServiceResource extends JsonResource
             : $product->rentals()->where('is_active', true)->get();
 
         $sortedRentals = $rentals->sortBy(
-            fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1
+            fn (EngageProductRental $rental) => $rental->isBaseListing() ? 0 : 1
         )->values();
 
         $variants = $this->buildLocalVariants($product, $sortedRentals);
@@ -78,7 +78,7 @@ class ServiceResource extends JsonResource
     }
 
     /** @param Collection<int, ProductRental> $rentals */
-    private function buildLocalVariants(Product $product, $rentals): array
+    private function buildLocalVariants(EngageProduct $product, $rentals): array
     {
         $listingPrice = $product->defaultVariantPrice();
 
@@ -105,7 +105,7 @@ class ServiceResource extends JsonResource
             ]];
         }
 
-        return $rentals->map(function (ProductRental $rental) use ($product, $listingPrice) {
+        return $rentals->map(function (EngageProductRental $rental) use ($product, $listingPrice) {
             $isDefault = $rental->isBaseListing();
             $variantPrice = $isDefault ? (float) ($listingPrice ?? 0) : 0.0;
 

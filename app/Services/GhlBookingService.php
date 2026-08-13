@@ -4,11 +4,11 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Booking;
-use App\Models\Customer;
-use App\Models\Product;
-use App\Models\ProductRental;
-use App\Models\ProductTransaction;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
+use App\Models\EngageProductTransaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
@@ -44,7 +44,7 @@ class GhlBookingService
      *                                        the calendar slot, so they're never asked to pay twice for the same booking.
      *                                        Implies skipping the email regardless of $skipPaymentEmail.
      */
-    public function createBooking(Booking $booking, bool $skipPaymentEmail = false, ?string $recordPaymentAs = null): ?string
+    public function createBooking(EngageBooking $booking, bool $skipPaymentEmail = false, ?string $recordPaymentAs = null): ?string
     {
         $booking->loadMissing(['customer', 'product', 'productRental']);
         $product = $booking->product;
@@ -148,7 +148,7 @@ class GhlBookingService
      * its hosted payment URL — no calendar booking required. Used to let a customer pay
      * immediately (e.g. via a QR code) without waiting for staff to confirm availability.
      */
-    public function createText2PayInvoice(Booking $booking): void
+    public function createText2PayInvoice(EngageBooking $booking): void
     {
         $booking->loadMissing(['customer', 'product']);
         $product = $booking->product;
@@ -222,7 +222,7 @@ class GhlBookingService
      *
      * @param  array<int, array{name:string, currency:string, amount:float, qty:int, product_id:?string, price_id:?string}>  $lineItems
      */
-    public function createProductSaleInvoice(ProductTransaction $transaction, array $lineItems): void
+    public function createProductSaleInvoice(EngageProductTransaction $transaction, array $lineItems): void
     {
         if (empty($lineItems)) {
             return;
@@ -290,7 +290,7 @@ class GhlBookingService
         }
     }
 
-    private function recordProductSaleInvoicePayment(ProductTransaction $transaction, string $invoiceId, float $amount): void
+    private function recordProductSaleInvoicePayment(EngageProductTransaction $transaction, string $invoiceId, float $amount): void
     {
         $locationId = $this->client->getLocationId();
         if (! $locationId) {
@@ -314,7 +314,7 @@ class GhlBookingService
         }
     }
 
-    private function persistTransactionInvoiceMetadata(ProductTransaction $transaction, array $invoice, ?string $invoiceUrl = null): void
+    private function persistTransactionInvoiceMetadata(EngageProductTransaction $transaction, array $invoice, ?string $invoiceUrl = null): void
     {
         $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
         $number = $invoice['invoiceNumber'] ?? null;
@@ -330,7 +330,7 @@ class GhlBookingService
     /**
      * Email the customer a GHL invoice with online payment link.
      */
-    public function sendInvoicePaymentEmail(Booking $booking): void
+    public function sendInvoicePaymentEmail(EngageBooking $booking): void
     {
         if (! $booking->ghl_invoice_id) {
             return;
@@ -376,7 +376,7 @@ class GhlBookingService
     /**
      * Record a manual POS payment against the GHL invoice for this booking.
      */
-    public function recordInvoicePayment(Booking $booking, float $amount, string $paymentMethod = 'cash'): void
+    public function recordInvoicePayment(EngageBooking $booking, float $amount, string $paymentMethod = 'cash'): void
     {
         if (! $booking->ghl_invoice_id) {
             return;
@@ -418,7 +418,7 @@ class GhlBookingService
         };
     }
 
-    public function updateBookingStatus(Booking $booking, string $localStatus): void
+    public function updateBookingStatus(EngageBooking $booking, string $localStatus): void
     {
         if ($localStatus === 'cancelled') {
             // Real calendar booking exists → DELETE calendars/services/bookings/{id}
@@ -462,7 +462,7 @@ class GhlBookingService
         }
     }
 
-    public function cancelBooking(Booking $booking): void
+    public function cancelBooking(EngageBooking $booking): void
     {
         if (! $booking->ghl_booking_id) {
             return;
@@ -486,7 +486,7 @@ class GhlBookingService
      * Void an unpaid GHL invoice so Text2Pay/payment links stop accepting payment.
      * POST /invoices/{id}/void
      */
-    public function voidInvoice(Booking $booking): void
+    public function voidInvoice(EngageBooking $booking): void
     {
         if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
             return;
@@ -522,12 +522,12 @@ class GhlBookingService
     }
 
     private function buildCreatePayload(
-        Booking $booking,
-        Product $product,
-        ProductRental $rental,
+        EngageBooking $booking,
+        EngageProduct $product,
+        EngageProductRental $rental,
         GhlServiceDetail $detail,
         GhlServiceDetail $baseDetail,
-        Customer $customer,
+        EngageCustomer $customer,
         string $ghlContactId,
         string $locationId,
         string $timezone,
@@ -552,7 +552,7 @@ class GhlBookingService
     }
 
     private function buildContactFormData(
-        Customer $customer,
+        EngageCustomer $customer,
         string $firstName,
         string $lastName,
         string $locationId,
@@ -576,9 +576,9 @@ class GhlBookingService
     }
 
     private function buildSelectedService(
-        Booking $booking,
-        Product $product,
-        ProductRental $rental,
+        EngageBooking $booking,
+        EngageProduct $product,
+        EngageProductRental $rental,
         GhlServiceDetail $detail,
         GhlServiceDetail $baseDetail,
         string $timezone,
@@ -693,7 +693,7 @@ class GhlBookingService
         return $invoiceIds[0] ?? null;
     }
 
-    public function refreshInvoiceMetadata(Booking $booking): void
+    public function refreshInvoiceMetadata(EngageBooking $booking): void
     {
         $this->syncInvoiceMetadata($booking);
     }
@@ -705,7 +705,7 @@ class GhlBookingService
      * of linking out to it. Returns null if there's no invoice yet or the
      * live fetch fails (never persisted — this is read-only, for display).
      */
-    public function fetchInvoiceDetail(Booking $booking): ?array
+    public function fetchInvoiceDetail(EngageBooking $booking): ?array
     {
         if (! $booking->ghl_invoice_id) {
             return null;
@@ -747,7 +747,7 @@ class GhlBookingService
         ];
     }
 
-    private function syncInvoiceMetadata(Booking $booking, ?string $invoiceId = null): void
+    private function syncInvoiceMetadata(EngageBooking $booking, ?string $invoiceId = null): void
     {
         $invoiceId = $invoiceId ?? $booking->ghl_invoice_id;
         if (! $invoiceId) {
@@ -770,7 +770,7 @@ class GhlBookingService
         }
     }
 
-    private function syncInvoiceMetadataFromResponse(Booking $booking, array $response): void
+    private function syncInvoiceMetadataFromResponse(EngageBooking $booking, array $response): void
     {
         $invoice = $response['invoice'] ?? null;
         if (is_array($invoice)) {
@@ -782,7 +782,7 @@ class GhlBookingService
         $this->syncInvoiceMetadata($booking);
     }
 
-    private function persistInvoiceMetadata(Booking $booking, array $invoice, ?string $invoiceUrl = null): void
+    private function persistInvoiceMetadata(EngageBooking $booking, array $invoice, ?string $invoiceUrl = null): void
     {
         $prefix = $invoice['invoiceNumberPrefix'] ?? 'INV-';
         $number = $invoice['invoiceNumber'] ?? null;
@@ -814,9 +814,9 @@ class GhlBookingService
      * because — unlike main, where Customer.ghl_contact_id is a single
      * global column — this branch's Customer can belong to multiple
      * locations (customers_locations junction), so the contact id is
-     * per-location (Customer::ghlContactIdFor()).
+     * per-location (EngageCustomer::ghlContactIdFor()).
      */
-    private function ensureGhlContactId(Customer $customer, ?string $orgLocationId): string
+    private function ensureGhlContactId(EngageCustomer $customer, ?string $orgLocationId): string
     {
         $ghlContactId = $customer->ghlContactIdFor($orgLocationId);
 

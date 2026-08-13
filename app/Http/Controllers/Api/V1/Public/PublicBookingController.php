@@ -6,14 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Public\StoreCustomerBookingRequest;
 use App\Http\Requests\QuoteBookingRequest;
 use App\Http\Resources\CustomerBookingResource;
-use App\Models\Booking;
+use App\Models\EngageBooking;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
 use App\Services\GhlService;
-use App\Services\RentalResolver;
 use App\Services\OrganizationLocationResolver;
+use App\Services\RentalResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -143,7 +143,7 @@ class PublicBookingController extends Controller
     }
 
     /** Customer confirmation lookup — requires the booking email as a cheap ownership check. */
-    public function show(Request $request, Booking $booking): JsonResponse
+    public function show(Request $request, EngageBooking $booking): JsonResponse
     {
         $email = strtolower((string) $request->query('email'));
         $booking->loadMissing('customer', 'product', 'productRental');

@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Customer\UpdateCustomerProfileRequest;
 use App\Http\Resources\CustomerPortalBookingResource;
 use App\Http\Resources\UserResource;
-use App\Models\Booking;
-use App\Models\Customer;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
@@ -46,7 +46,7 @@ class CustomerPortalController extends Controller
         // anything is unpaid, so sequential calls here would directly slow
         // down how quickly a customer sees their own payment reflected.
         $reconciled = $this->ghlService->reconcileInvoiceStatusBatch($bookings->getCollection());
-        $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
+        $bookings->setCollection(collect($reconciled)->map(function (EngageBooking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
                 : $booking->load(['customer', 'product', 'productRental', 'transactions']);
@@ -59,7 +59,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function bookingShow(Request $request, Booking $booking): JsonResponse
+    public function bookingShow(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -80,7 +80,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function cancelBooking(Request $request, Booking $booking): JsonResponse
+    public function cancelBooking(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -123,7 +123,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function invoice(Request $request, Booking $booking): JsonResponse
+    public function invoice(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -174,7 +174,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    private function denyUnlessOwned(Request $request, Booking $booking): ?JsonResponse
+    private function denyUnlessOwned(Request $request, EngageBooking $booking): ?JsonResponse
     {
         $customer = $this->resolveCustomer($request);
 
@@ -193,7 +193,7 @@ class CustomerPortalController extends Controller
         return null;
     }
 
-    private function resolveCustomer(Request $request): ?Customer
+    private function resolveCustomer(Request $request): ?EngageCustomer
     {
         /** @var User $user */
         $user = $request->user();
@@ -202,7 +202,7 @@ class CustomerPortalController extends Controller
             return null;
         }
 
-        return Customer::find($user->customer_id);
+        return EngageCustomer::find($user->customer_id);
     }
 
     private function missingCustomerResponse(): JsonResponse

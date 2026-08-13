@@ -2,16 +2,16 @@
 
 namespace Database\Factories;
 
-use App\Models\Customer;
+use App\Models\EngageCustomer;
 use App\Models\EngageOrganizationLocation;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * @extends Factory<Customer>
+ * @extends Factory<EngageCustomer>
  */
-class CustomerFactory extends Factory
+class EngageCustomerFactory extends Factory
 {
-    protected $model = Customer::class;
+    protected $model = EngageCustomer::class;
 
     public function definition(): array
     {
@@ -24,7 +24,7 @@ class CustomerFactory extends Factory
 
     public function configure(): static
     {
-        return $this->afterCreating(function (Customer $customer) {
+        return $this->afterCreating(function (EngageCustomer $customer) {
             if ($customer->locationLinks()->exists()) {
                 return;
             }

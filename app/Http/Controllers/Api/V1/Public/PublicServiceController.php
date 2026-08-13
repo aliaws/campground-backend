@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\LiveServiceResource;
 use App\Http\Resources\ServiceResource;
 use App\Http\Resources\ServiceVariantResource;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use App\Services\GhlRentalGateway;
 use App\Services\OrganizationLocationResolver;
 use App\Services\ProductService;
@@ -47,7 +47,7 @@ class PublicServiceController extends Controller
         ]);
     }
 
-    public function show(Product $product): JsonResponse
+    public function show(EngageProduct $product): JsonResponse
     {
         $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
 
