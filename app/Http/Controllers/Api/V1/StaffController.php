@@ -7,7 +7,6 @@ use App\Http\Requests\StoreStaffRequest;
 use App\Http\Requests\UpdateStaffRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
-use App\Services\OrganizationLocationResolver;
 use App\Support\SessionJwt;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -54,21 +53,37 @@ class StaffController extends Controller
         $data = $request->validated();
         $role = $data['role'];
         unset($data['role']);
+        $requestedLocationId = $data['engage_organization_location_id'] ?? null;
+        unset($data['engage_organization_location_id']);
 
         if (! $actor->canAssignRole($role)) {
             return $this->forbidden("You are not allowed to assign the '{$role}' role.");
         }
 
-        if (! $actor->isSuperAdmin() && ! $actor->primaryLocationId()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Your account is not linked to an organization location.',
-            ], 422);
+        if ($actor->isSuperAdmin()) {
+            // No default-org fallback for super-admin — it's org-less by
+            // design (see User::primaryLocationId()), so this is the one
+            // remaining place it could otherwise silently write into
+            // whichever org happens to be flagged default. The form
+            // request already requires this field when the actor is a
+            // super-admin, so a missing value here would be a bug, not a
+            // normal validation failure — the check stays as a backstop.
+            if (! is_string($requestedLocationId) || $requestedLocationId === '') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'engage_organization_location_id is required when creating staff as a super-admin.',
+                ], 422);
+            }
+            $locationId = $requestedLocationId;
+        } else {
+            if (! $actor->primaryLocationId()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Your account is not linked to an organization location.',
+                ], 422);
+            }
+            $locationId = $actor->resolveOrganizationLocationId();
         }
-
-        $locationId = $actor->isSuperAdmin()
-            ? OrganizationLocationResolver::resolveDefaultLocationId()
-            : $actor->resolveOrganizationLocationId();
 
         $user = User::create($data + [
             'roles' => [$role],

@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\EngageProduct;
-use App\Models\ProductRentalCategory;
+use App\Models\EngageProductRentalCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -204,7 +204,7 @@ class ProductService
         // resolve local id -> ghl id first, same indirection
         // EngageProductRental::serviceCategory() itself does for a single row.
         if (! empty($filters['service_category_id'])) {
-            $ghlCategoryId = ProductRentalCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
+            $ghlCategoryId = EngageProductRentalCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
                 ->where('id', $filters['service_category_id'])
                 ->value('ghl_category_id');
 

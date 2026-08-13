@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\EnsureOrganizationNotBlocked;
+use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\RoleMiddleware;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Console\Scheduling\Schedule;
@@ -22,6 +24,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'role' => RoleMiddleware::class,
+            'permission' => PermissionMiddleware::class,
+            'org.active' => EnsureOrganizationNotBlocked::class,
         ]);
         // This app is API-only — no `web` route group, no `login` named
         // route. Laravel's default guest-redirect logic calls route('login')

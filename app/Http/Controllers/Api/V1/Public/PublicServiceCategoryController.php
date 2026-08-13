@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceCategoryResource;
-use App\Models\ProductRentalCategory;
+use App\Models\EngageProductRentalCategory;
 use App\Services\OrganizationLocationResolver;
 use Illuminate\Http\JsonResponse;
 
@@ -13,7 +13,7 @@ class PublicServiceCategoryController extends Controller
 {
     public function index(): JsonResponse
     {
-        $categories = ProductRentalCategory::where('engage_organization_location_id', OrganizationLocationResolver::resolveDefaultLocationId())
+        $categories = EngageProductRentalCategory::where('engage_organization_location_id', OrganizationLocationResolver::resolveDefaultLocationId())
             ->where('is_active', true)
             ->orderBy('name')
             ->get();

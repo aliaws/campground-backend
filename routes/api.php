@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\Customer\CustomerPortalController;
 use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
+use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
@@ -25,6 +26,8 @@ use App\Http\Controllers\Api\V1\SiteMapController;
 use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
+use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
+use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -89,53 +92,52 @@ Route::prefix('v1')->group(function () {
         });
     });
 
-    // Staff-protected routes
-    Route::middleware(['auth:api', 'role:admin,owner,staff,superadmin'])->group(function () {
-        // Products (unified - campsites + inventory)
+    // Tier 0 — any authenticated role, including customer: the permission
+    // matrix has no secrets, and every role needs to be able to read its
+    // own row.
+    Route::middleware('auth:api')->group(function () {
+        Route::get('/permissions', [PermissionController::class, 'index']);
+    });
+
+    // Tier 1 — org-scoped day-to-day operations: owner, admin, staff.
+    // superadmin is deliberately NOT in this group — that's the mechanism
+    // that makes it genuinely org-less (see User::primaryLocationId()).
+    // org.active rejects every request here once the actor's active
+    // organization has been blocked (see EnsureOrganizationNotBlocked).
+    Route::middleware(['auth:api', 'role:owner,admin,staff', 'org.active'])->group(function () {
+        // Products (unified - campsites + inventory) — read + POS sell
         Route::get('/products', [ProductController::class, 'index']);
-        Route::post('/products', [ProductController::class, 'store']);
         // Must precede /products/{product} — otherwise implicit route-model
         // binding treats "lookup-by-sku" as a {product} id and 404s before
         // this route is ever matched.
         Route::get('/products/lookup-by-sku', [ProductController::class, 'lookupBySku']);
         Route::get('/products/{product}', [ProductController::class, 'show']);
-        Route::put('/products/{product}', [ProductController::class, 'update']);
-        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
-        Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
         Route::get('/products/{product}/ghl-stock', [ProductController::class, 'ghlStock']);
 
-        // Product categories
-        Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
-
-        // Product GHL sync
-        Route::post('/products/{product}/sync-ghl', [ProductController::class, 'syncToGhl']);
-        Route::post('/products/{product}/pull-ghl', [ProductController::class, 'pullFromGhl']);
-        Route::post('/products/bulk-sync-ghl', [ProductController::class, 'bulkSync']);
-        Route::post('/products/bulk-pull-ghl', [ProductController::class, 'bulkPull']);
-        Route::post('/products/generate-skus', [ProductController::class, 'generateSkus']);
-
-        // Customers
+        // Customers — normal CRUD (delete/archive/restore/bulk-sync are Tier 2)
         Route::get('/customers', [CustomerController::class, 'index']);
         Route::post('/customers', [CustomerController::class, 'store']);
-        // Must be registered before GET/POST /customers/{customer}* below —
-        // otherwise "archived" would be swallowed by the {customer} wildcard
-        // binding (same routing-order gotcha as /products/lookup-by-sku).
-        Route::get('/customers/archived', [CustomerController::class, 'archived']);
-        Route::post('/customers/archived/{archive}/restore', [CustomerController::class, 'restoreArchived']);
+        // Must be registered before GET /customers/{customer} below —
+        // otherwise "archived" would be swallowed by the {customer}
+        // wildcard binding (same routing-order gotcha as
+        // /products/lookup-by-sku above; this is owner/admin-only, but
+        // route *registration* order is independent of which middleware
+        // group a route sits in, so it has to come first regardless).
+        Route::middleware('role:owner,admin')->group(function () {
+            Route::get('/customers/archived', [CustomerController::class, 'archived'])
+                ->middleware('permission:customer.archive.view');
+            Route::post('/customers/archived/{archive}/restore', [CustomerController::class, 'restoreArchived'])
+                ->middleware('permission:customer.archive.restore');
+        });
         Route::get('/customers/{customer}', [CustomerController::class, 'show']);
         Route::put('/customers/{customer}', [CustomerController::class, 'update']);
-        Route::get('/customers/{customer}/deletion-preview', [CustomerController::class, 'deletionPreview']);
         Route::post('/customers/{customer}/sync-ghl', [CustomerController::class, 'syncToGhl']);
-        Route::post('/customers/bulk-sync-ghl', [CustomerController::class, 'bulkSync']);
-        Route::post('/customers/bulk-pull-ghl', [CustomerController::class, 'bulkPull']);
-        Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
 
-        // Services storefront (bookable SERVICE products, GHL Rentals style)
+        // Services storefront (bookable SERVICE products, GHL Rentals style) — read only
         Route::get('/services', [ServiceController::class, 'index']);
-        Route::post('/services/pull-ghl', [ServiceController::class, 'pullFromGhl']);
         Route::get('/services/{product}', [ServiceController::class, 'show']);
 
-        // Bookings
+        // Bookings — staff run the booking system in full
         Route::get('/bookings', [BookingController::class, 'index']);
         Route::post('/bookings/quote', [BookingController::class, 'quote']);
         Route::post('/bookings', [BookingController::class, 'store']);
@@ -146,9 +148,6 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);
         Route::post('/bookings/{booking}/pay-cash', [BookingController::class, 'payCash']);
 
-        // Reports
-        Route::get('/reports/summary', [ReportController::class, 'summary']);
-
         // Transactions — sole source of truth split across two tables as of
         // the 2026-08-10 refactor (no more generic /transactions*).
         Route::get('/rental-transactions', [RentalTransactionController::class, 'index']);
@@ -158,52 +157,69 @@ Route::prefix('v1')->group(function () {
         Route::patch('/product-transactions/{productTransaction}/payment-status', [ProductTransactionController::class, 'updatePaymentStatus']);
         Route::get('/product-transactions/{productTransaction}/invoice', [ProductTransactionController::class, 'invoice']);
 
-        // Categories
+        // Categories / Service Categories / Amenities / Features — read only
+        // (staff need these for POS filter chips and the booking picker)
         Route::get('/categories', [CategoryController::class, 'index']);
-        Route::post('/categories', [CategoryController::class, 'store']);
-        Route::get('/categories/{category}', [CategoryController::class, 'show']);
-        Route::put('/categories/{category}', [CategoryController::class, 'update']);
-        Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
-        Route::post('/categories/{category}/sync-ghl', [CategoryController::class, 'syncToGhl']);
-        Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
-        Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
-
-        // Service Categories (Services module — scoped to product_rentals, mirrors Categories above)
         Route::get('/service-categories', [ServiceCategoryController::class, 'index']);
-        Route::post('/service-categories', [ServiceCategoryController::class, 'store']);
-        Route::get('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'show']);
-        Route::put('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'update']);
-        Route::delete('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'destroy']);
-        Route::post('/service-categories/pull-ghl', [ServiceCategoryController::class, 'pullFromGhl']);
-        Route::post('/service-categories/{serviceCategory}/sync-ghl', [ServiceCategoryController::class, 'syncToGhl']);
-
-        // Amenities (Services module — assigned to service listings via service_amenities)
         Route::get('/amenities', [AmenityController::class, 'index']);
-        Route::post('/amenities', [AmenityController::class, 'store']);
-        Route::put('/amenities/{amenity}', [AmenityController::class, 'update']);
-        Route::post('/amenities/{amenity}/icon', [AmenityController::class, 'uploadIcon']);
-        Route::delete('/amenities/{amenity}', [AmenityController::class, 'destroy']);
-
-        // Features (Services module — assigned to service listings via service_features)
         Route::get('/features', [FeatureController::class, 'index']);
-        Route::post('/features', [FeatureController::class, 'store']);
-        Route::put('/features/{feature}', [FeatureController::class, 'update']);
-        Route::post('/features/{feature}/icon', [FeatureController::class, 'uploadIcon']);
-        Route::delete('/features/{feature}', [FeatureController::class, 'destroy']);
 
-        // Staff management — admin-only: staff accounts are created here, not via public /auth/register
-        Route::middleware('role:admin,owner,superadmin')->group(function () {
-            Route::get('/staff', [StaffController::class, 'index']);
-            Route::post('/staff', [StaffController::class, 'store']);
-            Route::put('/staff/{staff}', [StaffController::class, 'update']);
-            Route::delete('/staff/{staff}', [StaffController::class, 'destroy']);
-        });
-
-        // Site maps: viewing is open to any staff role, editing (the map builder) is admin-only
+        // Site maps — viewing only; editing (the map builder) is Tier 2
         Route::get('/site-maps', [SiteMapController::class, 'index']);
         Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
         Route::get('/site-map-icon-types', [SiteMapIconTypeController::class, 'index']);
-        Route::middleware('role:admin,owner,superadmin')->group(function () {
+
+        // Tier 2 — owner/admin only, nested inside Tier 1: management,
+        // deletion, and GHL-sync-triggering actions.
+        Route::middleware('role:owner,admin')->group(function () {
+            Route::post('/products', [ProductController::class, 'store']);
+            Route::put('/products/{product}', [ProductController::class, 'update']);
+            Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+            Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
+            Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
+            Route::post('/products/{product}/sync-ghl', [ProductController::class, 'syncToGhl']);
+            Route::post('/products/{product}/pull-ghl', [ProductController::class, 'pullFromGhl']);
+            Route::post('/products/bulk-sync-ghl', [ProductController::class, 'bulkSync']);
+            Route::post('/products/bulk-pull-ghl', [ProductController::class, 'bulkPull']);
+            Route::post('/products/generate-skus', [ProductController::class, 'generateSkus']);
+
+            // (archived/restore routes registered earlier, above the
+            // /customers/{customer} wildcard — see the comment there.)
+            Route::get('/customers/{customer}/deletion-preview', [CustomerController::class, 'deletionPreview']);
+            Route::post('/customers/bulk-sync-ghl', [CustomerController::class, 'bulkSync']);
+            Route::post('/customers/bulk-pull-ghl', [CustomerController::class, 'bulkPull']);
+            Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])
+                ->middleware('permission:customer.delete');
+
+            Route::post('/services/pull-ghl', [ServiceController::class, 'pullFromGhl']);
+
+            Route::get('/reports/summary', [ReportController::class, 'summary']);
+
+            Route::post('/categories', [CategoryController::class, 'store']);
+            Route::get('/categories/{category}', [CategoryController::class, 'show']);
+            Route::put('/categories/{category}', [CategoryController::class, 'update']);
+            Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+            Route::post('/categories/{category}/sync-ghl', [CategoryController::class, 'syncToGhl']);
+            Route::post('/categories/bulk-sync-ghl', [CategoryController::class, 'bulkSync']);
+            Route::post('/categories/pull-ghl', [CategoryController::class, 'pullFromGhl']);
+
+            Route::post('/service-categories', [ServiceCategoryController::class, 'store']);
+            Route::get('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'show']);
+            Route::put('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'update']);
+            Route::delete('/service-categories/{serviceCategory}', [ServiceCategoryController::class, 'destroy']);
+            Route::post('/service-categories/pull-ghl', [ServiceCategoryController::class, 'pullFromGhl']);
+            Route::post('/service-categories/{serviceCategory}/sync-ghl', [ServiceCategoryController::class, 'syncToGhl']);
+
+            Route::post('/amenities', [AmenityController::class, 'store']);
+            Route::put('/amenities/{amenity}', [AmenityController::class, 'update']);
+            Route::post('/amenities/{amenity}/icon', [AmenityController::class, 'uploadIcon']);
+            Route::delete('/amenities/{amenity}', [AmenityController::class, 'destroy']);
+
+            Route::post('/features', [FeatureController::class, 'store']);
+            Route::put('/features/{feature}', [FeatureController::class, 'update']);
+            Route::post('/features/{feature}/icon', [FeatureController::class, 'uploadIcon']);
+            Route::delete('/features/{feature}', [FeatureController::class, 'destroy']);
+
             Route::post('/site-maps', [SiteMapController::class, 'store']);
             Route::put('/site-maps/{siteMap}', [SiteMapController::class, 'update']);
             Route::delete('/site-maps/{siteMap}', [SiteMapController::class, 'destroy']);
@@ -214,20 +230,63 @@ Route::prefix('v1')->group(function () {
             Route::delete('/site-map-elements/{element}', [SiteMapElementController::class, 'destroy']);
             Route::post('/site-map-icon-types', [SiteMapIconTypeController::class, 'store']);
             Route::delete('/site-map-icon-types/{iconType}', [SiteMapIconTypeController::class, 'destroy']);
-        });
 
-        // Settings
-        Route::get('/settings/engage', [SettingsController::class, 'getEngage']);
-        Route::post('/settings/engage', [SettingsController::class, 'storeEngage']);
-        Route::get('/settings/engage/authorize', [SettingsController::class, 'getAuthorizeUrl']);
-        Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken']);
-        Route::get('/settings/engage/tokens', [SettingsController::class, 'getTokens']);
-        Route::post('/settings/engage/tokens', [SettingsController::class, 'saveTokens']);
-        Route::post('/settings/engage/pull-ghl', [SettingsController::class, 'pullAllGhlData']);
-        Route::get('/settings/engage/sync-log', [SettingsController::class, 'getLatestSyncLog']);
-        Route::get('/settings/countries', [SettingsController::class, 'getCountries']);
-        Route::get('/settings/custom-fields', [SettingsController::class, 'getCustomFields']);
-        Route::post('/settings/custom-fields', [SettingsController::class, 'storeCustomField']);
+            // Engage settings — full access (identifiers, tokens, refresh,
+            // data sync). super-admin gets a read-only equivalent under
+            // /superadmin/* instead (see Tier 3 below).
+            Route::get('/settings/engage', [SettingsController::class, 'getEngage']);
+            Route::post('/settings/engage', [SettingsController::class, 'storeEngage']);
+            Route::get('/settings/engage/authorize', [SettingsController::class, 'getAuthorizeUrl']);
+            Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken'])
+                ->middleware('permission:engage.refresh_token');
+            Route::get('/settings/engage/tokens', [SettingsController::class, 'getTokens']);
+            Route::post('/settings/engage/tokens', [SettingsController::class, 'saveTokens']);
+            Route::post('/settings/engage/pull-ghl', [SettingsController::class, 'pullAllGhlData'])
+                ->middleware('permission:engage.data_sync');
+            Route::get('/settings/engage/sync-log', [SettingsController::class, 'getLatestSyncLog']);
+            Route::get('/settings/custom-fields', [SettingsController::class, 'getCustomFields']);
+            Route::post('/settings/custom-fields', [SettingsController::class, 'storeCustomField']);
+        });
     });
 
+    // Tier 3 — super-admin platform routes. Deliberately no org.active:
+    // super-admin is org-less by design and reads across every
+    // organization via an explicit {organization} route id, never the JWT
+    // active-org claim.
+    Route::prefix('superadmin')->middleware(['auth:api', 'role:superadmin'])->group(function () {
+        Route::get('/organizations', [OrganizationController::class, 'index']);
+        Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
+        Route::post('/organizations/{organization}/block', [OrganizationController::class, 'block'])
+            ->middleware('permission:organization.block');
+        Route::post('/organizations/{organization}/unblock', [OrganizationController::class, 'unblock'])
+            ->middleware('permission:organization.unblock');
+        Route::get('/organizations/{organization}/rentals', [OrganizationDataController::class, 'rentals']);
+        Route::get('/organizations/{organization}/products', [OrganizationDataController::class, 'products']);
+        Route::get('/organizations/{organization}/bookings', [OrganizationDataController::class, 'bookings']);
+        Route::get('/organizations/{organization}/product-transactions', [OrganizationDataController::class, 'productTransactions']);
+
+        Route::get('/engage-identifiers', [OrganizationController::class, 'engageIdentifiers']);
+
+        // Platform-level reference data, moved here from the owner/admin
+        // group — same controller/path, gate changed to superadmin only.
+        Route::get('/settings/countries', [SettingsController::class, 'getCountries']);
+    });
+
+    // Staff management — its own top-level group rather than nested inside
+    // Tier 1/2, since it needs to be reachable by super-admin too (which
+    // Tier 1's outer role:owner,admin,staff gate excludes by design — see
+    // the "genuinely org-less" comment above). Safe to keep org.active
+    // here despite including super-admin: EnsureOrganizationNotBlocked
+    // no-ops for super-admin already, so this one middleware stack
+    // correctly serves all three roles with a single route declaration —
+    // registering /staff a second time elsewhere would silently shadow
+    // this one (Laravel's route table is keyed by method+URI; the last
+    // registration for an exact-match path wins for every caller, not
+    // just the role that route block was meant for).
+    Route::middleware(['auth:api', 'role:owner,admin,superadmin', 'org.active'])->group(function () {
+        Route::get('/staff', [StaffController::class, 'index']);
+        Route::post('/staff', [StaffController::class, 'store']);
+        Route::put('/staff/{staff}', [StaffController::class, 'update']);
+        Route::delete('/staff/{staff}', [StaffController::class, 'destroy']);
+    });
 });
