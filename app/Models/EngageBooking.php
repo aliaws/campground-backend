@@ -89,7 +89,7 @@ class EngageBooking extends Model
      */
     public function transactions(): HasMany
     {
-        return $this->hasMany(EngageRentalTransaction::class);
+        return $this->hasMany(EngageRentalTransaction::class, 'booking_id');
     }
 
     public function isPending(): bool

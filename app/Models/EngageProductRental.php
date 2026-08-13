@@ -57,7 +57,7 @@ class EngageProductRental extends Model
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(EngageBooking::class);
+        return $this->hasMany(EngageBooking::class, 'product_rental_id');
     }
 
     /** True when this row is its product's default (base listing) variant. */
