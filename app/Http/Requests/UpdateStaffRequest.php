@@ -21,7 +21,7 @@ class UpdateStaffRequest extends FormRequest
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'email' => ['sometimes', 'required', 'email', Rule::unique('users', 'email')->ignore($staffId)],
+            'email' => ['sometimes', 'required', 'email', Rule::unique('engage_users', 'email')->ignore($staffId)],
             'password' => ['sometimes', 'nullable', 'confirmed', Password::min(8)],
             'role' => ['sometimes', 'required', 'string', Rule::in($allowed ?: User::ASSIGNABLE_STAFF_ROLES)],
             'status' => ['sometimes', 'required', 'string', Rule::in(User::statuses())],

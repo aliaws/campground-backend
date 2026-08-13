@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Mail\CustomerPasswordResetMail;
 use App\Mail\CustomerRegistrationMail;
 use App\Mail\CustomerVerificationMail;
-use App\Models\Customer;
+use App\Models\EngageCustomer;
 use App\Models\User;
 use App\Models\UserVerification;
 use App\Support\ActionJwt;
@@ -106,7 +106,7 @@ class CustomerAccountService
      *                           ask for one. The public booking widget always leaves this true.
      * @param  User|null  $createdBy  Staff/admin who created the account; null for self/public booking.
      */
-    public function ensureCustomerAccount(Customer $customer, array $contactData = [], bool $sendEmail = true, ?User $createdBy = null): void
+    public function ensureCustomerAccount(EngageCustomer $customer, array $contactData = [], bool $sendEmail = true, ?User $createdBy = null): void
     {
         $email = strtolower(trim((string) ($contactData['email'] ?? $customer->email ?? '')));
 
@@ -160,7 +160,7 @@ class CustomerAccountService
      * new signup — a fresh User row, a fresh verification email — rather than silently
      * re-linking to the old (already-verified) account.
      */
-    public function deleteCustomerAccount(Customer $customer): void
+    public function deleteCustomerAccount(EngageCustomer $customer): void
     {
         $customerUser = $customer->customerAccount;
 

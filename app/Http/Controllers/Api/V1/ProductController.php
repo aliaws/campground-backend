@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use App\Services\GhlProductGateway;
 use App\Services\GhlProductSyncService;
 use App\Services\ProductService;
@@ -74,7 +74,7 @@ class ProductController extends Controller
         ], 201);
     }
 
-    public function show(Request $request, Product $product): JsonResponse
+    public function show(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -89,7 +89,7 @@ class ProductController extends Controller
         ]);
     }
 
-    public function update(UpdateProductRequest $request, Product $product): JsonResponse
+    public function update(UpdateProductRequest $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -104,7 +104,7 @@ class ProductController extends Controller
         ]);
     }
 
-    public function destroy(Request $request, Product $product): JsonResponse
+    public function destroy(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -115,7 +115,7 @@ class ProductController extends Controller
         return response()->json(['success' => true, 'message' => 'Product deleted.']);
     }
 
-    public function uploadImage(Request $request, Product $product): JsonResponse
+    public function uploadImage(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -131,7 +131,7 @@ class ProductController extends Controller
         ]);
     }
 
-    public function attachCategories(Request $request, Product $product): JsonResponse
+    public function attachCategories(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -139,7 +139,7 @@ class ProductController extends Controller
 
         $request->validate([
             'category_ids' => ['required', 'array'],
-            'category_ids.*' => ['string', 'exists:categories,id'],
+            'category_ids.*' => ['string', 'exists:engage_categories,id'],
         ]);
 
         $product->categories()->sync($request->input('category_ids'));
@@ -151,7 +151,7 @@ class ProductController extends Controller
         ]);
     }
 
-    public function syncToGhl(Request $request, Product $product): JsonResponse
+    public function syncToGhl(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -173,7 +173,7 @@ class ProductController extends Controller
         }
     }
 
-    public function pullFromGhl(Request $request, Product $product): JsonResponse
+    public function pullFromGhl(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -244,7 +244,7 @@ class ProductController extends Controller
      * GhlRentalGateway). Returns null data when the product isn't linked to
      * a GHL product yet.
      */
-    public function ghlStock(Request $request, Product $product): JsonResponse
+    public function ghlStock(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {
             return $response;
@@ -268,13 +268,13 @@ class ProductController extends Controller
     }
 
     /**
-     * Route-model binding (Product $product) fetches by id alone, with no
+     * Route-model binding (EngageProduct $product) fetches by id alone, with no
      * tenant scoping — every action taking a bound Product must call this
      * first, or a staff member from a different organization could view/
      * modify/delete/sync another organization's product just by knowing or
      * guessing its id.
      */
-    private function denyUnlessOwned(Request $request, Product $product): ?JsonResponse
+    private function denyUnlessOwned(Request $request, EngageProduct $product): ?JsonResponse
     {
         if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Product not found.'], 404);

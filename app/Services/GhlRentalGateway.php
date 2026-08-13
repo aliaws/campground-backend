@@ -4,8 +4,8 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -55,7 +55,7 @@ class GhlRentalGateway
      *
      * @return array<string, GhlServiceDetail>
      */
-    public function fetchListingBundle(Product $product): array
+    public function fetchListingBundle(EngageProduct $product): array
     {
         $ghlIds = $product->rentals
             ->pluck('ghl_id')
@@ -108,7 +108,7 @@ class GhlRentalGateway
      * @param  array<string, GhlServiceDetail>  $serviceDetails
      * @return array<string, ?array<string, mixed>>
      */
-    public function fetchPaymentsMap(Product $product, array $serviceDetails): array
+    public function fetchPaymentsMap(EngageProduct $product, array $serviceDetails): array
     {
         $map = [];
 
@@ -127,7 +127,7 @@ class GhlRentalGateway
     }
 
     /** Detail for one rental row; throws when GHL is unreachable. */
-    public function fetchRentalDetail(ProductRental $rental): GhlServiceDetail
+    public function fetchRentalDetail(EngageProductRental $rental): GhlServiceDetail
     {
         if (! $rental->ghl_id) {
             throw new \InvalidArgumentException(
@@ -144,7 +144,7 @@ class GhlRentalGateway
      *
      * @return array{detail: GhlServiceDetail, payments: ?array}
      */
-    public function fetchEnrichedRentalDetail(ProductRental $rental): array
+    public function fetchEnrichedRentalDetail(EngageProductRental $rental): array
     {
         $detail = $this->fetchRentalDetail($rental);
         $paymentsProductId = $detail->paymentsProductId() ?? $rental->ghl_product_id;

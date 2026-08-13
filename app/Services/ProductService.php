@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Product;
-use App\Models\ServiceCategory;
+use App\Models\EngageProduct;
+use App\Models\ProductRentalCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -16,7 +16,7 @@ class ProductService
 
     public function list(array $filters = []): LengthAwarePaginator
     {
-        $query = Product::query();
+        $query = EngageProduct::query();
 
         if (! empty($filters['engage_organization_location_id'])) {
             $query->byLocation($filters['engage_organization_location_id']);
@@ -60,7 +60,7 @@ class ProductService
             ->paginate($filters['per_page'] ?? 15);
     }
 
-    public function create(array $data): Product
+    public function create(array $data): EngageProduct
     {
         $categoryIds = $data['category_ids'] ?? [];
         unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
@@ -69,7 +69,7 @@ class ProductService
             $data['sku'] = $this->generateUniqueSku($data['engage_organization_location_id'], $data['name'] ?? '');
         }
 
-        $product = Product::create($data);
+        $product = EngageProduct::create($data);
 
         if (! empty($categoryIds)) {
             $product->categories()->sync($categoryIds);
@@ -78,7 +78,7 @@ class ProductService
         return $product->load(self::EAGER);
     }
 
-    public function update(Product $product, array $data): Product
+    public function update(EngageProduct $product, array $data): EngageProduct
     {
         $categoryIds = $data['category_ids'] ?? null;
         $amenityIds = $data['amenity_ids'] ?? null;
@@ -106,7 +106,7 @@ class ProductService
         return $product->fresh()->load(self::EAGER);
     }
 
-    public function delete(Product $product): bool
+    public function delete(EngageProduct $product): bool
     {
         return $product->delete();
     }
@@ -126,7 +126,7 @@ class ProductService
 
         do {
             $candidate = $base.'-'.strtoupper(Str::random(4));
-            $exists = Product::where('engage_organization_location_id', $tenantId)->where('sku', $candidate)->exists();
+            $exists = EngageProduct::where('engage_organization_location_id', $tenantId)->where('sku', $candidate)->exists();
         } while ($exists);
 
         return $candidate;
@@ -142,7 +142,7 @@ class ProductService
      */
     public function generateMissingSkus(string $tenantId): array
     {
-        $products = Product::byLocation($tenantId)
+        $products = EngageProduct::byLocation($tenantId)
             ->whereNull('product_rental_id')
             ->where(fn (Builder $q) => $q->whereNull('sku')->orWhere('sku', ''))
             ->get();
@@ -155,16 +155,16 @@ class ProductService
     }
 
     /** Exact-match SKU lookup for the Product Sales page's barcode scanner. */
-    public function findBySku(string $tenantId, string $sku): ?Product
+    public function findBySku(string $tenantId, string $sku): ?EngageProduct
     {
-        return Product::byLocation($tenantId)
+        return EngageProduct::byLocation($tenantId)
             ->whereNull('product_rental_id')
             ->where('sku', $sku)
             ->with(self::EAGER)
             ->first();
     }
 
-    public function uploadImage(Product $product, UploadedFile $image): Product
+    public function uploadImage(EngageProduct $product, UploadedFile $image): EngageProduct
     {
         $path = $image->store('products', 'public');
         $product->update(['image' => Storage::url($path), 'ghl_image_url' => null]);
@@ -178,7 +178,7 @@ class ProductService
      */
     public function listServices(array $filters = []): LengthAwarePaginator
     {
-        $query = Product::byLocation($filters['engage_organization_location_id'])
+        $query = EngageProduct::byLocation($filters['engage_organization_location_id'])
             ->whereNotNull('product_rental_id')
             ->where('status', 'active')
             ->with(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
@@ -202,9 +202,9 @@ class ProductService
         // category_id above is Category's id, not engage_collection_id),
         // but product_rentals.service_category_id stores the *raw GHL* id —
         // resolve local id -> ghl id first, same indirection
-        // ProductRental::serviceCategory() itself does for a single row.
+        // EngageProductRental::serviceCategory() itself does for a single row.
         if (! empty($filters['service_category_id'])) {
-            $ghlCategoryId = ServiceCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
+            $ghlCategoryId = ProductRentalCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
                 ->where('id', $filters['service_category_id'])
                 ->value('ghl_category_id');
 
@@ -217,16 +217,16 @@ class ProductService
         $services = $query->get();
 
         if (isset($filters['min_price']) && $filters['min_price'] !== '') {
-            $services = $services->filter(fn (Product $p) => ($p->fromPrice() ?? 0) >= (float) $filters['min_price']);
+            $services = $services->filter(fn (EngageProduct $p) => ($p->fromPrice() ?? 0) >= (float) $filters['min_price']);
         }
 
         if (isset($filters['max_price']) && $filters['max_price'] !== '') {
-            $services = $services->filter(fn (Product $p) => ($p->fromPrice() ?? 0) <= (float) $filters['max_price']);
+            $services = $services->filter(fn (EngageProduct $p) => ($p->fromPrice() ?? 0) <= (float) $filters['max_price']);
         }
 
         $services = match ($filters['sort'] ?? null) {
-            'price_asc' => $services->sortBy(fn (Product $p) => $p->fromPrice() ?? INF),
-            'price_desc' => $services->sortByDesc(fn (Product $p) => $p->fromPrice() ?? -INF),
+            'price_asc' => $services->sortBy(fn (EngageProduct $p) => $p->fromPrice() ?? INF),
+            'price_desc' => $services->sortByDesc(fn (EngageProduct $p) => $p->fromPrice() ?? -INF),
             default => $services->sortBy([['created_at', 'desc']]),
         };
 

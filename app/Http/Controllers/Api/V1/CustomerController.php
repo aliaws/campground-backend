@@ -8,9 +8,9 @@ use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerArchiveResource;
 use App\Http\Resources\CustomerResource;
-use App\Models\Booking;
-use App\Models\Customer;
 use App\Models\CustomerArchive;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
 use App\Models\User;
 use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
@@ -33,7 +33,7 @@ class CustomerController extends Controller
     {
         $locationId = $request->user()->resolveOrganizationLocationId();
 
-        $query = Customer::with('customerAccount')->whereHas(
+        $query = EngageCustomer::with('customerAccount')->whereHas(
             'locationLinks',
             fn ($q) => $q->where('engage_organization_location_id', $locationId)
         );
@@ -156,7 +156,7 @@ class CustomerController extends Controller
         ], $customer->wasRecentlyCreated ? 201 : 200);
     }
 
-    public function show(Request $request, Customer $customer): JsonResponse
+    public function show(Request $request, EngageCustomer $customer): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $customer)) {
             return $response;
@@ -169,7 +169,7 @@ class CustomerController extends Controller
         ]);
     }
 
-    public function update(UpdateCustomerRequest $request, Customer $customer): JsonResponse
+    public function update(UpdateCustomerRequest $request, EngageCustomer $customer): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $customer)) {
             return $response;
@@ -199,7 +199,7 @@ class CustomerController extends Controller
      * bookings, warn that they'll also be removed from GHL) without the
      * staff member having to already know the customer's booking history.
      */
-    public function deletionPreview(Request $request, Customer $customer): JsonResponse
+    public function deletionPreview(Request $request, EngageCustomer $customer): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $customer)) {
             return $response;
@@ -214,7 +214,7 @@ class CustomerController extends Controller
                 'completed_count' => $classification['completed']->count(),
                 'upcoming_count' => $classification['upcoming']->count(),
                 'cancelled_count' => $classification['cancelled']->count(),
-                'upcoming_bookings' => $classification['upcoming']->map(fn (Booking $b) => [
+                'upcoming_bookings' => $classification['upcoming']->map(fn (EngageBooking $b) => [
                     'id' => $b->id,
                     'product_name' => $b->product?->name,
                     'check_in_date' => $b->check_in_date?->format('Y-m-d'),
@@ -231,7 +231,7 @@ class CustomerController extends Controller
      * expected to have already called deletionPreview() and shown the
      * appropriate confirmation before this is ever hit.
      */
-    public function destroy(Request $request, Customer $customer): JsonResponse
+    public function destroy(Request $request, EngageCustomer $customer): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $customer)) {
             return $response;
@@ -250,7 +250,7 @@ class CustomerController extends Controller
         return response()->json(['success' => true, 'message' => 'Customer permanently deleted.']);
     }
 
-    public function syncToGhl(Request $request, Customer $customer): JsonResponse
+    public function syncToGhl(Request $request, EngageCustomer $customer): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $customer)) {
             return $response;
@@ -302,14 +302,14 @@ class CustomerController extends Controller
     }
 
     /**
-     * Route-model binding (Customer $customer) fetches by id alone, with no
+     * Route-model binding (EngageCustomer $customer) fetches by id alone, with no
      * tenant scoping — every action taking a bound Customer must call this
      * first, or a staff member from a different organization could view/
      * edit/delete/sync another organization's customer just by knowing or
      * guessing its id (a customer can legitimately belong to more than one
      * organization, so this checks the junction, not a single column).
      */
-    private function denyUnlessOwned(Request $request, Customer $customer): ?JsonResponse
+    private function denyUnlessOwned(Request $request, EngageCustomer $customer): ?JsonResponse
     {
         if (! $customer->belongsToLocation($request->user()->resolveOrganizationLocationId())) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Customer not found.'], 404);

@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Product;
-use App\Models\ProductTransaction;
+use App\Models\EngageProduct;
+use App\Models\EngageProductTransaction;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -29,7 +29,7 @@ class ProductTransactionService
 
     public function list(array $filters = []): LengthAwarePaginator
     {
-        $query = ProductTransaction::query();
+        $query = EngageProductTransaction::query();
 
         if (! empty($filters['engage_organization_location_id'])) {
             $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
@@ -73,7 +73,7 @@ class ProductTransactionService
      *   items: array<int, array{product_id:string, product_type:string,
      *   quantity:int, unit_price:float, rental_start?:string, rental_end?:string}>} $data
      */
-    public function create(array $data): ProductTransaction
+    public function create(array $data): EngageProductTransaction
     {
         // Only a booking-less sale gets live GHL price/stock resolution — a
         // booking-linked "extras" transaction is already covered by the
@@ -90,7 +90,7 @@ class ProductTransactionService
         }
 
         $productTransaction = DB::transaction(function () use ($data, $resolvedPrices) {
-            $productTransaction = ProductTransaction::create([
+            $productTransaction = EngageProductTransaction::create([
                 'engage_organization_location_id' => $data['engage_organization_location_id'],
                 'customer_id' => $data['customer_id'],
                 'booking_id' => $data['booking_id'] ?? null,
@@ -113,7 +113,7 @@ class ProductTransactionService
             foreach ($data['items'] as $item) {
                 $resolved = $resolvedPrices[$item['product_id']] ?? null;
                 $unitPrice = $resolved['unit_price'] ?? $item['unit_price'];
-                $product = Product::find($item['product_id']);
+                $product = EngageProduct::find($item['product_id']);
 
                 $transactionItem = $productTransaction->items()->create([
                     'product_id' => $item['product_id'],
@@ -164,7 +164,7 @@ class ProductTransactionService
                 continue;
             }
 
-            $product = Product::find($item['product_id']);
+            $product = EngageProduct::find($item['product_id']);
             if (! $product) {
                 continue;
             }
@@ -217,7 +217,7 @@ class ProductTransactionService
      *
      * @param  array<string, array<string, mixed>>  $resolvedPrices
      */
-    private function syncProductSaleToGhl(ProductTransaction $productTransaction, array $resolvedPrices): void
+    private function syncProductSaleToGhl(EngageProductTransaction $productTransaction, array $resolvedPrices): void
     {
         $ghlItems = array_filter($resolvedPrices, fn ($r) => $r['ghl_product_id'] !== null);
 
@@ -297,7 +297,7 @@ class ProductTransactionService
      * — confirmed by reading syncGhlInvoicePayment()'s old booking-lookup
      * guard directly.
      */
-    public function updateStatus(ProductTransaction $productTransaction, string $status): ProductTransaction
+    public function updateStatus(EngageProductTransaction $productTransaction, string $status): EngageProductTransaction
     {
         if ($productTransaction->isPaid()) {
             throw new \InvalidArgumentException('This order is already paid — payment status cannot be changed.');
@@ -317,7 +317,7 @@ class ProductTransactionService
      * status flip only if not already paid, no other side effects (a
      * product sale has no booking status to advance).
      */
-    public function syncPaidStatusFromGhl(ProductTransaction $productTransaction): ProductTransaction
+    public function syncPaidStatusFromGhl(EngageProductTransaction $productTransaction): EngageProductTransaction
     {
         if (! $productTransaction->isPaid()) {
             $productTransaction->update(['status' => 'paid', 'paid_at' => now()]);
