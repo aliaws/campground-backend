@@ -6,8 +6,8 @@ use App\Mail\CustomerPasswordResetMail;
 use App\Mail\CustomerRegistrationMail;
 use App\Mail\CustomerVerificationMail;
 use App\Models\EngageCustomer;
+use App\Models\EngageUserVerification;
 use App\Models\User;
-use App\Models\UserVerification;
 use App\Support\ActionJwt;
 use App\Support\SessionJwt;
 use Illuminate\Support\Facades\DB;
@@ -188,7 +188,7 @@ class CustomerAccountService
         $ttl = (int) config('customer.verification_ttl_minutes');
         [$jwt, $code] = $this->issueActionToken(
             $customerUser,
-            UserVerification::TYPE_EMAIL_VERIFICATION,
+            EngageUserVerification::TYPE_EMAIL_VERIFICATION,
             $ttl,
             withCode: true,
         );
@@ -233,7 +233,7 @@ class CustomerAccountService
 
     public function verifyCode(string $token, string $code): User
     {
-        $verification = $this->findOpenVerification($token, UserVerification::TYPE_EMAIL_VERIFICATION);
+        $verification = $this->findOpenVerification($token, EngageUserVerification::TYPE_EMAIL_VERIFICATION);
 
         if (! $verification) {
             throw new \InvalidArgumentException('Invalid or expired verification link.');
@@ -273,7 +273,7 @@ class CustomerAccountService
      */
     public function createPassword(string $token, string $password): array
     {
-        $verification = $this->findOpenVerification($token, UserVerification::TYPE_EMAIL_VERIFICATION);
+        $verification = $this->findOpenVerification($token, EngageUserVerification::TYPE_EMAIL_VERIFICATION);
 
         if (! $verification) {
             throw new \InvalidArgumentException('Invalid or expired verification link.');
@@ -322,7 +322,7 @@ class CustomerAccountService
         $ttl = (int) config('customer.password_reset_ttl_minutes');
         [$jwt] = $this->issueActionToken(
             $customerUser,
-            UserVerification::TYPE_PASSWORD_RESET,
+            EngageUserVerification::TYPE_PASSWORD_RESET,
             $ttl,
             withCode: false,
         );
@@ -339,7 +339,7 @@ class CustomerAccountService
 
     public function resetPassword(string $token, string $password): User
     {
-        $verification = $this->findOpenVerification($token, UserVerification::TYPE_PASSWORD_RESET);
+        $verification = $this->findOpenVerification($token, EngageUserVerification::TYPE_PASSWORD_RESET);
 
         if (! $verification) {
             throw new \InvalidArgumentException('Invalid or expired password reset link.');
@@ -394,7 +394,7 @@ class CustomerAccountService
     private function issueActionToken(User $user, string $type, int $ttlMinutes, bool $withCode): array
     {
         // Invalidate prior open rows of the same type so only the latest link works.
-        UserVerification::query()
+        EngageUserVerification::query()
             ->where('user_id', $user->id)
             ->where('type', $type)
             ->whereNull('consumed_at')
@@ -404,7 +404,7 @@ class CustomerAccountService
         $expiresAt = now()->addMinutes($ttlMinutes);
         $code = $withCode ? (string) random_int(100000, 999999) : null;
 
-        UserVerification::create([
+        EngageUserVerification::create([
             'user_id' => $user->id,
             'type' => $type,
             'jti' => $jti,
@@ -427,14 +427,14 @@ class CustomerAccountService
         return [$jwt, $code];
     }
 
-    private function findOpenVerification(string $jwt, string $type): ?UserVerification
+    private function findOpenVerification(string $jwt, string $type): ?EngageUserVerification
     {
         $claims = ActionJwt::decode($jwt);
         if (! $claims || ($claims['typ'] ?? null) !== $type || empty($claims['jti'])) {
             return null;
         }
 
-        $verification = UserVerification::query()
+        $verification = EngageUserVerification::query()
             ->with('user')
             ->where('jti', $claims['jti'])
             ->where('type', $type)

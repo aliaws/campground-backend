@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class UserVerification extends Model
+class EngageUserVerification extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_user_verifications';
 
     public const TYPE_EMAIL_VERIFICATION = 'email_verification';
 

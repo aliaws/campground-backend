@@ -4,8 +4,8 @@ namespace Database\Factories;
 
 use App\Models\EngageCustomer;
 use App\Models\EngageOrganizationLocation;
+use App\Models\EngageUserVerification;
 use App\Models\User;
-use App\Models\UserVerification;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -71,9 +71,9 @@ class UserFactory extends Factory
                 'created_by' => null,
             ];
         })->afterCreating(function (User $user) {
-            UserVerification::create([
+            EngageUserVerification::create([
                 'user_id' => $user->id,
-                'type' => UserVerification::TYPE_EMAIL_VERIFICATION,
+                'type' => EngageUserVerification::TYPE_EMAIL_VERIFICATION,
                 'jti' => (string) Str::uuid(),
                 'code_hash' => Hash::make('123456'),
                 'attempts' => 0,
@@ -101,9 +101,9 @@ class UserFactory extends Factory
                 'created_by' => null,
             ];
         })->afterCreating(function (User $user) {
-            UserVerification::create([
+            EngageUserVerification::create([
                 'user_id' => $user->id,
-                'type' => UserVerification::TYPE_EMAIL_VERIFICATION,
+                'type' => EngageUserVerification::TYPE_EMAIL_VERIFICATION,
                 'jti' => (string) Str::uuid(),
                 'code_hash' => null,
                 'attempts' => 0,

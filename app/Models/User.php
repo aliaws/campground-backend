@@ -241,7 +241,7 @@ class User extends Authenticatable
 
     public function verifications(): HasMany
     {
-        return $this->hasMany(UserVerification::class);
+        return $this->hasMany(EngageUserVerification::class);
     }
 
     /** @return list<string> */
