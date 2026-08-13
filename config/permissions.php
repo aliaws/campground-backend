@@ -80,6 +80,10 @@ return [
             'group' => 'organization', 'label' => "View an organization's POS product transactions",
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
+        'organization.staff.view' => [
+            'group' => 'organization', 'label' => "View an organization's staff accounts",
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
+        ],
 
         // Engage / GHL settings
         'engage.identifiers.view' => [
@@ -260,24 +264,24 @@ return [
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
 
-        // Staff management
+        // Staff management — org-scoped only; super-admin's view is
+        // organization.staff.view instead (reached via an org's own
+        // drill-down page, not a flat cross-org /staff list).
         'staff.view' => [
             'group' => 'staff', 'label' => 'View staff accounts',
-            'roles' => ['owner', 'admin', 'superadmin'], 'decider' => 'role+org',
-            'deciders' => ['superadmin' => 'role+platform'],
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'staff.create' => [
             'group' => 'staff', 'label' => 'Create a staff account',
-            'roles' => ['owner', 'admin', 'superadmin'], 'decider' => 'role+org',
-            'deciders' => ['superadmin' => 'role+platform'],
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'staff.update' => [
             'group' => 'staff', 'label' => 'Update a staff account',
-            'roles' => ['owner', 'admin', 'superadmin'], 'decider' => 'role+target',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+target',
         ],
         'staff.delete' => [
             'group' => 'staff', 'label' => 'Delete a staff account',
-            'roles' => ['owner', 'admin', 'superadmin'], 'decider' => 'role+target',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+target',
         ],
 
         // Platform-level config (super-admin only)

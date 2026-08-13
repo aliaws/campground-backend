@@ -264,6 +264,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/organizations/{organization}/products', [OrganizationDataController::class, 'products']);
         Route::get('/organizations/{organization}/bookings', [OrganizationDataController::class, 'bookings']);
         Route::get('/organizations/{organization}/product-transactions', [OrganizationDataController::class, 'productTransactions']);
+        Route::get('/organizations/{organization}/staff', [OrganizationDataController::class, 'staff']);
 
         Route::get('/engage-identifiers', [OrganizationController::class, 'engageIdentifiers']);
 
@@ -272,18 +273,13 @@ Route::prefix('v1')->group(function () {
         Route::get('/settings/countries', [SettingsController::class, 'getCountries']);
     });
 
-    // Staff management — its own top-level group rather than nested inside
-    // Tier 1/2, since it needs to be reachable by super-admin too (which
-    // Tier 1's outer role:owner,admin,staff gate excludes by design — see
-    // the "genuinely org-less" comment above). Safe to keep org.active
-    // here despite including super-admin: EnsureOrganizationNotBlocked
-    // no-ops for super-admin already, so this one middleware stack
-    // correctly serves all three roles with a single route declaration —
-    // registering /staff a second time elsewhere would silently shadow
-    // this one (Laravel's route table is keyed by method+URI; the last
-    // registration for an exact-match path wins for every caller, not
-    // just the role that route block was meant for).
-    Route::middleware(['auth:api', 'role:owner,admin,superadmin', 'org.active'])->group(function () {
+    // Staff management — org-scoped only (owner/admin manage their own
+    // org's staff). Super-admin no longer gets a flat cross-org /staff
+    // list here (2026-08-14) — it sees staff per-organization instead, via
+    // GET /superadmin/organizations/{organization}/staff on the org's own
+    // drill-down page. Kept as its own top-level group (not nested inside
+    // Tier 1/2) purely to match the existing route layout.
+    Route::middleware(['auth:api', 'role:owner,admin', 'org.active'])->group(function () {
         Route::get('/staff', [StaffController::class, 'index']);
         Route::post('/staff', [StaffController::class, 'store']);
         Route::put('/staff/{staff}', [StaffController::class, 'update']);

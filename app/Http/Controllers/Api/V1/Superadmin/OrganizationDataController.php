@@ -8,7 +8,9 @@ use App\Http\Resources\BookingResource;
 use App\Http\Resources\ProductResource;
 use App\Http\Resources\ProductTransactionResource;
 use App\Http\Resources\ServiceResource;
+use App\Http\Resources\UserResource;
 use App\Models\EngageOrganizationLocation;
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\ProductService;
 use App\Services\ProductTransactionService;
@@ -82,6 +84,29 @@ class OrganizationDataController extends Controller
         return response()->json([
             'success' => true,
             'data' => $this->paginatedData($this->productTransactionService->list($filters), ProductTransactionResource::class),
+        ]);
+    }
+
+    /** Read-only, this org's staff only — not the flat cross-org list owner/admin's own /staff endpoint returns. */
+    public function staff(EngageOrganizationLocation $organization): JsonResponse
+    {
+        $staff = User::query()
+            ->where(function ($q) {
+                foreach ([User::ROLE_OWNER, User::ROLE_ADMIN, User::ROLE_STAFF] as $role) {
+                    $q->orWhereJsonContains('roles', $role);
+                }
+            })
+            ->whereJsonDoesntContain('roles', User::ROLE_SUPERADMIN)
+            ->whereHas(
+                'locationLinks',
+                fn ($q) => $q->where('engage_organization_location_id', $organization->id)
+            )
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => UserResource::collection($staff),
         ]);
     }
 }
