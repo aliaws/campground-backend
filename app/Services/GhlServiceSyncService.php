@@ -6,7 +6,7 @@ use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
-use App\Models\ProductRentalCategory;
+use App\Models\EngageProductRentalCategory;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -372,7 +372,7 @@ class GhlServiceSyncService
                     'engage_organization_location_id' => $tenantId,
                 ];
 
-                $category = ProductRentalCategory::where('engage_organization_location_id', $tenantId)
+                $category = EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
                     ->where('ghl_category_id', $ghlId)
                     ->first();
 
@@ -388,7 +388,7 @@ class GhlServiceSyncService
                 // duplicate-avoidance reasoning used on the push side (see
                 // syncServiceCategoryToGhl()'s own name-matching before POSTing).
                 if (! $category) {
-                    $category = ProductRentalCategory::where('engage_organization_location_id', $tenantId)
+                    $category = EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
                         ->whereNull('ghl_category_id')
                         ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim($data['name']))])
                         ->first();
@@ -397,7 +397,7 @@ class GhlServiceSyncService
                 if ($category) {
                     $category->update($data + ['ghl_category_id' => $ghlId]);
                 } else {
-                    ProductRentalCategory::create($data + ['ghl_category_id' => $ghlId]);
+                    EngageProductRentalCategory::create($data + ['ghl_category_id' => $ghlId]);
                     $results['created']++;
                 }
 
@@ -508,7 +508,7 @@ class GhlServiceSyncService
      * list?"), and the user explicitly chose real deletion over hiding
      * inactive rows by default. This is safe specifically for
      * ServiceCategory: a hard DELETE here does **not** leave a dangling
-     * reference anywhere — `ProductRentalCategory::rentals()` is keyed on the raw
+     * reference anywhere — `EngageProductRentalCategory::rentals()` is keyed on the raw
      * `ghl_category_id` string, not a real FK, so a `ProductRental` still
      * pointing at a since-deleted category simply resolves that relation to
      * `null` (falls back to "no category"), exactly the same as manually
@@ -541,7 +541,7 @@ class GhlServiceSyncService
      */
     private function deleteMissingServiceCategories(string $tenantId, array $seenGhlIds): int
     {
-        return ProductRentalCategory::where('engage_organization_location_id', $tenantId)
+        return EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
             ->whereNotNull('ghl_category_id')
             ->whereNotIn('ghl_category_id', $seenGhlIds)
             ->delete();
@@ -585,7 +585,7 @@ class GhlServiceSyncService
      * working, exactly the same reasoning as before, just no longer
      * describing today's actual, working default path.
      */
-    public function syncServiceCategoryToGhl(ProductRentalCategory $category): ProductRentalCategory
+    public function syncServiceCategoryToGhl(EngageProductRentalCategory $category): EngageProductRentalCategory
     {
         $category->update(['engage_sync_status' => 'pending']);
 
@@ -643,7 +643,7 @@ class GhlServiceSyncService
      * check (see syncServiceCategoryToGhl()'s own doc comment for the full
      * investigation).
      */
-    public function deleteServiceCategoryFromGhl(ProductRentalCategory $category): void
+    public function deleteServiceCategoryFromGhl(EngageProductRentalCategory $category): void
     {
         if (! $category->ghl_category_id) {
             return;
