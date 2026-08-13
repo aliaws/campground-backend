@@ -13,9 +13,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * creates rows — everything beyond these identifiers (durations, quantity,
  * pricing rules, booking times) is fetched live from GHL, never stored.
  */
-class ProductRental extends Model
+class EngageProductRental extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_product_rentals';
 
     protected $fillable = [
         'name',
@@ -44,18 +46,18 @@ class ProductRental extends Model
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(EngageProduct::class);
     }
 
-    /** Keyed on the raw GHL category id stored here, not a local FK column — see ServiceCategory::rentals(). */
+    /** Keyed on the raw GHL category id stored here, not a local FK column — see ProductRentalCategory::rentals(). */
     public function serviceCategory(): BelongsTo
     {
-        return $this->belongsTo(ServiceCategory::class, 'service_category_id', 'ghl_category_id');
+        return $this->belongsTo(ProductRentalCategory::class, 'service_category_id', 'ghl_category_id');
     }
 
     public function bookings(): HasMany
     {
-        return $this->hasMany(Booking::class);
+        return $this->hasMany(EngageBooking::class);
     }
 
     /** True when this row is its product's default (base listing) variant. */

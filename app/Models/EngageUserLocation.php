@@ -2,25 +2,21 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class CustomerLocation extends Model
+class EngageUserLocation extends Model
 {
-    use HasUlids;
-
-    protected $table = 'customers_locations';
+    protected $table = 'engage_users_locations';
 
     protected $fillable = [
-        'customer_id',
+        'user_id',
         'engage_organization_location_id',
-        'ghl_contact_id',
     ];
 
-    public function customer(): BelongsTo
+    public function user(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(User::class);
     }
 
     public function organizationLocation(): BelongsTo

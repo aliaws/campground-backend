@@ -15,9 +15,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * did: 'draft'|'pending'|'paid'. `booking_id` links back to the owning
  * `Booking` — `Booking::transactions()` resolves here now.
  */
-class RentalTransaction extends Model
+class EngageRentalTransaction extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_rental_transactions';
 
     protected $fillable = [
         'engage_organization_location_id',
@@ -57,23 +59,23 @@ class RentalTransaction extends Model
 
     public function customer(): BelongsTo
     {
-        // withTrashed() — same reasoning as Booking::customer(), see there.
-        return $this->belongsTo(Customer::class)->withTrashed();
+        // withTrashed() — same reasoning as EngageBooking::customer(), see there.
+        return $this->belongsTo(EngageCustomer::class)->withTrashed();
     }
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(EngageProduct::class);
     }
 
     public function productRental(): BelongsTo
     {
-        return $this->belongsTo(ProductRental::class);
+        return $this->belongsTo(EngageProductRental::class);
     }
 
     public function booking(): BelongsTo
     {
-        return $this->belongsTo(Booking::class);
+        return $this->belongsTo(EngageBooking::class);
     }
 
     public function isPaid(): bool

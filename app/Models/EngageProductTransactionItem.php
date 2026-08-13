@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class ProductTransactionItem extends Model
+class EngageProductTransactionItem extends Model
 {
     use HasUlids;
+
+    protected $table = 'engage_product_transaction_items';
 
     protected $fillable = [
         'product_transaction_id',
@@ -32,11 +34,11 @@ class ProductTransactionItem extends Model
 
     public function productTransaction(): BelongsTo
     {
-        return $this->belongsTo(ProductTransaction::class);
+        return $this->belongsTo(EngageProductTransaction::class);
     }
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(EngageProduct::class);
     }
 }

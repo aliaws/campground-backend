@@ -2,7 +2,7 @@
 
 namespace Database\Factories;
 
-use App\Models\Customer;
+use App\Models\EngageCustomer;
 use App\Models\EngageOrganizationLocation;
 use App\Models\User;
 use App\Models\UserVerification;
@@ -53,10 +53,10 @@ class UserFactory extends Factory
         });
     }
 
-    public function customerPendingVerification(?Customer $customer = null): static
+    public function customerPendingVerification(?EngageCustomer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
-            $linked = $customer ?? Customer::factory()->create([
+            $linked = $customer ?? EngageCustomer::factory()->create([
                 'email' => $attributes['email'] ?? fake()->unique()->safeEmail(),
                 'name' => $attributes['name'] ?? fake()->name(),
             ]);
@@ -83,10 +83,10 @@ class UserFactory extends Factory
     }
 
     /** Email verified, password not yet set — still status=pending. */
-    public function customerVerified(?Customer $customer = null): static
+    public function customerVerified(?EngageCustomer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
-            $linked = $customer ?? Customer::factory()->create([
+            $linked = $customer ?? EngageCustomer::factory()->create([
                 'email' => $attributes['email'] ?? fake()->unique()->safeEmail(),
                 'name' => $attributes['name'] ?? fake()->name(),
             ]);
@@ -113,10 +113,10 @@ class UserFactory extends Factory
         });
     }
 
-    public function customerActive(?Customer $customer = null): static
+    public function customerActive(?EngageCustomer $customer = null): static
     {
         return $this->state(function (array $attributes) use ($customer) {
-            $linked = $customer ?? Customer::factory()->create([
+            $linked = $customer ?? EngageCustomer::factory()->create([
                 'email' => $attributes['email'] ?? fake()->unique()->safeEmail(),
                 'name' => $attributes['name'] ?? fake()->name(),
             ]);

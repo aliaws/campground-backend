@@ -3,15 +3,15 @@
 namespace Database\Factories;
 
 use App\Models\EngageOrganizationLocation;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * @extends Factory<Product>
+ * @extends Factory<EngageProduct>
  */
-class ProductFactory extends Factory
+class EngageProductFactory extends Factory
 {
-    protected $model = Product::class;
+    protected $model = EngageProduct::class;
 
     public function definition(): array
     {
