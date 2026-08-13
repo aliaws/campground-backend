@@ -56,6 +56,19 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // Org-blocking is per-organization, not per-user: a user linked to
+        // multiple orgs where only some are blocked still logs in fine (and
+        // simply won't be able to select a blocked one — see
+        // selectOrganization()/issueTokenFor() below). Only reject here
+        // when the user has links at all and every single one is blocked.
+        // Super-admin is exempt (org-less by design, see User::primaryLocationId()).
+        if (! $user->isSuperAdmin() && $user->locationLinks()->exists() && ! $user->hasAnyActiveOrganization()) {
+            return response()->json([
+                'success' => false,
+                'message' => "Your organization's access has been suspended. Please contact support.",
+            ], 403);
+        }
+
         if ($user->hasRole(User::ROLE_CUSTOMER) && ! $user->hasAnyRole(...User::STAFF_ROLES) && $user->status !== User::STATUS_ACTIVE) {
             return response()->json([
                 'success' => false,
@@ -92,7 +105,7 @@ class AuthController extends Controller
      */
     private function issueTokenFor(User $user): string
     {
-        $ids = $user->locationLinks()->pluck('engage_organization_location_id');
+        $ids = collect($user->activeLocationIds());
         $locationId = $ids->count() === 1 ? $ids->first() : null;
 
         $user->setActiveLocationId($locationId);
@@ -121,6 +134,13 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have access to that organization.',
+            ], 403);
+        }
+
+        if (! $user->isSuperAdmin() && ! in_array($locationId, $user->activeLocationIds(), true)) {
+            return response()->json([
+                'success' => false,
+                'message' => "That organization's access has been suspended.",
             ], 403);
         }
 

@@ -144,9 +144,33 @@ class User extends Authenticatable
         )->withTimestamps();
     }
 
-    /** First linked location id, else system default. */
+    /**
+     * First linked, non-blocked location id; else the system default.
+     *
+     * Super-admin is the one deliberate exception: it always returns null,
+     * never falling through to the system default. Super-admin genuinely
+     * owns no location — before this check existed, a super-admin (who by
+     * construction has zero locationLinks) silently fell through to
+     * operating inside the default organization, exactly like every other
+     * unlinked user. That's the bug this line fixes.
+     */
     public function primaryLocationId(): ?string
     {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $activeId = $this->activeLocationIds()[0] ?? null;
+
+        if (is_string($activeId) && $activeId !== '') {
+            return $activeId;
+        }
+
+        // Every linked org (if any) is blocked, or there are no links at
+        // all — fall back to the first link regardless of block status
+        // (org.active middleware/AuthController::login() are what actually
+        // enforce blocking; this method is resolution, not enforcement),
+        // then the system default.
         $fromJunction = $this->relationLoaded('locationLinks')
             ? $this->locationLinks->first()?->engage_organization_location_id
             : $this->locationLinks()->value('engage_organization_location_id');
@@ -160,6 +184,27 @@ class User extends Authenticatable
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /** This user's location links whose organization is not blocked. */
+    public function activeLocationLinks(): HasMany
+    {
+        return $this->locationLinks()->whereHas(
+            'organizationLocation',
+            fn ($query) => $query->where('status', EngageOrganizationLocation::STATUS_ACTIVE)
+        );
+    }
+
+    /** @return list<string> */
+    public function activeLocationIds(): array
+    {
+        return $this->activeLocationLinks()->pluck('engage_organization_location_id')->all();
+    }
+
+    /** False only when this user has at least one location link and every one of them is blocked. */
+    public function hasAnyActiveOrganization(): bool
+    {
+        return $this->activeLocationLinks()->exists();
     }
 
     public function belongsToLocation(string $locationId): bool

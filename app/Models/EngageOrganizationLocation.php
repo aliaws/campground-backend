@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +14,16 @@ class EngageOrganizationLocation extends Model
 {
     use HasUuids;
 
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_BLOCKED = 'blocked';
+
+    /**
+     * Deliberately NOT fillable — status/blocked_at/blocked_by/block_reason
+     * only ever change through block()/unblock() below, never mass
+     * assignment, so there's exactly one code path that can disable an
+     * organization.
+     */
     protected $fillable = [
         'name',
         'legal_business_name',
@@ -36,7 +48,45 @@ class EngageOrganizationLocation extends Model
         return [
             'business_information' => 'array',
             'is_default' => 'boolean',
+            'blocked_at' => 'datetime',
         ];
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ACTIVE);
+    }
+
+    public function isBlocked(): bool
+    {
+        return $this->status === self::STATUS_BLOCKED;
+    }
+
+    public function blockedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'blocked_by');
+    }
+
+    public function block(User $actor, ?string $reason = null): self
+    {
+        $this->status = self::STATUS_BLOCKED;
+        $this->blocked_at = now();
+        $this->blocked_by = $actor->id;
+        $this->block_reason = $reason;
+        $this->save();
+
+        return $this;
+    }
+
+    public function unblock(): self
+    {
+        $this->status = self::STATUS_ACTIVE;
+        $this->blocked_at = null;
+        $this->blocked_by = null;
+        $this->block_reason = null;
+        $this->save();
+
+        return $this;
     }
 
     public function engageTokens(): HasMany

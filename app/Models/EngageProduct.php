@@ -86,16 +86,16 @@ class EngageProduct extends Model
         return $this->belongsToMany(EngageCategory::class, 'engage_product_categories', 'product_id', 'category_id');
     }
 
-    /** Amenities assigned to this service listing (Services module concept — see product_rental_amenities). */
+    /** Amenities assigned to this service listing (Services module concept — see engage_product_rental_amenities). */
     public function amenities(): BelongsToMany
     {
-        return $this->belongsToMany(Amenity::class, 'product_rental_amenities', 'product_id', 'amenity_id');
+        return $this->belongsToMany(Amenity::class, 'engage_product_rental_amenities', 'product_id', 'amenity_id');
     }
 
-    /** Features assigned to this service listing (Services module concept — see product_rental_features). */
+    /** Features assigned to this service listing (Services module concept — see engage_product_rental_features). */
     public function features(): BelongsToMany
     {
-        return $this->belongsToMany(Feature::class, 'product_rental_features', 'product_id', 'feature_id');
+        return $this->belongsToMany(Feature::class, 'engage_product_rental_features', 'product_id', 'feature_id');
     }
 
     /** All rental variants of this listing (the default/base row included). */

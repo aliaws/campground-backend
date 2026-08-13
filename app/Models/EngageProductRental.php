@@ -49,10 +49,10 @@ class EngageProductRental extends Model
         return $this->belongsTo(EngageProduct::class);
     }
 
-    /** Keyed on the raw GHL category id stored here, not a local FK column — see ProductRentalCategory::rentals(). */
+    /** Keyed on the raw GHL category id stored here, not a local FK column — see EngageProductRentalCategory::rentals(). */
     public function serviceCategory(): BelongsTo
     {
-        return $this->belongsTo(ProductRentalCategory::class, 'service_category_id', 'ghl_category_id');
+        return $this->belongsTo(EngageProductRentalCategory::class, 'service_category_id', 'ghl_category_id');
     }
 
     public function bookings(): HasMany
