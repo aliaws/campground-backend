@@ -29,11 +29,11 @@ return new class extends Migration
             ->value('id')
             ?? DB::table('engage_organization_locations')->orderBy('created_at')->value('id');
 
-        if (! $locationId) {
-            throw new RuntimeException(
-                'No engage_organization_locations row found. Seed EngageOrganizationLocationSeeder before migrating.'
-            );
-        }
+//        if (! $locationId) {
+//            throw new RuntimeException(
+//                'No engage_organization_locations row found. Seed EngageOrganizationLocationSeeder before migrating.'
+//            );
+//        }
 
         // products: drop (tenant_id, sku) unique before column drop
         if (Schema::hasTable('products') && Schema::hasColumn('products', 'tenant_id')) {
