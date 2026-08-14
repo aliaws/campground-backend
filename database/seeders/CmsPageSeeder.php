@@ -18,22 +18,22 @@ class CmsPageSeeder extends Seeder
             [
                 'slug' => CmsPage::SLUG_TERMS_OF_SERVICE,
                 'title' => 'Terms of Service',
-                'content' => ['body' => $this->termsOfService()],
+                'content' => ['body' => $this->toHtml($this->termsOfService())],
             ],
             [
                 'slug' => CmsPage::SLUG_PRIVACY_POLICY,
                 'title' => 'Privacy Policy',
-                'content' => ['body' => $this->privacyPolicy()],
+                'content' => ['body' => $this->toHtml($this->privacyPolicy())],
             ],
             [
                 'slug' => CmsPage::SLUG_SUPPORT,
                 'title' => 'Support',
-                'content' => ['body' => $this->support()],
+                'content' => ['body' => $this->toHtml($this->support())],
             ],
             [
                 'slug' => CmsPage::SLUG_ABOUT_US,
                 'title' => 'About Us',
-                'content' => ['body' => $this->aboutUs()],
+                'content' => ['body' => $this->toHtml($this->aboutUs())],
             ],
             [
                 'slug' => CmsPage::SLUG_CONTACT_US,
@@ -42,7 +42,7 @@ class CmsPageSeeder extends Seeder
                     'phone' => '(555) 012-3456',
                     'email' => 'stay@campgroundrentals.com',
                     'address' => '300 Forest Edge Road, Folsom Lake, CA 95630',
-                    'text' => "Questions about a booking, a site, or your reservation? Our team is happy to help.\n\nAlready have a booking request in? We'll follow up by email or phone shortly to confirm it. For anything urgent, calling is fastest.",
+                    'text' => $this->toHtml("Questions about a booking, a site, or your reservation? Our team is happy to help.\n\nAlready have a booking request in? We'll follow up by email or phone shortly to confirm it. For anything urgent, calling is fastest."),
                 ],
             ],
         ];
@@ -50,6 +50,35 @@ class CmsPageSeeder extends Seeder
         foreach ($pages as $page) {
             CmsPage::query()->updateOrCreate(['slug' => $page['slug']], $page);
         }
+    }
+
+    /**
+     * Content below is authored as plain text with a lightweight "## " =
+     * heading convention (easier to write/review as a heredoc than inline
+     * HTML) and converted to the HTML RichTextEditor/CmsContent actually
+     * expect at seed time. Only used here, at seed time — the real content
+     * lives as HTML in the database from this point on, edited via the
+     * WYSIWYG editor in /superadmin/pages.
+     */
+    private function toHtml(string $plain): string
+    {
+        $blocks = preg_split('/\n\s*\n/', trim($plain));
+        $html = '';
+
+        foreach ($blocks as $block) {
+            $block = trim($block);
+            if ($block === '') {
+                continue;
+            }
+
+            if (str_starts_with($block, '## ')) {
+                $html .= '<h2>'.e(substr($block, 3)).'</h2>';
+            } else {
+                $html .= '<p>'.nl2br(e($block)).'</p>';
+            }
+        }
+
+        return $html;
     }
 
     private function termsOfService(): string
