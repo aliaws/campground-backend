@@ -11,7 +11,6 @@ class EngageSettingResource extends JsonResource
     {
         $token = $this->token;
 
-
         return [
             'id' => $this->id,
             'oauth_state_key' => $this->oauth_state_key,
@@ -20,6 +19,7 @@ class EngageSettingResource extends JsonResource
             'client_secret' => $this->client_secret,
             'api_version' => $this->api_version,
             'api_base_url' => $this->api_base_url,
+            'redirect_uri' => $this->redirect_uri,
             'timezone' => $this->timezone,
             'scopes' => $this->scopes ?? [],
             'user_id' => $token?->user_id,

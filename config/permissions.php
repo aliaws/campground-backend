@@ -86,19 +86,20 @@ return [
         ],
 
         // Engage / GHL settings. Client ID/Secret/API Version/Base
-        // URL/Timezone ("Engage Identifiers") are super-admin-only
-        // (2026-08-14) — they're the credentials for the platform's own
-        // registered GHL app, not per-org data owner/admin should see or
-        // edit; each org's own OAuth grant still lives separately in
-        // engage_tokens, untouched by this. Reached per-organization via
-        // /superadmin/organizations/{organization}/engage-settings, not a
-        // flat/global endpoint.
+        // URL/Redirect URI/Timezone/Scopes ("Engage Identifiers") are
+        // genuinely global, super-admin-only platform data (2026-08-14,
+        // revised same day from an earlier per-org design) — one row for
+        // the whole platform's registered GHL marketplace app, not
+        // per-org data owner/admin should see or edit; each org's own
+        // OAuth grant still lives separately in engage_tokens, untouched
+        // by this. Reached via a standalone /superadmin/engage-settings
+        // form, not a per-organization drill-down tab.
         'engage.identifiers.view' => [
-            'group' => 'engage', 'label' => "View an organization's Engage identifiers",
+            'group' => 'engage', 'label' => 'View the platform Engage identifiers',
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.identifiers.update' => [
-            'group' => 'engage', 'label' => "Update an organization's Engage identifiers",
+            'group' => 'engage', 'label' => 'Update the platform Engage identifiers',
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.tokens.view' => [
@@ -109,9 +110,13 @@ return [
             'group' => 'engage', 'label' => 'Save Engage tokens',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
+        // Widened to include staff (2026-08-14) — the Refresh Token page
+        // (connect/reconnect this org's own GHL location against the
+        // platform-wide app above) is now owner/admin/staff, not just
+        // owner/admin.
         'engage.refresh_token' => [
             'group' => 'engage', 'label' => 'Refresh the Engage access token',
-            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+            'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'engage.data_sync' => [
             'group' => 'engage', 'label' => 'Trigger a GHL data pull/sync',

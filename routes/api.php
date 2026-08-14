@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\V1\SiteMapController;
 use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
+use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -169,6 +170,16 @@ Route::prefix('v1')->group(function () {
         Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
         Route::get('/site-map-icon-types', [SiteMapIconTypeController::class, 'index']);
 
+        // Engage OAuth — Refresh Token page, staff-visible too (2026-08-14,
+        // widened from owner/admin). The Client ID/Secret it authorizes
+        // against are super-admin-only global data (see Tier 3 below); this
+        // is only the per-org "connect/reconnect this org's GHL location"
+        // action + the redirect URL info staff need to register it in GHL.
+        Route::get('/settings/engage/oauth-info', [SettingsController::class, 'getOauthInfo']);
+        Route::get('/settings/engage/authorize', [SettingsController::class, 'getAuthorizeUrl']);
+        Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken'])
+            ->middleware('permission:engage.refresh_token');
+
         // Tier 2 — owner/admin only, nested inside Tier 1: management,
         // deletion, and GHL-sync-triggering actions.
         Route::middleware('role:owner,admin')->group(function () {
@@ -232,15 +243,12 @@ Route::prefix('v1')->group(function () {
             Route::delete('/site-map-icon-types/{iconType}', [SiteMapIconTypeController::class, 'destroy']);
 
             // Engage Identifiers (Client ID/Secret/API Version/Base
-            // URL/Timezone) moved to super-admin only (2026-08-14, see
-            // Tier 3 below, Organization::showEngageSettings/
-            // updateEngageSettings) — owner/admin no longer get
-            // GET/POST /settings/engage at all. They keep the rest:
-            // Refresh Token (uses whatever super-admin already
-            // configured for their org), manual tokens, and data sync.
-            Route::get('/settings/engage/authorize', [SettingsController::class, 'getAuthorizeUrl']);
-            Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken'])
-                ->middleware('permission:engage.refresh_token');
+            // URL/Redirect URI/Timezone/Scopes) are super-admin-only global
+            // platform data (2026-08-14, see Tier 3 below,
+            // Superadmin\EngageSettingsController) — owner/admin never get
+            // these at all. getAuthorizeUrl/refreshToken/getOauthInfo moved
+            // up into Tier 1 above (staff-visible too); manual tokens and
+            // data sync stay owner/admin-only here.
             Route::get('/settings/engage/tokens', [SettingsController::class, 'getTokens']);
             Route::post('/settings/engage/tokens', [SettingsController::class, 'saveTokens']);
             Route::post('/settings/engage/pull-ghl', [SettingsController::class, 'pullAllGhlData'])
@@ -268,9 +276,17 @@ Route::prefix('v1')->group(function () {
         Route::get('/organizations/{organization}/product-transactions', [OrganizationDataController::class, 'productTransactions']);
         Route::get('/organizations/{organization}/staff', [OrganizationDataController::class, 'staff']);
 
-        Route::get('/engage-identifiers', [OrganizationController::class, 'engageIdentifiers']);
-        Route::get('/organizations/{organization}/engage-settings', [OrganizationController::class, 'showEngageSettings']);
-        Route::put('/organizations/{organization}/engage-settings', [OrganizationController::class, 'updateEngageSettings']);
+        // Engage Identifiers — genuinely global (2026-08-14), the
+        // platform's own registered GHL marketplace app credentials, not
+        // per-organization data — a standalone form, not a per-org drill-down
+        // tab. Each organization's own connection status (has_token/
+        // token_expires_at) is already shown on its own detail page above
+        // via EngageOrganizationLocationResource, so no separate cross-org
+        // list is needed here.
+        Route::get('/engage-settings', [EngageSettingsController::class, 'show'])
+            ->middleware('permission:engage.identifiers.view');
+        Route::put('/engage-settings', [EngageSettingsController::class, 'update'])
+            ->middleware('permission:engage.identifiers.update');
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.

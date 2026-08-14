@@ -4,10 +4,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreCustomFieldRequest;
-use App\Http\Requests\StoreEngageSettingRequest;
 use App\Http\Resources\CountryResource;
 use App\Http\Resources\CustomFieldResource;
-use App\Http\Resources\EngageSettingResource;
 use App\Http\Resources\GhlSyncLogResource;
 use App\Models\Country;
 use App\Models\CustomField;
@@ -22,7 +20,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class SettingsController extends Controller
 {
@@ -32,65 +29,43 @@ class SettingsController extends Controller
         private GhlFullSyncService $ghlFullSyncService,
     ) {}
 
-    public function getEngage(Request $request): JsonResponse
+    /**
+     * Redirect URL (and default scopes) so an owner/staff member can
+     * register the right callback URL with GHL, or just see what this
+     * deployment sends, without needing engage.identifiers.view (which
+     * would also expose the platform's Client ID/Secret — genuinely
+     * platform-wide, super-admin-only data, see globalEngageSetting()).
+     */
+    public function getOauthInfo(): JsonResponse
     {
-        $setting = $this->resolveEngageSetting($request->user());
-
-        if (! $setting) {
-            return response()->json([
-                'success' => true,
-                'data' => null,
-                'message' => 'Engage settings not configured.',
-            ]);
-        }
+        $setting = $this->globalEngageSetting();
+        $redirectUri = $setting?->redirect_uri ?: (config('app.url').'/api/v1/settings/engage/callback');
 
         return response()->json([
             'success' => true,
-            'data' => new EngageSettingResource($setting),
-            'message' => 'Engage settings retrieved.',
-        ]);
-    }
-
-    public function storeEngage(StoreEngageSettingRequest $request): JsonResponse
-    {
-        $locationId = $request->user()->resolveOrganizationLocationId();
-        $existing = $this->resolveEngageSetting($request->user());
-        $oauthStateKey = $existing?->oauth_state_key ?? (string) Str::ulid();
-
-        $setting = EngageSetting::updateOrCreate(
-            [EngageSetting::OAUTH_STATE_COLUMN => $oauthStateKey],
-            $request->validated() + ['oauth_state_key' => $oauthStateKey]
-        );
-
-        EngageToken::updateOrCreate(
-            ['engage_setting_id' => $setting->id],
-            [
-                'token_type' => EngageToken::TYPE_LOCATION,
-                'engage_organization_location_id' => $locationId,
-            ]
-        );
-
-        return response()->json([
-            'success' => true,
-            'data' => new EngageSettingResource($setting->load('token')),
-            'message' => 'Engage settings saved.',
+            'data' => [
+                'redirect_uri' => $redirectUri,
+                'scopes' => $this->ghlAuthService->getScopes($setting),
+                'is_configured' => (bool) ($setting?->client_id && $setting?->client_secret),
+            ],
         ]);
     }
 
     public function getAuthorizeUrl(Request $request): JsonResponse
     {
-        $setting = $this->resolveEngageSetting($request->user());
+        $setting = $this->globalEngageSetting();
 
         if (! $setting || ! $setting->client_id || ! $setting->client_secret) {
             return response()->json([
                 'success' => false,
-                'message' => 'Please save your Client ID and Client Secret first.',
+                'message' => 'Engage identifiers have not been configured yet. Contact your platform administrator.',
             ], 422);
         }
 
-        $redirectUri = $request->input('redirect_uri', config('app.url').'/api/v1/settings/engage/callback');
+        $locationId = $request->user()->resolveOrganizationLocationId();
+        $redirectUri = $setting->redirect_uri ?: (config('app.url').'/api/v1/settings/engage/callback');
 
-        $authorizeUrl = $this->ghlAuthService->getAuthorizationUrl($setting, $redirectUri);
+        $authorizeUrl = $this->ghlAuthService->getAuthorizationUrl($setting, $locationId, $redirectUri);
 
         return response()->json([
             'success' => true,
@@ -111,37 +86,33 @@ class SettingsController extends Controller
         ]);
 
         $code = $request->input('code');
+        // The `state` param carries the organization's id (see
+        // getAuthorizeUrl()) — the shared, global EngageSetting no longer
+        // identifies *which organization* started this flow on its own, so
+        // this is what ties the callback back to the right EngageToken row.
         $state = $request->input('state');
 
-        if (! $code) {
+        if (! $code || ! $state) {
             Log::error('Lead Connector OAuth callback missing params', [
                 'code' => $code,
+                'state' => $state,
                 'url' => $request->fullUrl(),
             ]);
 
             return $this->callbackRedirect('error=missing_params');
         }
 
-        // Matched by the state param GHL echoes back (see getAuthorizeUrl(),
-        // which sends $setting->oauth_state_key as `state`) — this is what
-        // ties the callback to the *specific organization* that started this
-        // OAuth flow. Without it, a bare ::first() would land whichever
-        // organization happens to have the lowest-id EngageSetting row,
-        // silently attaching another organization's Lead Connector tokens to
-        // the wrong one whenever more than one is connected.
-        $setting = $state
-            ? EngageSetting::with('token')->where('oauth_state_key', $state)->first()
-            : null;
+        $setting = $this->globalEngageSetting();
 
         if (! $setting) {
-            Log::error('Lead Connector OAuth callback: no matching organization for state', ['state' => $state]);
+            Log::error('Lead Connector OAuth callback: Engage identifiers not configured');
 
             return $this->callbackRedirect('error=settings_not_found');
         }
 
         try {
-            $redirectUri = config('app.url').'/api/v1/settings/engage/callback';
-            $this->ghlAuthService->exchangeCodeForTokens($setting, $code, $redirectUri);
+            $redirectUri = $setting->redirect_uri ?: (config('app.url').'/api/v1/settings/engage/callback');
+            $this->ghlAuthService->exchangeCodeForTokens($setting, $state, $code, $redirectUri);
 
             return $this->callbackRedirect('success=true');
         } catch (\Exception $e) {
@@ -151,9 +122,8 @@ class SettingsController extends Controller
 
     public function refreshToken(Request $request): JsonResponse
     {
-        $setting = $this->resolveEngageSetting($request->user());
-
-        $token = $setting?->token;
+        $setting = $this->globalEngageSetting();
+        $token = $this->resolveOwnToken($request->user());
 
         if (! $setting || ! $token?->refresh_token) {
             return response()->json([
@@ -163,7 +133,7 @@ class SettingsController extends Controller
         }
 
         try {
-            $token = $this->ghlAuthService->refreshAccessToken($setting);
+            $token = $this->ghlAuthService->refreshAccessToken($setting, $token);
             $payload = $this->engageTokenCache->buildPayload($token);
 
             return response()->json([
@@ -217,22 +187,25 @@ class SettingsController extends Controller
         ]);
 
         $locationId = $request->user()->resolveOrganizationLocationId();
-        $setting = $this->resolveEngageSetting($request->user());
+        $setting = $this->globalEngageSetting();
 
         if (! $setting) {
             return response()->json([
                 'success' => false,
-                'message' => 'Please save engage settings first.',
+                'message' => 'Engage identifiers have not been configured yet. Contact your platform administrator.',
             ], 422);
         }
 
-        $existing = EngageToken::query()->where('engage_setting_id', $setting->id)->first();
+        // Keyed by this organization's own location id, not engage_setting_id
+        // — the setting is a shared, global row now (2026-08-14), so keying
+        // by it would overwrite whichever other organization last saved
+        // tokens here instead of creating this organization's own row.
+        $existing = EngageToken::query()->where('engage_organization_location_id', $locationId)->first();
         $previousLocationId = $existing?->location_id;
 
         $updateData = [
             'engage_setting_id' => $setting->id,
             'token_type' => $request->input('token_type', EngageToken::TYPE_LOCATION),
-            'engage_organization_location_id' => $locationId,
         ];
         foreach (['authorization_code', 'access_token', 'refresh_token', 'location_id', 'user_id', 'company_id'] as $field) {
             if ($request->has($field)) {
@@ -241,7 +214,7 @@ class SettingsController extends Controller
         }
 
         $token = EngageToken::updateOrCreate(
-            ['engage_setting_id' => $setting->id],
+            ['engage_organization_location_id' => $locationId],
             $updateData
         );
 
@@ -299,22 +272,21 @@ class SettingsController extends Controller
     }
 
     /**
-     * Scoped strictly to $user's own organization — must never fall back to
-     * "some other organization's settings" when this one hasn't configured
-     * Lead Connector yet, or a staff member would see another
-     * organization's client_id/business info on their own (blank) Engage
-     * Settings page. Returning null here is the correct "not configured
-     * yet" signal every caller already handles.
+     * The Client ID/Secret/etc. credentials — genuinely global (2026-08-14),
+     * the platform's own registered GHL marketplace app, not per-organization
+     * data. Managed exclusively via Superadmin\EngageSettingsController.
      */
-    private function resolveEngageSetting(User $user): ?EngageSetting
+    private function globalEngageSetting(): ?EngageSetting
     {
-        $locationId = $user->resolveOrganizationLocationId();
+        return EngageSetting::query()->first();
+    }
 
-        $token = EngageToken::with('setting.token')
-            ->where('engage_organization_location_id', $locationId)
+    /** This organization's own OAuth grant (access/refresh token, GHL location id, etc.) — always per-org, unlike the setting above. */
+    private function resolveOwnToken(User $user): ?EngageToken
+    {
+        return EngageToken::query()
+            ->where('engage_organization_location_id', $user->resolveOrganizationLocationId())
             ->first();
-
-        return $token?->setting?->loadMissing('token');
     }
 
     /**

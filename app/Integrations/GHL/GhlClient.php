@@ -378,11 +378,14 @@ class GhlClient
 
     private function refreshToken(): void
     {
+        if (! $this->setting || ! $this->token) {
+            throw new \RuntimeException('GHL token refresh failed: no Engage settings/token resolved.');
+        }
+
         try {
             $authService = app(GhlAuthService::class);
-            $this->token = $authService->refreshAccessToken($this->setting);
-            $this->setting = $this->setting->fresh(['token']) ?? $this->setting;
-            $this->accessToken = $this->token?->access_token;
+            $this->token = $authService->refreshAccessToken($this->setting, $this->token);
+            $this->accessToken = $this->token->access_token;
         } catch (\Exception $e) {
             throw new \RuntimeException('GHL token refresh failed: '.$e->getMessage());
         }

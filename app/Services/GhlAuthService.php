@@ -72,20 +72,27 @@ class GhlAuthService
         private EngageTokenCache $engageTokenCache,
     ) {}
 
-    public function getAuthorizationUrl(EngageSetting $setting, string $redirectUri): string
+    /**
+     * @param  string  $organizationLocationId  Encoded as OAuth `state` so the callback
+     *                                          (which only receives the shared, global
+     *                                          EngageSetting's credentials back) knows
+     *                                          which organization's EngageToken to
+     *                                          attach the resulting grant to.
+     */
+    public function getAuthorizationUrl(EngageSetting $setting, string $organizationLocationId, string $redirectUri): string
     {
         $params = http_build_query([
             'response_type' => 'code',
             'client_id' => $setting->client_id,
             'redirect_uri' => $redirectUri,
             'scope' => implode(' ', $this->getScopes($setting)),
-            'state' => $setting->oauth_state_key,
+            'state' => $organizationLocationId,
         ]);
 
         return self::AUTHORIZE_URL.'?'.$params;
     }
 
-    public function exchangeCodeForTokens(EngageSetting $setting, string $code, string $redirectUri): EngageSetting
+    public function exchangeCodeForTokens(EngageSetting $setting, string $organizationLocationId, string $code, string $redirectUri): EngageToken
     {
         $response = Http::asForm()->connectTimeout(self::CONNECT_TIMEOUT)->timeout(self::REQUEST_TIMEOUT)->post(self::TOKEN_URL, [
             'client_id' => $setting->client_id,
@@ -104,7 +111,7 @@ class GhlAuthService
         }
 
         $data = $response->json();
-        $token = $this->resolveToken($setting);
+        $token = $this->resolveTokenForOrganization($setting, $organizationLocationId);
         $previousLocationId = $token->location_id;
 
         $token->fill([
@@ -117,15 +124,15 @@ class GhlAuthService
             'company_id' => $data['companyId'] ?? $token->company_id,
         ])->save();
 
-        $this->engageTokenCache->refresh($token->fresh(), $previousLocationId);
+        $fresh = $token->fresh();
+        $this->engageTokenCache->refresh($fresh, $previousLocationId);
 
-        return $setting->fresh(['token']);
+        return $fresh;
     }
 
-    public function refreshAccessToken(EngageSetting $setting): EngageToken
+    /** $token is this organization's own EngageToken — passed explicitly, never re-resolved, since EngageSetting is now shared platform-wide and no longer identifies an organization on its own. */
+    public function refreshAccessToken(EngageSetting $setting, EngageToken $token): EngageToken
     {
-        $token = $this->resolveToken($setting);
-
         if (! $token->refresh_token) {
             throw new \RuntimeException('No refresh token available. Please re-authorize.');
         }
@@ -178,12 +185,18 @@ class GhlAuthService
         return self::DEFAULT_SCOPES;
     }
 
-    private function resolveToken(EngageSetting $setting): EngageToken
+    /**
+     * Find-or-create this organization's own token row. Deliberately keyed
+     * by engage_organization_location_id, not engage_setting_id — the
+     * setting is a shared, global row now (2026-08-14), so keying by it
+     * would collapse every organization's OAuth grant onto the same token.
+     */
+    private function resolveTokenForOrganization(EngageSetting $setting, string $organizationLocationId): EngageToken
     {
-        $token = $setting->token ?? EngageToken::query()->where('engage_setting_id', $setting->id)->first();
+        $token = EngageToken::query()->where('engage_organization_location_id', $organizationLocationId)->first();
 
         if ($token) {
-            if (! $token->engage_setting_id) {
+            if ($token->engage_setting_id !== $setting->id) {
                 $token->update(['engage_setting_id' => $setting->id]);
             }
 
@@ -193,7 +206,7 @@ class GhlAuthService
         return EngageToken::create([
             'engage_setting_id' => $setting->id,
             'token_type' => EngageToken::TYPE_LOCATION,
-            'engage_organization_location_id' => null,
+            'engage_organization_location_id' => $organizationLocationId,
         ]);
     }
 }
