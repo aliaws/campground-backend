@@ -45,6 +45,16 @@ class CmsPageSeeder extends Seeder
                     'text' => $this->toHtml("Questions about a booking, a site, or your reservation? Our team is happy to help.\n\nAlready have a booking request in? We'll follow up by email or phone shortly to confirm it. For anything urgent, calling is fastest."),
                 ],
             ],
+            [
+                'slug' => CmsPage::SLUG_HEADER,
+                'title' => 'Site Header',
+                'content' => $this->headerContent(),
+            ],
+            [
+                'slug' => CmsPage::SLUG_FOOTER,
+                'title' => 'Site Footer',
+                'content' => $this->footerContent(),
+            ],
         ];
 
         foreach ($pages as $page) {
@@ -224,6 +234,91 @@ An account is created automatically the first time you book as a guest — just 
 
 Reach out through our Contact page with your name, booking reference (if you have one), and a description of what you need — we typically respond within one business day.
 TEXT;
+    }
+
+    /**
+     * Matches the site's actual current hardcoded header exactly — this is
+     * the "apply what we have right now" starting point super-admin then
+     * edits from, not a fresh design. See app/(customer)/layout.tsx's
+     * previous hardcoded baseNavItems/colors for what these values mirror.
+     */
+    private function headerContent(): array
+    {
+        return [
+            'logo_url' => null,
+            'site_title' => [
+                'primary_text' => 'Campground',
+                'secondary_text' => 'Rentals',
+                'primary_color' => '#1b1d21',
+                'secondary_color' => '#135846',
+            ],
+            'menu_items' => [
+                ['id' => 'site-map', 'label' => 'Site Map', 'href' => '/rentals/map', 'sort_order' => 1],
+                ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 2],
+                ['id' => 'about', 'label' => 'About', 'href' => '/about', 'sort_order' => 3],
+                ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 4],
+            ],
+            'layout' => [
+                'logo_position' => 'left',
+                'theme_toggle_position' => 'right',
+                'login_order' => ['customer', 'staff'],
+            ],
+            'style' => [
+                'background_type' => 'default',
+                'background_color' => null,
+                'gradient_from' => null,
+                'gradient_to' => null,
+                'gradient_direction' => 'to right',
+                'background_image_url' => null,
+                'hover_color' => '#135846',
+            ],
+        ];
+    }
+
+    /** Matches the site's actual current hardcoded footer exactly — see app/(customer)/layout.tsx's previous hardcoded footer JSX. */
+    private function footerContent(): array
+    {
+        return [
+            'logo_url' => null,
+            'site_title' => [
+                'primary_text' => 'Campground',
+                'secondary_text' => 'Rentals',
+                'primary_color' => '#ffffff',
+                'secondary_color' => '#ffffff',
+            ],
+            'description' => 'Cabins, campsites and glamping stays — book your next escape in minutes and pay securely online.',
+            'sections' => [
+                'explore' => [
+                    'title' => 'Explore',
+                    'items' => [
+                        ['id' => 'browse-rentals', 'label' => 'Browse Rentals', 'href' => '/', 'sort_order' => 1],
+                        ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 2],
+                        ['id' => 'about-us', 'label' => 'About Us', 'href' => '/about', 'sort_order' => 3],
+                        ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 4],
+                    ],
+                ],
+                'legal' => [
+                    'title' => 'Legal',
+                    'items' => [
+                        ['id' => 'terms', 'label' => 'Terms of Service', 'href' => '/terms-of-service', 'sort_order' => 1],
+                        ['id' => 'privacy', 'label' => 'Privacy Policy', 'href' => '/privacy-policy', 'sort_order' => 2],
+                        ['id' => 'support', 'label' => 'Support', 'href' => '/support', 'sort_order' => 3],
+                    ],
+                ],
+            ],
+            'contact_section_title' => 'Get in touch',
+            'contact_fields_order' => ['address', 'phone', 'email'],
+            'copyright_text' => '© {year} Campground Rentals. All bookings are subject to our cancellation policy.',
+            'style' => [
+                'background_type' => 'default',
+                'background_color' => null,
+                'gradient_from' => null,
+                'gradient_to' => null,
+                'gradient_direction' => 'to right',
+                'background_image_url' => null,
+                'hover_color' => '#ffffff',
+            ],
+        ];
     }
 
     private function aboutUs(): string

@@ -292,14 +292,18 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:engage.identifiers.update');
 
         // CMS pages (2026-08-14) — Terms of Service, Privacy Policy,
-        // Support, About Us, Contact Us. Same "genuinely global" reasoning
-        // as Engage Identifiers above: one set of pages for the whole
-        // platform, not per-organization.
+        // Support, About Us, Contact Us, Header, Footer. Same "genuinely
+        // global" reasoning as Engage Identifiers above: one set of pages
+        // for the whole platform, not per-organization.
         Route::get('/pages', [CmsPageController::class, 'index'])
             ->middleware('permission:cms.pages.view');
         Route::get('/pages/{slug}', [CmsPageController::class, 'show'])
             ->middleware('permission:cms.pages.view');
         Route::put('/pages/{slug}', [CmsPageController::class, 'update'])
+            ->middleware('permission:cms.pages.update');
+        Route::post('/pages/{slug}/image', [CmsPageController::class, 'uploadImage'])
+            ->middleware('permission:cms.pages.update');
+        Route::delete('/pages/{slug}/image', [CmsPageController::class, 'deleteImage'])
             ->middleware('permission:cms.pages.update');
 
         // Platform-level reference data, moved here from the owner/admin

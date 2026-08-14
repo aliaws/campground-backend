@@ -19,13 +19,25 @@ class CmsPage extends Model
 
     public const SLUG_CONTACT_US = 'contact-us';
 
-    /** The five fixed slugs this table holds — not a general-purpose page builder. */
+    public const SLUG_HEADER = 'header';
+
+    public const SLUG_FOOTER = 'footer';
+
+    /** The seven fixed slugs this table holds — not a general-purpose page builder. */
     public const SLUGS = [
         self::SLUG_TERMS_OF_SERVICE,
         self::SLUG_PRIVACY_POLICY,
         self::SLUG_SUPPORT,
         self::SLUG_ABOUT_US,
         self::SLUG_CONTACT_US,
+        self::SLUG_HEADER,
+        self::SLUG_FOOTER,
+    ];
+
+    /** header/footer have a logo_url field superadmin can upload an image into — see Superadmin\CmsPageController::uploadLogo(). */
+    public const LOGO_SLUGS = [
+        self::SLUG_HEADER,
+        self::SLUG_FOOTER,
     ];
 
     protected $fillable = [
@@ -39,5 +51,11 @@ class CmsPage extends Model
         return [
             'content' => 'array',
         ];
+    }
+
+    /** Cache key for the public-facing payload of this page — see PublicCmsPageController/Superadmin\CmsPageController. */
+    public static function cacheKey(string $slug): string
+    {
+        return "cms:page:{$slug}";
     }
 }
