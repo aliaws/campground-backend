@@ -31,7 +31,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'user' => new UserResource($user),
+                'user' => new UserResource($this->asSelf($request, $user)),
                 'token' => $token,
             ],
             'message' => 'Registration successful.',
@@ -81,11 +81,47 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'user' => new UserResource($user),
+                'user' => new UserResource($this->asSelf($request, $user)),
                 'token' => $token,
             ],
             'message' => 'Login successful.',
         ]);
+    }
+
+    /**
+     * login()/register() are unauthenticated routes — $request->user() is
+     * still null at the point UserResource is built, even though we've
+     * just identified exactly who $user is. UserResource's `permissions`
+     * field is gated on `$request->user()?->id === $this->id` (deliberately
+     * self-lookup-only, so serializing some *other* user — e.g. a staff
+     * list — never leaks their allowed actions) — that check silently came
+     * back false on every login/register response, so the frontend's
+     * AuthContext seeded allowedActions as [] until the next /auth/me call,
+     * and the Sidebar/AppLayout rendered as if the user had zero
+     * permissions until a manual page reload fixed it.
+     *
+     * The fix has to reach two different Request objects, confirmed via
+     * live debugging (not guessed): the $request injected into this
+     * controller method (a LoginRequest/RegisterRequest FormRequest
+     * instance) is NOT the same object JsonResource ends up resolving —
+     * UserResource::toArray() is invoked lazily during response
+     * json_encode() via JsonResource::jsonSerialize() -> resolve(), which
+     * falls back to Container::getInstance()->make('request') when no
+     * request is explicitly passed through — a *different*, separately
+     * bound Request instance in this app's request lifecycle. Setting the
+     * resolver only on the controller's own $request left the
+     * container-bound one (the one actually used at serialization time)
+     * untouched, so the permissions field kept coming back missing even
+     * after the "fix." Stamping both closes the gap without touching
+     * UserResource's actual security semantics at all.
+     */
+    private function asSelf(Request $request, User $user): User
+    {
+        $resolver = fn () => $user;
+        $request->setUserResolver($resolver);
+        app('request')->setUserResolver($resolver);
+
+        return $user;
     }
 
     /**
