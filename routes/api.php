@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
+use App\Http\Controllers\Api\V1\Public\PublicCmsPageController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\Api\V1\SiteMapController;
 use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
+use App\Http\Controllers\Api\V1\Superadmin\CmsPageController;
 use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
@@ -54,6 +56,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
+            Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
 
@@ -287,6 +290,17 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:engage.identifiers.view');
         Route::put('/engage-settings', [EngageSettingsController::class, 'update'])
             ->middleware('permission:engage.identifiers.update');
+
+        // CMS pages (2026-08-14) — Terms of Service, Privacy Policy,
+        // Support, About Us, Contact Us. Same "genuinely global" reasoning
+        // as Engage Identifiers above: one set of pages for the whole
+        // platform, not per-organization.
+        Route::get('/pages', [CmsPageController::class, 'index'])
+            ->middleware('permission:cms.pages.view');
+        Route::get('/pages/{slug}', [CmsPageController::class, 'show'])
+            ->middleware('permission:cms.pages.view');
+        Route::put('/pages/{slug}', [CmsPageController::class, 'update'])
+            ->middleware('permission:cms.pages.update');
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.

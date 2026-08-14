@@ -305,6 +305,18 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        // CMS pages (2026-08-14) — Terms of Service, Privacy Policy,
+        // Support, About Us, Contact Us. Genuinely global platform content,
+        // same reasoning as Engage Identifiers above.
+        'cms.pages.view' => [
+            'group' => 'config', 'label' => 'View CMS page content (superadmin editor)',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'cms.pages.update' => [
+            'group' => 'config', 'label' => 'Update CMS page content',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         // Org-level config (owner/admin)
         'custom_field.view' => [
             'group' => 'config', 'label' => 'View custom fields',
