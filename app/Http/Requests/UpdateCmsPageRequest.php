@@ -74,6 +74,12 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.contact_fields_order' => ['required', 'array', 'size:3'],
                 'content.contact_fields_order.*' => ['required', 'string', 'in:address,phone,email'],
                 'content.copyright_text' => ['required', 'string', 'max:500'],
+                // Order of the four footer columns themselves (brand/logo
+                // block, Explore, Legal, Get in Touch) — independent of
+                // contact_fields_order above, which only reorders the
+                // fields *inside* the Get in Touch column.
+                'content.column_order' => ['required', 'array', 'size:4'],
+                'content.column_order.*' => ['required', 'string', 'in:brand,explore,legal,contact'],
             ];
         }
 

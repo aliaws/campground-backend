@@ -308,6 +308,7 @@ TEXT;
             ],
             'contact_section_title' => 'Get in touch',
             'contact_fields_order' => ['address', 'phone', 'email'],
+            'column_order' => ['brand', 'explore', 'legal', 'contact'],
             'copyright_text' => '© {year} Campground Rentals. All bookings are subject to our cancellation policy.',
             'style' => [
                 'background_type' => 'default',
