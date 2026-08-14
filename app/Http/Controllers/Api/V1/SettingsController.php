@@ -47,6 +47,7 @@ class SettingsController extends Controller
                 'redirect_uri' => $redirectUri,
                 'scopes' => $this->ghlAuthService->getScopes($setting),
                 'is_configured' => (bool) ($setting?->client_id && $setting?->client_secret),
+                'location_installation_url_template' => $setting?->location_installation_url_template,
             ],
         ]);
     }

@@ -28,6 +28,7 @@ class EngageSetting extends Model
         'api_version',
         'api_base_url',
         'redirect_uri',
+        'location_installation_url_template',
         'timezone',
         'scopes',
     ];

@@ -20,6 +20,7 @@ class EngageSettingResource extends JsonResource
             'api_version' => $this->api_version,
             'api_base_url' => $this->api_base_url,
             'redirect_uri' => $this->redirect_uri,
+            'location_installation_url_template' => $this->location_installation_url_template,
             'timezone' => $this->timezone,
             'scopes' => $this->scopes ?? [],
             'user_id' => $token?->user_id,
