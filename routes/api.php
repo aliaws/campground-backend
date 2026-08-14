@@ -231,11 +231,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/site-map-icon-types', [SiteMapIconTypeController::class, 'store']);
             Route::delete('/site-map-icon-types/{iconType}', [SiteMapIconTypeController::class, 'destroy']);
 
-            // Engage settings — full access (identifiers, tokens, refresh,
-            // data sync). super-admin gets a read-only equivalent under
-            // /superadmin/* instead (see Tier 3 below).
-            Route::get('/settings/engage', [SettingsController::class, 'getEngage']);
-            Route::post('/settings/engage', [SettingsController::class, 'storeEngage']);
+            // Engage Identifiers (Client ID/Secret/API Version/Base
+            // URL/Timezone) moved to super-admin only (2026-08-14, see
+            // Tier 3 below, Organization::showEngageSettings/
+            // updateEngageSettings) — owner/admin no longer get
+            // GET/POST /settings/engage at all. They keep the rest:
+            // Refresh Token (uses whatever super-admin already
+            // configured for their org), manual tokens, and data sync.
             Route::get('/settings/engage/authorize', [SettingsController::class, 'getAuthorizeUrl']);
             Route::post('/settings/engage/refresh-token', [SettingsController::class, 'refreshToken'])
                 ->middleware('permission:engage.refresh_token');
@@ -267,6 +269,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/organizations/{organization}/staff', [OrganizationDataController::class, 'staff']);
 
         Route::get('/engage-identifiers', [OrganizationController::class, 'engageIdentifiers']);
+        Route::get('/organizations/{organization}/engage-settings', [OrganizationController::class, 'showEngageSettings']);
+        Route::put('/organizations/{organization}/engage-settings', [OrganizationController::class, 'updateEngageSettings']);
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.

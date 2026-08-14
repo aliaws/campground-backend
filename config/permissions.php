@@ -85,15 +85,21 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
 
-        // Engage / GHL settings
+        // Engage / GHL settings. Client ID/Secret/API Version/Base
+        // URL/Timezone ("Engage Identifiers") are super-admin-only
+        // (2026-08-14) — they're the credentials for the platform's own
+        // registered GHL app, not per-org data owner/admin should see or
+        // edit; each org's own OAuth grant still lives separately in
+        // engage_tokens, untouched by this. Reached per-organization via
+        // /superadmin/organizations/{organization}/engage-settings, not a
+        // flat/global endpoint.
         'engage.identifiers.view' => [
-            'group' => 'engage', 'label' => 'View Engage identifiers (read-only)',
-            'roles' => ['superadmin', 'owner', 'admin'], 'decider' => 'role+org',
-            'deciders' => ['superadmin' => 'role+platform'],
+            'group' => 'engage', 'label' => "View an organization's Engage identifiers",
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.identifiers.update' => [
-            'group' => 'engage', 'label' => 'Update Engage settings',
-            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+            'group' => 'engage', 'label' => "Update an organization's Engage identifiers",
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.tokens.view' => [
             'group' => 'engage', 'label' => 'View Engage tokens',
