@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\Customer\CustomerPortalController;
 use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\FeatureController;
+use App\Http\Controllers\Api\V1\OrganizationProfileController;
 use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
@@ -44,6 +45,18 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:api');
     Route::get('/auth/me', [AuthController::class, 'me'])->middleware('auth:api');
     Route::post('/auth/select-organization', [AuthController::class, 'selectOrganization'])->middleware('auth:api');
+
+    // Staff forgot/reset/change password (owner/admin/staff/superadmin) —
+    // separate from the customer portal's identically-shaped /customer/*
+    // flow below, since the reset link points at a different frontend page.
+    Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])
+        ->middleware('throttle:staff-forgot-password');
+    Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
+        ->middleware('throttle:staff-forgot-password');
+    Route::post('/auth/change-password', [AuthController::class, 'changePassword'])
+        ->middleware(['auth:api', 'throttle:staff-change-password']);
+    Route::post('/auth/avatar', [AuthController::class, 'uploadAvatar'])->middleware('auth:api');
+    Route::delete('/auth/avatar', [AuthController::class, 'deleteAvatar'])->middleware('auth:api');
 
     // Webhooks (no auth - GHL calls these)
     Route::post('/webhooks/ghl', [WebhookController::class, 'ghl']);
@@ -207,6 +220,14 @@ Route::prefix('v1')->group(function () {
         // Tier 2 — owner/admin only, nested inside Tier 1: management,
         // deletion, and GHL-sync-triggering actions.
         Route::middleware('role:owner,admin')->group(function () {
+            // Self-service — the Profile page's "Business Information"
+            // section, editing the caller's OWN organization (not the
+            // superadmin cross-org drill-down under /superadmin/*).
+            Route::get('/organization/profile', [OrganizationProfileController::class, 'show'])
+                ->middleware('permission:organization.profile.view');
+            Route::put('/organization/profile', [OrganizationProfileController::class, 'update'])
+                ->middleware('permission:organization.profile.update');
+
             Route::post('/products', [ProductController::class, 'store']);
             Route::put('/products/{product}', [ProductController::class, 'update']);
             Route::delete('/products/{product}', [ProductController::class, 'destroy']);

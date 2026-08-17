@@ -18,6 +18,7 @@ use Illuminate\Notifications\Notifiable;
     'name',
     'email',
     'password',
+    'avatar_url',
     'roles',
     'status',
     'jwt_version',

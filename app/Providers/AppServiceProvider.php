@@ -65,6 +65,18 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by((string) $id);
         });
 
+        RateLimiter::for('staff-forgot-password', function (Request $request) {
+            $email = strtolower((string) $request->input('email', $request->ip()));
+
+            return Limit::perHour(5)->by($request->ip().'|'.$email);
+        });
+
+        RateLimiter::for('staff-change-password', function (Request $request) {
+            $id = $request->user()?->id ?? $request->ip();
+
+            return Limit::perMinute(10)->by((string) $id);
+        });
+
         // Configurable via .env — see config/organization.php's rate_limits block.
         RateLimiter::for('organization-register', fn (Request $request) => Limit::perHour(
             (int) config('organization.rate_limits.register_per_hour')

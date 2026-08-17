@@ -84,6 +84,18 @@ return [
             'group' => 'organization', 'label' => "View an organization's staff accounts",
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
+        // Self-service: an owner/admin editing their OWN organization's
+        // business profile (name, address, phone, etc. — the Profile page's
+        // "Business Information" section), not the cross-org drill-down
+        // above, which stays superadmin-only.
+        'organization.profile.view' => [
+            'group' => 'organization', 'label' => "View your own organization's business profile",
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
+        'organization.profile.update' => [
+            'group' => 'organization', 'label' => "Update your own organization's business profile",
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
 
         // Engage / GHL settings. Client ID/Secret/API Version/Base
         // URL/Redirect URI/Timezone/Scopes ("Engage Identifiers") are

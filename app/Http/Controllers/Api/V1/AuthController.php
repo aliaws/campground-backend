@@ -4,18 +4,25 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Auth\JwtGuard;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\ChangePasswordRequest;
+use App\Http\Requests\Auth\ForgotPasswordRequest;
+use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\StaffAccountService;
 use App\Support\SessionJwt;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    public function __construct(private StaffAccountService $staffAccounts) {}
+
     public function register(RegisterRequest $request): JsonResponse
     {
         $user = User::create([
@@ -227,6 +234,101 @@ class AuthController extends Controller
             'success' => true,
             'data' => new UserResource($user),
             'message' => 'Authenticated user.',
+        ]);
+    }
+
+    /**
+     * Staff forgot-password (owner/admin/staff/superadmin) — deliberately
+     * always returns the same success message regardless of whether the
+     * email matched a real staff account, so this endpoint can't be used
+     * to enumerate staff emails.
+     */
+    public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
+    {
+        $this->staffAccounts->forgotPassword($request->validated('email'));
+
+        return response()->json([
+            'success' => true,
+            'data' => null,
+            'message' => 'If a staff account exists for that email, a password reset link has been sent.',
+        ]);
+    }
+
+    public function resetPassword(ResetPasswordRequest $request): JsonResponse
+    {
+        try {
+            $this->staffAccounts->resetPassword(
+                $request->validated('token'),
+                $request->validated('password')
+            );
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => null,
+            'message' => 'Password reset successfully. Please log in.',
+        ]);
+    }
+
+    public function changePassword(ChangePasswordRequest $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        try {
+            $token = $this->staffAccounts->changePassword(
+                $user,
+                $request->validated('current_password'),
+                $request->validated('password')
+            );
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => ['token' => $token],
+            'message' => 'Password updated.',
+        ]);
+    }
+
+    public function uploadAvatar(Request $request): JsonResponse
+    {
+        $request->validate([
+            'avatar' => ['required', 'file', 'image', 'max:2048'],
+        ]);
+
+        $user = $this->staffAccounts->updateAvatar($request->user(), $request->file('avatar'));
+
+        return response()->json([
+            'success' => true,
+            'data' => new UserResource($user),
+            'message' => 'Profile picture updated.',
+        ]);
+    }
+
+    public function deleteAvatar(Request $request): JsonResponse
+    {
+        $user = $this->staffAccounts->deleteAvatar($request->user());
+
+        return response()->json([
+            'success' => true,
+            'data' => new UserResource($user),
+            'message' => 'Profile picture removed.',
         ]);
     }
 }
