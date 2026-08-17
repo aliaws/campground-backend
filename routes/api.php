@@ -80,7 +80,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/register', [OrganizationRegistrationController::class, 'register'])
                 ->middleware('throttle:organization-register');
             Route::post('/{organization}/complete', [OrganizationRegistrationController::class, 'complete'])
-                ->middleware('throttle:organization-register');
+                ->middleware('throttle:organization-complete');
             Route::post('/resend-verification', [OrganizationRegistrationController::class, 'resend'])
                 ->middleware('throttle:organization-resend-verification');
             Route::post('/verify-code', [OrganizationRegistrationController::class, 'verifyCode'])
