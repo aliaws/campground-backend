@@ -23,7 +23,9 @@ class CmsPage extends Model
 
     public const SLUG_FOOTER = 'footer';
 
-    /** The seven fixed slugs this table holds — not a general-purpose page builder. */
+    public const SLUG_FAQ = 'faq';
+
+    /** The eight fixed slugs this table holds — not a general-purpose page builder. */
     public const SLUGS = [
         self::SLUG_TERMS_OF_SERVICE,
         self::SLUG_PRIVACY_POLICY,
@@ -32,6 +34,7 @@ class CmsPage extends Model
         self::SLUG_CONTACT_US,
         self::SLUG_HEADER,
         self::SLUG_FOOTER,
+        self::SLUG_FAQ,
     ];
 
     /** header/footer have a logo_url field superadmin can upload an image into — see Superadmin\CmsPageController::uploadLogo(). */

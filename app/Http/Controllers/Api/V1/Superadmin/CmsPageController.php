@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Manages the seven fixed platform CMS pages (CmsPage::SLUGS) — not a
+ * Manages the eight fixed platform CMS pages (CmsPage::SLUGS) — not a
  * general page builder, so there's no store()/destroy(); every slug
  * already exists via CmsPageSeeder and only its title/content are edited.
  *

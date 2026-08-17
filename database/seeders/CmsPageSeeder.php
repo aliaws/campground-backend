@@ -4,9 +4,10 @@ namespace Database\Seeders;
 
 use App\Models\CmsPage;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Str;
 
 /**
- * Seeds the five platform-wide CMS pages with real, usable starting content
+ * Seeds the eight platform-wide CMS pages with real, usable starting content
  * (not lorem-ipsum placeholders) — super-admin can edit any of it afterward
  * via /superadmin/pages. Safe to re-run: updateOrCreate keyed by slug.
  */
@@ -18,22 +19,22 @@ class CmsPageSeeder extends Seeder
             [
                 'slug' => CmsPage::SLUG_TERMS_OF_SERVICE,
                 'title' => 'Terms of Service',
-                'content' => ['body' => $this->toHtml($this->termsOfService())],
+                'content' => ['body' => $this->toHtml($this->termsOfService()), 'background_color' => null],
             ],
             [
                 'slug' => CmsPage::SLUG_PRIVACY_POLICY,
                 'title' => 'Privacy Policy',
-                'content' => ['body' => $this->toHtml($this->privacyPolicy())],
+                'content' => ['body' => $this->toHtml($this->privacyPolicy()), 'background_color' => null],
             ],
             [
                 'slug' => CmsPage::SLUG_SUPPORT,
                 'title' => 'Support',
-                'content' => ['body' => $this->toHtml($this->support())],
+                'content' => ['body' => $this->toHtml($this->support()), 'background_color' => null],
             ],
             [
                 'slug' => CmsPage::SLUG_ABOUT_US,
                 'title' => 'About Us',
-                'content' => ['body' => $this->toHtml($this->aboutUs())],
+                'content' => ['body' => $this->toHtml($this->aboutUs()), 'background_color' => null],
             ],
             [
                 'slug' => CmsPage::SLUG_CONTACT_US,
@@ -43,6 +44,7 @@ class CmsPageSeeder extends Seeder
                     'email' => 'stay@campgroundrentals.com',
                     'address' => '300 Forest Edge Road, Folsom Lake, CA 95630',
                     'text' => $this->toHtml("Questions about a booking, a site, or your reservation? Our team is happy to help.\n\nAlready have a booking request in? We'll follow up by email or phone shortly to confirm it. For anything urgent, calling is fastest."),
+                    'background_color' => null,
                 ],
             ],
             [
@@ -54,6 +56,11 @@ class CmsPageSeeder extends Seeder
                 'slug' => CmsPage::SLUG_FOOTER,
                 'title' => 'Site Footer',
                 'content' => $this->footerContent(),
+            ],
+            [
+                'slug' => CmsPage::SLUG_FAQ,
+                'title' => 'Frequently Asked Questions',
+                'content' => ['items' => $this->faqItems(), 'background_color' => null],
             ],
         ];
 
@@ -251,6 +258,8 @@ TEXT;
                 'secondary_text' => 'Rentals',
                 'primary_color' => '#1b1d21',
                 'secondary_color' => '#135846',
+                'primary_color_dark' => '#f8f8f8',
+                'secondary_color_dark' => '#4ade80',
             ],
             'menu_items' => [
                 ['id' => 'site-map', 'label' => 'Site Map', 'href' => '/rentals/map', 'sort_order' => 1],
@@ -285,6 +294,8 @@ TEXT;
                 'secondary_text' => 'Rentals',
                 'primary_color' => '#ffffff',
                 'secondary_color' => '#ffffff',
+                'primary_color_dark' => null,
+                'secondary_color_dark' => null,
             ],
             'description' => 'Cabins, campsites and glamping stays — book your next escape in minutes and pay securely online.',
             'sections' => [
@@ -303,6 +314,7 @@ TEXT;
                         ['id' => 'terms', 'label' => 'Terms of Service', 'href' => '/terms-of-service', 'sort_order' => 1],
                         ['id' => 'privacy', 'label' => 'Privacy Policy', 'href' => '/privacy-policy', 'sort_order' => 2],
                         ['id' => 'support', 'label' => 'Support', 'href' => '/support', 'sort_order' => 3],
+                        ['id' => 'faq', 'label' => 'FAQ', 'href' => '/faq', 'sort_order' => 4],
                     ],
                 ],
             ],
@@ -343,5 +355,71 @@ We care about the land we operate on as much as we care about your stay. That me
 
 Have questions about a rental or need help planning your stay? Reach out any time on our Contact page — we're happy to help.
 TEXT;
+    }
+
+    /** @return array<int, array{id: string, question: string, answer: string, sort_order: int}> */
+    private function faqItems(): array
+    {
+        $items = [
+            [
+                'question' => 'How do I book a rental?',
+                'answer' => 'Browse available cabins, campsites, and RV sites from the homepage, pick your check-in and check-out dates, and follow the checkout steps. You\'ll get a confirmation by email — some bookings confirm instantly, while others go through a brief review by our team first.',
+            ],
+            [
+                'question' => 'Do I need to create an account to book?',
+                'answer' => 'No — you can book as a guest with just your name, email, and phone number. An account is created for you automatically the first time you book, so you can come back later, use the same email, and set a password to sign in and manage your reservations.',
+            ],
+            [
+                'question' => 'What payment methods do you accept?',
+                'answer' => 'We accept major credit and debit cards through our secure online checkout. Depending on the listing, cash payment in person may also be available — this is shown as a payment option at checkout when applicable.',
+            ],
+            [
+                'question' => 'When is my card actually charged?',
+                'answer' => 'For online payments, you\'ll get a secure payment link by email as soon as your booking request is created — your reservation is fully confirmed once that payment is completed. If you pay by cash, your site is held and payment is collected in person, with your reservation confirmed at that point.',
+            ],
+            [
+                'question' => 'Is a security deposit required?',
+                'answer' => 'Some listings require a refundable security deposit, shown in your quote and invoice before you complete a booking. Deposits are refunded after checkout provided there\'s no damage, excessive cleaning needed, or policy violations.',
+            ],
+            [
+                'question' => 'Can I change or cancel my reservation?',
+                'answer' => 'Yes. Sign in to your account and open the booking from "My Bookings" to see your options, or contact us with your booking details and we\'ll help directly. How much (if anything) is refunded depends on the listing\'s cancellation policy and how close to check-in you are — see our Terms of Service for the general policy.',
+            ],
+            [
+                'question' => 'How do I find my booking confirmation or invoice?',
+                'answer' => 'Every booking confirmation includes a link to view your invoice, and it\'s also always available from "My Bookings" in your account — you can view or download it any time, whether you paid online or in cash.',
+            ],
+            [
+                'question' => 'I didn\'t receive a confirmation email — what do I do?',
+                'answer' => 'First check your spam or promotions folder. If it\'s still missing, sign in to "My Bookings" to confirm the reservation actually went through, or contact us with the name and email used for the booking and we\'ll resend your confirmation.',
+            ],
+            [
+                'question' => 'Can I see where a site is located before booking?',
+                'answer' => 'Yes — use the interactive site map (linked from the homepage and the main navigation) to see exactly where each rental sits on the property, check live availability for your dates, and jump straight to booking from there.',
+            ],
+            [
+                'question' => 'What happens after I submit a booking request?',
+                'answer' => 'Most bookings are confirmed right away. A small number are briefly reviewed by our team first (for example, to double-check availability on a specific site) — if that happens, you\'ll hear from us by email or phone shortly after you book.',
+            ],
+            [
+                'question' => 'Can I book multiple sites or add extras to my reservation?',
+                'answer' => 'Yes — your reservation can include more than one rental and any available add-on items for your stay. Everything is combined into one checkout, with pricing for each item shown before you confirm.',
+            ],
+            [
+                'question' => 'How do I get in touch if I still have questions?',
+                'answer' => 'Reach out through our Contact page with your name, booking reference (if you have one), and a description of what you need — we typically respond within one business day. For anything urgent close to your check-in date, calling is fastest.',
+            ],
+        ];
+
+        return array_values(array_map(
+            fn (array $item, int $index) => [
+                'id' => Str::slug($item['question']),
+                'question' => $item['question'],
+                'answer' => $item['answer'],
+                'sort_order' => $index + 1,
+            ],
+            $items,
+            array_keys($items)
+        ));
     }
 }

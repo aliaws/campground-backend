@@ -34,6 +34,19 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.email' => ['nullable', 'email', 'max:255'],
                 'content.address' => ['nullable', 'string', 'max:500'],
                 'content.text' => ['nullable', 'string', 'max:5000'],
+                'content.background_color' => ['nullable', 'string', 'max:20'],
+            ];
+        }
+
+        if ($slug === CmsPage::SLUG_FAQ) {
+            return $rules + [
+                'content' => ['required', 'array'],
+                'content.items' => ['present', 'array'],
+                'content.items.*.id' => ['required', 'string', 'max:64'],
+                'content.items.*.question' => ['required', 'string', 'max:500'],
+                'content.items.*.answer' => ['required', 'string', 'max:5000'],
+                'content.items.*.sort_order' => ['required', 'integer'],
+                'content.background_color' => ['nullable', 'string', 'max:20'],
             ];
         }
 
@@ -86,6 +99,7 @@ class UpdateCmsPageRequest extends FormRequest
         return $rules + [
             'content' => ['required', 'array'],
             'content.body' => ['required', 'string', 'max:50000'],
+            'content.background_color' => ['nullable', 'string', 'max:20'],
         ];
     }
 
@@ -98,6 +112,10 @@ class UpdateCmsPageRequest extends FormRequest
             'content.site_title.secondary_text' => ['nullable', 'string', 'max:100'],
             'content.site_title.primary_color' => ['required', 'string', 'max:20'],
             'content.site_title.secondary_color' => ['required', 'string', 'max:20'],
+            // Optional dark-mode overrides — fall back to the light-mode
+            // colors above when unset (see CmsSiteTitle's frontend doc).
+            'content.site_title.primary_color_dark' => ['nullable', 'string', 'max:20'],
+            'content.site_title.secondary_color_dark' => ['nullable', 'string', 'max:20'],
         ];
     }
 
