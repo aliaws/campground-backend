@@ -64,5 +64,15 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(10)->by((string) $id);
         });
+
+        RateLimiter::for('organization-register', fn (Request $request) => Limit::perHour(10)->by($request->ip()));
+
+        RateLimiter::for('organization-resend-verification', function (Request $request) {
+            $locationId = (string) $request->input('location_id');
+
+            return Limit::perHour(5)->by($request->ip().'|'.$locationId);
+        });
+
+        RateLimiter::for('organization-verify', fn (Request $request) => Limit::perMinute(10)->by($request->ip()));
     }
 }

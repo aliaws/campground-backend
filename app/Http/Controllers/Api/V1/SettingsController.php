@@ -9,6 +9,7 @@ use App\Http\Resources\CustomFieldResource;
 use App\Http\Resources\GhlSyncLogResource;
 use App\Models\Country;
 use App\Models\CustomField;
+use App\Models\EngageOrganizationLocation;
 use App\Models\EngageSetting;
 use App\Models\EngageToken;
 use App\Models\GhlSyncLog;
@@ -16,6 +17,7 @@ use App\Models\User;
 use App\Services\EngageTokenCache;
 use App\Services\GhlAuthService;
 use App\Services\GhlFullSyncService;
+use App\Services\OrganizationRegistrationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -27,6 +29,7 @@ class SettingsController extends Controller
         private GhlAuthService $ghlAuthService,
         private EngageTokenCache $engageTokenCache,
         private GhlFullSyncService $ghlFullSyncService,
+        private OrganizationRegistrationService $organizationRegistrations,
     ) {}
 
     /**
@@ -86,16 +89,9 @@ class SettingsController extends Controller
         ]);
 
         $code = $request->input('code');
-        // The `state` param carries the organization's id (see
-        // getAuthorizeUrl()) — the shared, global EngageSetting no longer
-        // identifies *which organization* started this flow on its own, so
-        // this is what ties the callback back to the right EngageToken row.
-        $state = $request->input('state');
 
-        if (! $code || ! $state) {
-            Log::error('Lead Connector OAuth callback missing params', [
-                'code' => $code,
-                'state' => $state,
+        if (! $code) {
+            Log::error('Lead Connector OAuth callback missing code', [
                 'url' => $request->fullUrl(),
             ]);
 
@@ -110,14 +106,81 @@ class SettingsController extends Controller
             return $this->callbackRedirect('error=settings_not_found');
         }
 
-        try {
-            $redirectUri = $setting->redirect_uri ?: (config('app.url').'/api/v1/settings/engage/callback');
-            $this->ghlAuthService->exchangeCodeForTokens($setting, $state, $code, $redirectUri);
+        $redirectUri = $setting->redirect_uri ?: (config('app.url').'/api/v1/settings/engage/callback');
 
-            return $this->callbackRedirect('success=true');
-        } catch (\Exception $e) {
-            return $this->callbackRedirect('error='.urlencode($e->getMessage()));
+        // The `state` param carries the organization's id (see
+        // getAuthorizeUrl()) for the existing owner/admin/staff "connect
+        // this org's own GHL location" flow. The public "Register for
+        // Application" marketplace-install flow doesn't go through
+        // getAuthorizeUrl() at all (it redirects straight to GHL's own
+        // hosted install page), so GHL calls this same callback back with
+        // only `code` — no `state` — for that flow. Both are handled here
+        // since GHL only lets one redirect_uri be registered per app.
+        $state = $request->input('state');
+
+        if ($state) {
+            try {
+                $this->ghlAuthService->exchangeCodeForTokens($setting, $state, $code, $redirectUri);
+
+                return $this->callbackRedirect('success=true');
+            } catch (\Exception $e) {
+                return $this->callbackRedirect('error='.urlencode($e->getMessage()));
+            }
         }
+
+        try {
+            $data = $this->ghlAuthService->exchangeCodeForTokensWithoutOrganization($setting, $code, $redirectUri);
+            $ghlLocationId = $data['locationId'] ?? null;
+
+            if (! $ghlLocationId) {
+                Log::error('Lead Connector OAuth callback (organization registration): no locationId in token response', [
+                    'response' => $data,
+                ]);
+
+                return $this->registrationCallbackRedirect('error=no_location_id');
+            }
+
+            $organization = $this->organizationRegistrations->findOrCreateByGhlLocationId($ghlLocationId);
+            $this->saveTokenForOrganization($setting, $organization, $code, $data);
+
+            return $this->registrationCallbackRedirect('organization='.$organization->id);
+        } catch (\Exception $e) {
+            return $this->registrationCallbackRedirect('error='.urlencode($e->getMessage()));
+        }
+    }
+
+    /**
+     * Mirrors what GhlAuthService::exchangeCodeForTokens()'s
+     * resolveTokenForOrganization()+fill()->save() does internally, but for
+     * an organization only just identified via the response body itself
+     * (see handleCallback()'s state-less branch) rather than known upfront.
+     */
+    private function saveTokenForOrganization(EngageSetting $setting, EngageOrganizationLocation $organization, string $code, array $data): EngageToken
+    {
+        $token = EngageToken::query()
+            ->where('engage_organization_location_id', $organization->id)
+            ->first() ?? new EngageToken([
+                'engage_organization_location_id' => $organization->id,
+                'token_type' => EngageToken::TYPE_LOCATION,
+            ]);
+
+        $previousLocationId = $token->location_id;
+
+        $token->fill([
+            'engage_setting_id' => $setting->id,
+            'authorization_code' => $code,
+            'access_token' => $data['access_token'],
+            'refresh_token' => $data['refresh_token'],
+            'token_expiry' => now()->addSeconds($data['expires_in'] ?? 86400),
+            'location_id' => $data['locationId'] ?? $token->location_id,
+            'user_id' => $data['userId'] ?? $token->user_id,
+            'company_id' => $data['companyId'] ?? $token->company_id,
+        ])->save();
+
+        $fresh = $token->fresh();
+        $this->engageTokenCache->refresh($fresh, $previousLocationId);
+
+        return $fresh;
     }
 
     public function refreshToken(Request $request): JsonResponse
@@ -232,6 +295,13 @@ class SettingsController extends Controller
         $frontendUrl = config('app.frontend_url');
 
         return redirect("{$frontendUrl}/settings/engage/tokens?{$query}");
+    }
+
+    private function registrationCallbackRedirect(string $query): RedirectResponse
+    {
+        $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+
+        return redirect("{$frontendUrl}/register-application/complete?{$query}");
     }
 
     public function getCountries(): JsonResponse

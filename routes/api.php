@@ -12,9 +12,11 @@ use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
+use App\Http\Controllers\Api\V1\Public\OrganizationRegistrationController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicCmsPageController;
+use App\Http\Controllers\Api\V1\Public\PublicCountryController;
 use App\Http\Controllers\Api\V1\Public\PublicEngageController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
@@ -59,6 +61,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
             Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);
             Route::get('/engage/installation-url-template', [PublicEngageController::class, 'installationUrlTemplate']);
+            Route::get('/countries', [PublicCountryController::class, 'index']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
 
@@ -68,6 +71,22 @@ Route::prefix('v1')->group(function () {
         });
         Route::middleware('throttle:customer-booking')->group(function () {
             Route::post('/bookings', [PublicBookingController::class, 'store']);
+        });
+
+        // Self-service organization registration — see
+        // OrganizationRegistrationService's doc comment for the full flow.
+        // Rate limiters mirror the customer-auth ones directly above.
+        Route::prefix('engage/organizations')->group(function () {
+            Route::post('/register', [OrganizationRegistrationController::class, 'register'])
+                ->middleware('throttle:organization-register');
+            Route::post('/{organization}/complete', [OrganizationRegistrationController::class, 'complete'])
+                ->middleware('throttle:organization-register');
+            Route::post('/resend-verification', [OrganizationRegistrationController::class, 'resend'])
+                ->middleware('throttle:organization-resend-verification');
+            Route::post('/verify-code', [OrganizationRegistrationController::class, 'verifyCode'])
+                ->middleware('throttle:organization-verify');
+            Route::post('/create-password', [OrganizationRegistrationController::class, 'createPassword'])
+                ->middleware('throttle:organization-verify');
         });
     });
 

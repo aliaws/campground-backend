@@ -19,6 +19,16 @@ class EngageOrganizationLocation extends Model
     public const STATUS_BLOCKED = 'blocked';
 
     /**
+     * Created by the public "Register for Application" flow the moment a
+     * location id is submitted, before the GHL OAuth install/callback has
+     * even happened, let alone business info + owner-email verification.
+     * Deliberately excluded from scopeActive()/User::activeLocationLinks()
+     * (same `where('status', STATUS_ACTIVE)` check blocked already excludes
+     * it) — nobody can select/log into an uninstalled organization.
+     */
+    public const STATUS_UNINSTALLED = 'uninstalled';
+
+    /**
      * Deliberately NOT fillable — status/blocked_at/blocked_by/block_reason
      * only ever change through block()/unblock() below, never mass
      * assignment, so there's exactly one code path that can disable an
@@ -60,6 +70,11 @@ class EngageOrganizationLocation extends Model
     public function isBlocked(): bool
     {
         return $this->status === self::STATUS_BLOCKED;
+    }
+
+    public function isUninstalled(): bool
+    {
+        return $this->status === self::STATUS_UNINSTALLED;
     }
 
     public function blockedByUser(): BelongsTo
