@@ -143,7 +143,10 @@ class SettingsController extends Controller
             $organization = $this->organizationRegistrations->findOrCreateByGhlLocationId($ghlLocationId);
             $this->saveTokenForOrganization($setting, $organization, $code, $data);
 
-            return $this->registrationCallbackRedirect('organization='.$organization->id);
+            return $this->registrationCallbackRedirect(http_build_query([
+                'organization' => $organization->id,
+                'location_id' => $organization->engage_location_id,
+            ]));
         } catch (\Exception $e) {
             return $this->registrationCallbackRedirect('error='.urlencode($e->getMessage()));
         }
