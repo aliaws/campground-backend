@@ -20,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('engage:refresh-expired-tokens')
             ->everySixHours()
             ->withoutOverlapping();
+        $schedule->command('engage:sync-all')
+            ->everySixHours()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([

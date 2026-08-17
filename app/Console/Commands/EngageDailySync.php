@@ -6,9 +6,9 @@ use App\Services\GhlFullSyncService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
-class GhlDailySync extends Command
+class EngageDailySync extends Command
 {
-    protected $signature = 'ghl:sync-all {--location= : Only sync this engage_organization_location_id, instead of every configured location}';
+    protected $signature = 'engage:sync-all {--location= : Only sync this engage_organization_location_id, instead of every configured location}';
 
     protected $description = 'Pull Contacts, Categories, Products, Services/Rentals, and paid Invoices/Bookings from GHL for every location with Engage settings configured.';
 
