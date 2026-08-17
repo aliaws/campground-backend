@@ -118,16 +118,6 @@ return [
             'group' => 'engage', 'label' => 'Refresh the Engage access token',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
-        // "Register for Application" page: types a GHL location id, gets
-        // redirected to the platform's install-to-location URL (the
-        // super-admin-managed {location_id} template, substituted
-        // client-side). No per-org data read/written — just exposes the
-        // same global template value already returned by GET
-        // /settings/engage/oauth-info.
-        'engage.installation.view' => [
-            'group' => 'engage', 'label' => 'View/use the location installation URL template',
-            'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role',
-        ],
         'engage.data_sync' => [
             'group' => 'engage', 'label' => 'Trigger a GHL data pull/sync',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',

@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\ProductTransactionController;
 use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicCmsPageController;
+use App\Http\Controllers\Api\V1\Public\PublicEngageController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
@@ -57,6 +58,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
             Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);
+            Route::get('/engage/installation-url-template', [PublicEngageController::class, 'installationUrlTemplate']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
             Route::get('/bookings/{booking}', [PublicBookingController::class, 'show']);
 
