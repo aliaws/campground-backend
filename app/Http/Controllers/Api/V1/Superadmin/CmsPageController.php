@@ -70,6 +70,23 @@ class CmsPageController extends Controller
             $data['content']['style']['background_image_url'] = $existing?->content['style']['background_image_url'] ?? null;
         }
 
+        // The header's Style editor (custom background/hover color) was
+        // removed from the UI — a fixed color doesn't adapt between light
+        // and dark mode, so a custom value always looks wrong in one of
+        // the two. Enforced here too, not just by omission in the
+        // frontend, so a direct API call can't reintroduce it.
+        if ($slug === CmsPage::SLUG_HEADER) {
+            $data['content']['style'] = [
+                'background_type' => 'default',
+                'background_color' => null,
+                'gradient_from' => null,
+                'gradient_to' => null,
+                'gradient_direction' => null,
+                'background_image_url' => null,
+                'hover_color' => '#135846',
+            ];
+        }
+
         $page = CmsPage::query()->updateOrCreate(['slug' => $slug], $data);
 
         Cache::forget(CmsPage::cacheKey($slug));
