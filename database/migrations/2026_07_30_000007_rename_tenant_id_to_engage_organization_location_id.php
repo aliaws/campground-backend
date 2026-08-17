@@ -82,7 +82,7 @@ return new class extends Migration
 
             DB::table($tableName)->update(['engage_organization_location_id' => $locationId]);
 
-            DB::statement("ALTER TABLE {$tableName} ALTER COLUMN engage_organization_location_id SET NOT NULL");
+            //DB::statement("ALTER TABLE {$tableName} ALTER COLUMN engage_organization_location_id SET NOT NULL");
 
             $fkName = substr(str_replace('_', '', $tableName), 0, 18).'_eol_fk';
             Schema::table($tableName, function (Blueprint $table) use ($fkName) {
