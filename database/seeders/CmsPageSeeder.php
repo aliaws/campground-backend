@@ -19,22 +19,22 @@ class CmsPageSeeder extends Seeder
             [
                 'slug' => CmsPage::SLUG_TERMS_OF_SERVICE,
                 'title' => 'Terms of Service',
-                'content' => ['body' => $this->toHtml($this->termsOfService()), 'background_color' => null],
+                'content' => ['body' => $this->toHtml($this->termsOfService())],
             ],
             [
                 'slug' => CmsPage::SLUG_PRIVACY_POLICY,
                 'title' => 'Privacy Policy',
-                'content' => ['body' => $this->toHtml($this->privacyPolicy()), 'background_color' => null],
+                'content' => ['body' => $this->toHtml($this->privacyPolicy())],
             ],
             [
                 'slug' => CmsPage::SLUG_SUPPORT,
                 'title' => 'Support',
-                'content' => ['body' => $this->toHtml($this->support()), 'background_color' => null],
+                'content' => ['body' => $this->toHtml($this->support())],
             ],
             [
                 'slug' => CmsPage::SLUG_ABOUT_US,
                 'title' => 'About Us',
-                'content' => ['body' => $this->toHtml($this->aboutUs()), 'background_color' => null],
+                'content' => ['body' => $this->toHtml($this->aboutUs())],
             ],
             [
                 'slug' => CmsPage::SLUG_CONTACT_US,
@@ -44,7 +44,6 @@ class CmsPageSeeder extends Seeder
                     'email' => 'stay@campgroundrentals.com',
                     'address' => '300 Forest Edge Road, Folsom Lake, CA 95630',
                     'text' => $this->toHtml("Questions about a booking, a site, or your reservation? Our team is happy to help.\n\nAlready have a booking request in? We'll follow up by email or phone shortly to confirm it. For anything urgent, calling is fastest."),
-                    'background_color' => null,
                 ],
             ],
             [
@@ -60,7 +59,7 @@ class CmsPageSeeder extends Seeder
             [
                 'slug' => CmsPage::SLUG_FAQ,
                 'title' => 'Frequently Asked Questions',
-                'content' => ['items' => $this->faqItems(), 'background_color' => null],
+                'content' => ['items' => $this->faqItems()],
             ],
         ];
 

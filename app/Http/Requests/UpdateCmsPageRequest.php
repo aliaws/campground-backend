@@ -34,7 +34,6 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.email' => ['nullable', 'email', 'max:255'],
                 'content.address' => ['nullable', 'string', 'max:500'],
                 'content.text' => ['nullable', 'string', 'max:5000'],
-                'content.background_color' => ['nullable', 'string', 'max:20'],
             ];
         }
 
@@ -46,7 +45,6 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.items.*.question' => ['required', 'string', 'max:500'],
                 'content.items.*.answer' => ['required', 'string', 'max:5000'],
                 'content.items.*.sort_order' => ['required', 'integer'],
-                'content.background_color' => ['nullable', 'string', 'max:20'],
             ];
         }
 
@@ -99,7 +97,6 @@ class UpdateCmsPageRequest extends FormRequest
         return $rules + [
             'content' => ['required', 'array'],
             'content.body' => ['required', 'string', 'max:50000'],
-            'content.background_color' => ['nullable', 'string', 'max:20'],
         ];
     }
 
