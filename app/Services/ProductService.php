@@ -83,7 +83,14 @@ class ProductService
         $categoryIds = $data['category_ids'] ?? null;
         $amenityIds = $data['amenity_ids'] ?? null;
         $featureIds = $data['feature_ids'] ?? null;
-        unset($data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants']);
+        // Base-rental pricing fields (Manage Service's Pricing section) —
+        // pulled out the same way as amenity/feature ids above, since they
+        // live on EngageProductRental, not EngageProduct itself.
+        $rentalData = array_intersect_key($data, array_flip(['listing_price', 'service_duration_unit', 'security_deposit_amount']));
+        unset(
+            $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
+            $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
+        );
 
         $product->update($data);
 
@@ -101,6 +108,12 @@ class ProductService
 
         if ($featureIds !== null) {
             $product->features()->sync($featureIds);
+        }
+
+        // Same reasoning — only a rental has a base rental row to write
+        // these onto; the goods form never sends these keys at all.
+        if ($rentalData !== [] && $product->isRental()) {
+            $product->resolveBaseRental()?->update($rentalData);
         }
 
         return $product->fresh()->load(self::EAGER);

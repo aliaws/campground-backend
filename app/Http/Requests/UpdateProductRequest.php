@@ -39,6 +39,13 @@ class UpdateProductRequest extends FormRequest
             'amenity_ids.*' => ['string', 'exists:amenities,id'],
             'feature_ids' => ['nullable', 'array'],
             'feature_ids.*' => ['string', 'exists:features,id'],
+            // Manage Service's Pricing section — display/reference values on
+            // the base rental row, not the live GHL booking quote. Harmless
+            // to accept generically (the goods form never sends these keys),
+            // same convention as amenity_ids/feature_ids above.
+            'listing_price' => ['nullable', 'numeric', 'min:0'],
+            'service_duration_unit' => ['nullable', Rule::in(['hour', 'day', 'week', 'month'])],
+            'security_deposit_amount' => ['nullable', 'numeric', 'min:0'],
         ];
     }
 }

@@ -9,9 +9,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A bookable rental/service variant. The base listing is stored here too as
- * the product's "default" row (products.product_rental_id). Only the GHL pull
- * creates rows — everything beyond these identifiers (durations, quantity,
- * pricing rules, booking times) is fetched live from GHL, never stored.
+ * the product's "default" row (products.product_rental_id). Only the GHL
+ * pull creates rows. listing_price/service_duration_unit/
+ * security_deposit_amount are staff-editable locally (Manage Service's
+ * Pricing section, 2026-08-18) — display/reference values only, e.g. the
+ * product list's "From Price" column. They do NOT feed the live GHL quote
+ * a guest actually pays for at booking time — that's still entirely
+ * GhlRentalGateway/BookingPriceCalculator, unchanged, GHL-sourced, and not
+ * persisted anywhere. Everything else about a rental (actual booking
+ * windows, availability, real pricing rules) is fetched live from GHL,
+ * never stored.
  */
 class EngageProductRental extends Model
 {
@@ -29,6 +36,7 @@ class EngageProductRental extends Model
         'ghl_id',
         'ghl_product_id',
         'listing_price',
+        'security_deposit_amount',
         'product_id',
         'service_category_id',
         'service_id',
@@ -41,6 +49,7 @@ class EngageProductRental extends Model
             'service_duration' => 'integer',
             'map_position' => 'json',
             'listing_price' => 'decimal:2',
+            'security_deposit_amount' => 'decimal:2',
         ];
     }
 
