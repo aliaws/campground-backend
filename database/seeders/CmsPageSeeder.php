@@ -318,6 +318,11 @@ TEXT;
                 ],
             ],
             'contact_section_title' => 'Get in touch',
+            // Same starting values as Contact Us's own seed below —
+            // independently editable from here on, not derived from it.
+            'address' => '300 Forest Edge Road, Folsom Lake, CA 95630',
+            'phone' => '(555) 012-3456',
+            'email' => 'stay@campgroundrentals.com',
             'contact_fields_order' => ['address', 'phone', 'email'],
             'column_order' => ['brand', 'explore', 'legal', 'contact'],
             'copyright_text' => '© {year} Campground Rentals. All bookings are subject to our cancellation policy.',

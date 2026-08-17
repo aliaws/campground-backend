@@ -82,6 +82,12 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.sections.legal.items.*.href' => ['required', 'string', 'max:500'],
                 'content.sections.legal.items.*.sort_order' => ['required', 'integer'],
                 'content.contact_section_title' => ['required', 'string', 'max:100'],
+                // The footer's own address/phone/email — independently
+                // editable from the identically-shaped Contact Us fields,
+                // not derived from them.
+                'content.address' => ['nullable', 'string', 'max:500'],
+                'content.phone' => ['nullable', 'string', 'max:100'],
+                'content.email' => ['nullable', 'email', 'max:255'],
                 'content.contact_fields_order' => ['required', 'array', 'size:3'],
                 'content.contact_fields_order.*' => ['required', 'string', 'in:address,phone,email'],
                 'content.copyright_text' => ['required', 'string', 'max:500'],
