@@ -1418,7 +1418,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/products?search=cabin&product_type=PHYSICAL&is_rental=1&status=active&engage_sync_status=synced&category_id={{category_id}}&per_page=15",
+                  "raw": "{{base_url}}/products?search=cabin&product_type=PHYSICAL&is_rental=1&status=active&engage_sync_status=synced&category_id={{category_id}}&per_page=15&service_category_id={{service_category_id}}",
                   "host": [
                     "{{base_url}}"
                   ],
@@ -1460,6 +1460,12 @@
                       "key": "per_page",
                       "value": "15",
                       "disabled": true
+                    },
+                    {
+                      "key": "service_category_id",
+                      "value": "{{service_category_id}}",
+                      "disabled": true,
+                      "description": "Rental-side counterpart of category_id \u2014 filters to products whose rentals belong to this ServiceCategory (id, not ghl_category_id). Used by Manage Service's own category filter (is_rental=1)."
                     }
                   ]
                 },
@@ -2367,14 +2373,22 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/categories",
+                  "raw": "{{base_url}}/categories?industry_type=pos",
                   "host": [
                     "{{base_url}}"
                   ],
                   "path": [
                     "categories"
+                  ],
+                  "query": [
+                    {
+                      "key": "industry_type",
+                      "value": "pos",
+                      "description": "pos | rental. Omit to get both. A category is industry_type=rental (with rental_category_id set) when GHL calendars/service-categories associated it via associationId \u2014 see GhlServiceSyncService::pullServiceCategories()."
+                    }
                   ]
-                }
+                },
+                "description": "\n\nEach category now also carries industry_type ('pos'/'rental', default 'pos') and rental_category_id (FK to a ServiceCategory, set only when GHL's pull matched this category's engage_collection_id against a service category's associationId). Filter to industry_type=pos for a Product-Categories-only view (e.g. the Manage Categories admin page)."
               },
               "response": []
             }

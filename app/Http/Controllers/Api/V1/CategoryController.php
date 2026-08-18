@@ -19,11 +19,14 @@ class CategoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $categories = EngageCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
-            ->withCount('products')
-            ->orderBy('sort_order')
-            ->orderBy('name')
-            ->get();
+        $query = EngageCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+            ->withCount('products');
+
+        if ($request->filled('industry_type')) {
+            $query->where('industry_type', $request->industry_type);
+        }
+
+        $categories = $query->orderBy('sort_order')->orderBy('name')->get();
 
         return response()->json([
             'success' => true,

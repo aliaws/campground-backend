@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
+use App\Models\EngageCategory;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
@@ -397,8 +398,28 @@ class GhlServiceSyncService
                 if ($category) {
                     $category->update($data + ['ghl_category_id' => $ghlId]);
                 } else {
-                    EngageProductRentalCategory::create($data + ['ghl_category_id' => $ghlId]);
+                    $category = EngageProductRentalCategory::create($data + ['ghl_category_id' => $ghlId]);
                     $results['created']++;
+                }
+
+                // Each service-category item also carries `industryType`
+                // ('pos'/'rental') and, when GHL considers this category the
+                // rental-side counterpart of a regular Category, an
+                // `associationId` matching that Category's
+                // engage_collection_id. Only ever touches a Category already
+                // known here (never creates one) and only within this same
+                // tenant — engage_collection_id isn't unique across
+                // organizations on its own, so the tenant scope is what
+                // keeps one org's pull from ever touching another org's row.
+                $associationId = $ghlCategory['associationId'] ?? null;
+
+                if ($associationId) {
+                    EngageCategory::where('engage_organization_location_id', $tenantId)
+                        ->where('engage_collection_id', $associationId)
+                        ->update([
+                            'industry_type' => $ghlCategory['industryType'] ?? EngageCategory::INDUSTRY_TYPE_RENTAL,
+                            'rental_category_id' => $category->id,
+                        ]);
                 }
 
                 $results['pulled']++;

@@ -55,6 +55,18 @@ class ProductService
             $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
         }
 
+        // Rental-side counterpart of category_id above — Manage Service's
+        // own category filter. Same indirection listServices() already uses:
+        // product_rentals.service_category_id stores the raw GHL category
+        // id, not this table's local ULID, so it's resolved first.
+        if (! empty($filters['service_category_id'])) {
+            $ghlCategoryId = EngageProductRentalCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'] ?? null)
+                ->where('id', $filters['service_category_id'])
+                ->value('ghl_category_id');
+
+            $query->whereHas('rentals', fn (Builder $q) => $q->where('service_category_id', $ghlCategoryId ?? '__none__'));
+        }
+
         return $query->with(self::EAGER)
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);

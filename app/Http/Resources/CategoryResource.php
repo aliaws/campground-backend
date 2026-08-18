@@ -19,6 +19,8 @@ class CategoryResource extends JsonResource
             'engage_collection_id' => $this->engage_collection_id,
             'engage_sync_status' => $this->engage_sync_status,
             'engage_last_synced_at' => $this->engage_last_synced_at,
+            'industry_type' => $this->industry_type,
+            'rental_category_id' => $this->rental_category_id,
             'products_count' => $this->whenCounted('products'),
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,

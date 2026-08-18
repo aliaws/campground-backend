@@ -155,6 +155,7 @@ class GhlFullSyncService
 
             $this->runPhase('services', $phaseErrors, function () use ($tenantId, &$counts) {
                 $result = $this->serviceSyncService->pullServices($tenantId);
+
                 // "Services" = distinct rental listings (base rows); "Rentals" =
                 // every bookable unit under them, base + variants combined
                 // (`pulled`, the pre-existing total) — NOT `variants_pulled`
