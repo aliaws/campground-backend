@@ -143,6 +143,24 @@ class SettingsController extends Controller
             $organization = $this->organizationRegistrations->findOrCreateByGhlLocationId($ghlLocationId);
             $this->saveTokenForOrganization($setting, $organization, $code, $data);
 
+            // findOrCreateByGhlLocationId() only ever creates a brand-new
+            // row (status 'uninstalled') for a location GHL has never sent
+            // us before — that's the one case that genuinely needs the
+            // Complete Registration flow (business info -> email verify ->
+            // owner password). Any organization that already exists here
+            // (status 'active', or even 'blocked') isn't a new
+            // registration — it's an existing org's GHL connection being
+            // re-authorized (e.g. an already-logged-in admin clicking
+            // Authorize from /admin/engages/tokens, which goes through the
+            // marketplace-install URL and so, unlike getAuthorizeUrl(),
+            // never carries `state`). Sending an already-set-up org through
+            // the registration-complete redirect would either 404 or
+            // re-trigger onboarding for an org that's done with it — send
+            // it back to the real Engage Tokens page instead.
+            if ($organization->status !== EngageOrganizationLocation::STATUS_UNINSTALLED) {
+                return $this->callbackRedirect('success=true');
+            }
+
             return $this->registrationCallbackRedirect(http_build_query([
                 'organization' => $organization->id,
                 'location_id' => $organization->engage_location_id,
