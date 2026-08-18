@@ -194,6 +194,39 @@ class BookingService
     }
 
     /**
+     * Retries the Text2Pay invoice for a 'requested' ('card'/online) booking
+     * that never got one — the known gap where create()'s else branch (see
+     * above) swallows a GHL failure into a log line, leaving a booking that
+     * came back 201 with no invoice/transaction and no way for the customer
+     * to pay. Unlike confirm() above, this does NOT skip straight to a real
+     * GHL calendar booking + 'confirmed' status — it retries the *original*
+     * step (create the invoice, leave the booking 'requested' awaiting the
+     * customer's online payment), exactly as if create() had succeeded the
+     * first time.
+     *
+     * Guarded on no invoice already existing — createText2PayInvoice()
+     * would otherwise create a genuine duplicate invoice for a booking that
+     * already has one, and createFromBooking() has no dedupe of its own
+     * (always inserts a new row).
+     */
+    public function retryInvoice(EngageBooking $booking): EngageBooking
+    {
+        if ($booking->status !== 'requested') {
+            throw new \InvalidArgumentException('Only a requested booking can have its invoice retried.');
+        }
+
+        if ($booking->ghl_invoice_id || $booking->ghl_invoice_url) {
+            throw new \InvalidArgumentException('This booking already has an invoice.');
+        }
+
+        $this->ghlBookingService->createText2PayInvoice($booking);
+        $this->rentalTransactionService->createFromBooking($booking);
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
      * Auto-confirm a booking whose payment was just marked paid (webhook,
      * invoice reconciliation, cash pay, or RentalTransactionService::confirmPayment()).
      *

@@ -190,6 +190,7 @@ Route::prefix('v1')->group(function () {
         Route::patch('/bookings/{booking}/status', [BookingController::class, 'updateStatus']);
         Route::patch('/bookings/{booking}/check-in-out', [BookingController::class, 'updateCheckInOut']);
         Route::post('/bookings/{booking}/confirm', [BookingController::class, 'confirm']);
+        Route::post('/bookings/{booking}/retry-invoice', [BookingController::class, 'retryInvoice']);
         Route::post('/bookings/{booking}/pay-cash', [BookingController::class, 'payCash']);
 
         // Transactions — sole source of truth split across two tables as of
