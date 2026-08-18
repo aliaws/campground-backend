@@ -13,7 +13,6 @@ use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
 use App\Services\GhlLocationContext;
 use App\Services\GhlService;
-use App\Services\OrganizationLocationResolver;
 use App\Services\RentalResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,8 +31,10 @@ class PublicBookingController extends Controller
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
     public function quote(QuoteBookingRequest $request): JsonResponse
     {
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
-        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $locationId);
+        // No forced default org — resolves globally across every
+        // organization's rentals (user-directed, 2026-08-19), then the
+        // resolved product's own org is what scopes the GHL call below.
+        $resolved = $this->rentalResolver->resolve($request->validated('product_id'));
 
         if (! $resolved) {
             return response()->json([
@@ -95,9 +96,8 @@ class PublicBookingController extends Controller
 
     public function store(StoreCustomerBookingRequest $request): JsonResponse
     {
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
-
-        $resolved = $this->rentalResolver->resolve($request->validated('product_id'), $locationId);
+        // No forced default org — see quote() above for the same reasoning.
+        $resolved = $this->rentalResolver->resolve($request->validated('product_id'));
 
         if (! $resolved) {
             return response()->json([
@@ -117,6 +117,7 @@ class PublicBookingController extends Controller
             ], 422);
         }
 
+        $locationId = $product->engage_organization_location_id;
         $createdBy = User::createdByLabel(null, $request->input('name', ''));
 
         $customer = $this->customerService->findOrCreate(

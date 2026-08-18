@@ -26,6 +26,12 @@ class PublicProductResource extends JsonResource
             'track_product_inventory' => $this->track_product_inventory,
             'quantity' => $this->quantity,
             'categories' => CategoryResource::collection($this->whenLoaded('categories')),
+            // The Shop page now aggregates every organization's catalog
+            // together (2026-08-19) — a guest needs to see which "store" a
+            // product belongs to, since checkout can only ever settle items
+            // from one organization at a time.
+            'organization_id' => $this->engage_organization_location_id,
+            'organization_name' => $this->whenLoaded('organizationLocation', fn () => $this->organizationLocation?->name),
         ];
     }
 }

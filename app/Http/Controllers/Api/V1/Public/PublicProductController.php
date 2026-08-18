@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PublicProductResource;
-use App\Services\OrganizationLocationResolver;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +13,11 @@ use Illuminate\Http\Request;
  * (non-rental products), the sibling of PublicServiceController for
  * rentals. Read-only, unauthenticated, rate-limited under the same
  * customer-browse throttle group as the rest of /public/*.
+ *
+ * No engage_organization_location_id filter — aggregates every
+ * (non-blocked) organization's products together rather than one default
+ * org (user-directed, 2026-08-19). See
+ * ProductService::scopeToLocationOrAllActiveOrgs()'s doc comment.
  */
 class PublicProductController extends Controller
 {
@@ -24,7 +28,6 @@ class PublicProductController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = [
-            'engage_organization_location_id' => OrganizationLocationResolver::resolveDefaultLocationId(),
             'search' => $request->input('search'),
             'category_ids' => $request->input('category_ids', []),
             'min_price' => $request->input('min_price'),

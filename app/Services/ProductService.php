@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRentalCategory;
 use Illuminate\Database\Eloquent\Builder;
@@ -215,11 +216,13 @@ class ProductService
      */
     public function listStorefront(array $filters = []): LengthAwarePaginator
     {
-        $query = EngageProduct::byLocation($filters['engage_organization_location_id'])
+        $query = EngageProduct::query()
             ->whereNull('product_rental_id')
             ->where('status', 'active')
             ->where('available_in_store', true)
-            ->with(['categories']);
+            ->with(['categories', 'organizationLocation']);
+
+        $this->scopeToLocationOrAllActiveOrgs($query, $filters);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {
@@ -265,10 +268,12 @@ class ProductService
      */
     public function listServices(array $filters = []): LengthAwarePaginator
     {
-        $query = EngageProduct::byLocation($filters['engage_organization_location_id'])
+        $query = EngageProduct::query()
             ->whereNotNull('product_rental_id')
             ->where('status', 'active')
             ->with(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
+
+        $this->scopeToLocationOrAllActiveOrgs($query, $filters);
 
         if (! empty($filters['search'])) {
             $query->where(function (Builder $q) use ($filters) {
@@ -291,8 +296,11 @@ class ProductService
         // resolve local id -> ghl id first, same indirection
         // EngageProductRental::serviceCategory() itself does for a single row.
         if (! empty($filters['service_category_id'])) {
-            $ghlCategoryId = EngageProductRentalCategory::where('engage_organization_location_id', $filters['engage_organization_location_id'])
-                ->where('id', $filters['service_category_id'])
+            // No org filter needed here — service_category_id is already a
+            // specific, globally-unique local ULID (and, since a public
+            // cross-org call has no single org of its own, there's nothing
+            // to scope it to anyway).
+            $ghlCategoryId = EngageProductRentalCategory::where('id', $filters['service_category_id'])
                 ->value('ghl_category_id');
 
             // An unmatched/local-only category (no ghl_category_id yet) has
@@ -326,6 +334,33 @@ class ProductService
             $perPage,
             $page,
             ['path' => LengthAwarePaginator::resolveCurrentPath()]
+        );
+    }
+
+    /**
+     * Shared by listStorefront()/listServices(): every staff caller
+     * (authenticated, always scoped to their own org) passes a real
+     * engage_organization_location_id and gets byLocation()'s exact
+     * pre-existing behavior, unchanged. The public storefront controllers
+     * omit it entirely — a guest browsing the homepage/Shop isn't tied to
+     * any one organization, and should see every organization's catalog
+     * aggregated together (user-directed, 2026-08-19: "each organization
+     * can have different categories... why not all rental services").
+     * Restricted to non-blocked organizations only, so a blocked org's
+     * inventory never surfaces on the public site even though it's still
+     * fully intact in the database.
+     */
+    private function scopeToLocationOrAllActiveOrgs(Builder $query, array $filters): void
+    {
+        if (! empty($filters['engage_organization_location_id'])) {
+            $query->byLocation($filters['engage_organization_location_id']);
+
+            return;
+        }
+
+        $query->whereIn(
+            'engage_organization_location_id',
+            EngageOrganizationLocation::active()->pluck('id')
         );
     }
 }

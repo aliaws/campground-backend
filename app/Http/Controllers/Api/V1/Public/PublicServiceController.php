@@ -7,8 +7,8 @@ use App\Http\Resources\LiveServiceResource;
 use App\Http\Resources\ServiceResource;
 use App\Http\Resources\ServiceVariantResource;
 use App\Models\EngageProduct;
+use App\Services\GhlLocationContext;
 use App\Services\GhlRentalGateway;
-use App\Services\OrganizationLocationResolver;
 use App\Services\ProductService;
 use App\Services\RentalResolver;
 use Illuminate\Http\JsonResponse;
@@ -21,14 +21,18 @@ class PublicServiceController extends Controller
         private ProductService $productService,
         private GhlRentalGateway $gateway,
         private RentalResolver $rentalResolver,
+        private GhlLocationContext $ghlLocationContext,
     ) {}
 
+    /**
+     * No engage_organization_location_id filter — the public browse list
+     * aggregates every (non-blocked) organization's rentals together, not
+     * just one default org (user-directed, 2026-08-19). See
+     * ProductService::scopeToLocationOrAllActiveOrgs()'s doc comment.
+     */
     public function index(Request $request): JsonResponse
     {
-        $filters = array_merge(
-            $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']),
-            ['engage_organization_location_id' => OrganizationLocationResolver::resolveDefaultLocationId()]
-        );
+        $filters = $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']);
 
         $services = $this->productService->listServices($filters);
 
@@ -49,9 +53,7 @@ class PublicServiceController extends Controller
 
     public function show(EngageProduct $product): JsonResponse
     {
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
-
-        if ($product->engage_organization_location_id !== $locationId || $product->status !== 'active' || ! $product->isRental()) {
+        if ($product->status !== 'active' || ! $product->isRental()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -60,6 +62,12 @@ class PublicServiceController extends Controller
         }
 
         $product->load(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
+
+        // A guest request has no authenticated user for GhlClient to derive
+        // credentials from — scope to this specific product's own
+        // organization so the live detail fetch below uses the right GHL
+        // token, not whichever org's token happens to resolve first.
+        $this->ghlLocationContext->set($product->engage_organization_location_id);
 
         try {
             $details = $this->gateway->fetchListingBundle($product);
@@ -86,14 +94,17 @@ class PublicServiceController extends Controller
                 'data' => new ServiceResource($product),
                 'message' => 'Service retrieved.',
             ]);
+        } finally {
+            $this->ghlLocationContext->set(null);
         }
     }
 
     /** Live GHL detail for a single variant (product id or product_rentals id). */
     public function variant(string $id): JsonResponse
     {
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
-        $resolved = $this->rentalResolver->resolve($id, $locationId);
+        // No org passed — resolves globally, then the product's own org
+        // (not a forced default) is what scopes the GHL call below.
+        $resolved = $this->rentalResolver->resolve($id);
 
         if (! $resolved) {
             return response()->json([
@@ -114,6 +125,7 @@ class PublicServiceController extends Controller
         }
 
         $product->loadMissing(['rentals']);
+        $this->ghlLocationContext->set($product->engage_organization_location_id);
 
         try {
             $enriched = $this->gateway->fetchEnrichedRentalDetail($rental);
@@ -141,6 +153,8 @@ class PublicServiceController extends Controller
                 'data' => null,
                 'message' => 'Live availability is temporarily unavailable. Please try again.',
             ], 422);
+        } finally {
+            $this->ghlLocationContext->set(null);
         }
     }
 }

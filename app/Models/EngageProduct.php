@@ -86,6 +86,12 @@ class EngageProduct extends Model
         return $this->belongsToMany(EngageCategory::class, 'engage_product_categories', 'product_id', 'category_id');
     }
 
+    /** Added for the public cross-org storefront (2026-08-19) — lets a guest see which organization/"store" a product belongs to, since a cart can only ever check out items from one organization at a time. */
+    public function organizationLocation(): BelongsTo
+    {
+        return $this->belongsTo(EngageOrganizationLocation::class, 'engage_organization_location_id');
+    }
+
     /** Amenities assigned to this service listing (Services module concept — see engage_product_rental_amenities). */
     public function amenities(): BelongsToMany
     {
