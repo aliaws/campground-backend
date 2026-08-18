@@ -29,12 +29,14 @@ class EngageCategory extends Model
         'engage_last_synced_at',
         'industry_type',
         'rental_category_id',
+        'show_on_homepage',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'show_on_homepage' => 'boolean',
             'engage_last_synced_at' => 'datetime',
         ];
     }

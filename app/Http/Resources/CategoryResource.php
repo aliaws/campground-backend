@@ -16,6 +16,7 @@ class CategoryResource extends JsonResource
             'image' => $this->image,
             'sort_order' => $this->sort_order,
             'is_active' => $this->is_active,
+            'show_on_homepage' => $this->show_on_homepage,
             'engage_collection_id' => $this->engage_collection_id,
             'engage_sync_status' => $this->engage_sync_status,
             'engage_last_synced_at' => $this->engage_last_synced_at,

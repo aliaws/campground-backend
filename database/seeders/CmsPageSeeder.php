@@ -262,9 +262,10 @@ TEXT;
             ],
             'menu_items' => [
                 ['id' => 'site-map', 'label' => 'Site Map', 'href' => '/rentals/map', 'sort_order' => 1],
-                ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 2],
-                ['id' => 'about', 'label' => 'About', 'href' => '/about', 'sort_order' => 3],
-                ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 4],
+                ['id' => 'shop', 'label' => 'Shop', 'href' => '/shop', 'sort_order' => 2],
+                ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 3],
+                ['id' => 'about', 'label' => 'About', 'href' => '/about', 'sort_order' => 4],
+                ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 5],
             ],
             'layout' => [
                 'logo_position' => 'left',
@@ -302,9 +303,10 @@ TEXT;
                     'title' => 'Explore',
                     'items' => [
                         ['id' => 'browse-rentals', 'label' => 'Browse Rentals', 'href' => '/', 'sort_order' => 1],
-                        ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 2],
-                        ['id' => 'about-us', 'label' => 'About Us', 'href' => '/about', 'sort_order' => 3],
-                        ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 4],
+                        ['id' => 'shop', 'label' => 'Shop', 'href' => '/shop', 'sort_order' => 2],
+                        ['id' => 'gallery', 'label' => 'Gallery', 'href' => '/gallery', 'sort_order' => 3],
+                        ['id' => 'about-us', 'label' => 'About Us', 'href' => '/about', 'sort_order' => 4],
+                        ['id' => 'contact', 'label' => 'Contact', 'href' => '/contact', 'sort_order' => 5],
                     ],
                 ],
                 'legal' => [

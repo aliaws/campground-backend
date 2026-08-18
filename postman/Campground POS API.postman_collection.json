@@ -576,15 +576,94 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/public/categories",
+              "raw": "{{base_url}}/public/categories?industry_type=pos&homepage_only=1",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "public",
                 "categories"
+              ],
+              "query": [
+                {
+                  "key": "industry_type",
+                  "value": "pos",
+                  "description": "pos | rental. Omit to get both."
+                },
+                {
+                  "key": "homepage_only",
+                  "value": "1",
+                  "description": "Only categories with show_on_homepage=true (the guest homepage's curated \"Shop by Category\" showcase) \u2014 omit to get every active category, e.g. for the Shop page's own filter sidebar."
+                }
               ]
-            }
+            },
+            "description": "\n\nEach category now includes industry_type, rental_category_id, show_on_homepage, and products_count."
+          },
+          "response": []
+        },
+        {
+          "name": "List Shop Products (POS storefront)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/shop/products?search=firewood&category_ids[]={{category_id}}&min_price=5&max_price=50&available_only=1&sort=price_asc&per_page=12",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "shop",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "firewood",
+                  "disabled": true
+                },
+                {
+                  "key": "category_ids[]",
+                  "value": "{{category_id}}",
+                  "disabled": true,
+                  "description": "Repeat this key for multiple categories \u2014 OR'd together."
+                },
+                {
+                  "key": "min_price",
+                  "value": "5",
+                  "disabled": true
+                },
+                {
+                  "key": "max_price",
+                  "value": "50",
+                  "disabled": true
+                },
+                {
+                  "key": "available_only",
+                  "value": "1",
+                  "disabled": true,
+                  "description": "track_product_inventory=false OR quantity>0 \u2014 local fields only, no live GHL stock call (this is a public list endpoint)."
+                },
+                {
+                  "key": "sort",
+                  "value": "price_asc",
+                  "disabled": true,
+                  "description": "price_asc | price_desc | name. Omit for newest-first."
+                },
+                {
+                  "key": "per_page",
+                  "value": "12",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Backs the guest-facing Shop page (browsing standalone POS goods) \u2014 the sibling of List Public Services for rentals. Unauthenticated, rate-limited under customer-browse. Only active, available_in_store, non-rental products for the resolved default organization.\n\nMirrors ProductService::listStorefront()."
           },
           "response": []
         },

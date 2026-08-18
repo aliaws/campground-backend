@@ -198,6 +198,68 @@ class ProductService
     }
 
     /**
+     * Public "Shop" page: non-rental POS goods only. Unlike listServices()
+     * (rentals, whose price/stock live in GHL and can't be filtered in SQL),
+     * a regular product's price/quantity/track_product_inventory are local
+     * columns, so price range and availability can both be filtered and
+     * sorted directly at the DB level — no in-memory Collection pass needed.
+     *
+     * `available_only` mirrors the frontend's deriveProductStock() fallback
+     * definition of "available": inventory isn't tracked at all, or it is
+     * and there's at least one unit left. This uses the already-fetched
+     * local `quantity` column, not a live per-product GHL stock call — the
+     * same "list views use cheap local fallback data, only a single-item
+     * view goes live" precedent this codebase already follows elsewhere
+     * (e.g. ProductGrid's card-level GHL stock check happens per card, on
+     * demand, not as part of the list query itself).
+     */
+    public function listStorefront(array $filters = []): LengthAwarePaginator
+    {
+        $query = EngageProduct::byLocation($filters['engage_organization_location_id'])
+            ->whereNull('product_rental_id')
+            ->where('status', 'active')
+            ->where('available_in_store', true)
+            ->with(['categories']);
+
+        if (! empty($filters['search'])) {
+            $query->where(function (Builder $q) use ($filters) {
+                $q->where('name', 'like', "%{$filters['search']}%")
+                    ->orWhere('description', 'like', "%{$filters['search']}%");
+            });
+        }
+
+        // Multiple categories, OR'd together — a product matching any one
+        // of the selected categories is included.
+        if (! empty($filters['category_ids']) && is_array($filters['category_ids'])) {
+            $query->whereHas('categories', fn (Builder $q) => $q->whereIn('engage_categories.id', $filters['category_ids']));
+        }
+
+        if (isset($filters['min_price']) && $filters['min_price'] !== '') {
+            $query->where('price', '>=', (float) $filters['min_price']);
+        }
+
+        if (isset($filters['max_price']) && $filters['max_price'] !== '') {
+            $query->where('price', '<=', (float) $filters['max_price']);
+        }
+
+        if ($filters['available_only'] ?? false) {
+            $query->where(function (Builder $q) {
+                $q->where('track_product_inventory', false)
+                    ->orWhere('quantity', '>', 0);
+            });
+        }
+
+        match ($filters['sort'] ?? null) {
+            'price_asc' => $query->orderBy('price', 'asc'),
+            'price_desc' => $query->orderBy('price', 'desc'),
+            'name' => $query->orderBy('name', 'asc'),
+            default => $query->orderBy('created_at', 'desc'),
+        };
+
+        return $query->paginate($filters['per_page'] ?? 15);
+    }
+
+    /**
      * Bookable services for the storefront: GHL-linked rental listings only.
      * Local-only fast query — live detail fetched on show/quote.
      */
