@@ -16,7 +16,7 @@ class StoreSiteMapElementRequest extends FormRequest
     {
         return [
             'type' => ['required', 'string', Rule::in(['icon', 'rental'])],
-            'product_rental_id' => ['required_if:type,rental', 'nullable', 'string', 'exists:product_rentals,id'],
+            'product_rental_id' => ['required_if:type,rental', 'nullable', 'string', 'exists:engage_product_rentals,id'],
             'icon_key' => ['nullable', 'string', 'max:50'],
             'icon_type_id' => ['nullable', 'string', 'exists:site_map_icon_types,id'],
             'shape' => ['sometimes', 'string', Rule::in(['circle', 'rectangle'])],

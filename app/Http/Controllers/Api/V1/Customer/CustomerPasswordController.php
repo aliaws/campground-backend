@@ -34,6 +34,21 @@ class CustomerPasswordController extends Controller
             ], 422);
         }
 
+        // createPassword() is an unauthenticated route (token-based, not
+        // session-based) — $request->user() is still null here even though
+        // $result['user'] is exactly who just got signed in, so
+        // UserResource's self-lookup-only `permissions` gate would
+        // otherwise silently omit it from this response (same bug fixed in
+        // AuthController::login()/register(), see its asSelf() doc comment
+        // — both the controller's own $request AND the separately
+        // container-bound app('request') need the resolver, confirmed via
+        // live debugging: UserResource is serialized lazily against
+        // whichever one JsonResource::resolve() falls back to, which is
+        // NOT the FormRequest instance injected into this method).
+        $resolver = fn () => $result['user'];
+        $request->setUserResolver($resolver);
+        app('request')->setUserResolver($resolver);
+
         return response()->json([
             'success' => true,
             'data' => [

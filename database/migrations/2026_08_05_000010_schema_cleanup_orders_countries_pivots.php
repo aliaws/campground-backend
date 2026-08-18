@@ -43,19 +43,29 @@ return new class extends Migration
     private function truncateOperationalData(): void
     {
         // FK-safe wipe of the tables the user listed (+ site map stack).
-        DB::statement('TRUNCATE TABLE
-            transaction_items,
-            transactions,
-            bookings,
-            site_map_elements,
-            site_maps,
-            site_map_icon_types,
-            product_categories,
-            service_amenities,
-            service_features,
-            product_rentals,
-            products
-            RESTART IDENTITY CASCADE');
+        // transaction_items/transactions may already be gone on a database
+        // that picked up the later 2026-08-10 consolidation migration
+        // (which drops them) before this one ever got to run — only
+        // truncate whichever of these actually still exist.
+        $candidates = [
+            'transaction_items',
+            'transactions',
+            'bookings',
+            'site_map_elements',
+            'site_maps',
+            'site_map_icon_types',
+            'product_categories',
+            'service_amenities',
+            'service_features',
+            'product_rentals',
+            'products',
+        ];
+
+        $existing = array_filter($candidates, fn ($table) => Schema::hasTable($table));
+
+        if (! empty($existing)) {
+            DB::statement('TRUNCATE TABLE '.implode(', ', $existing).' RESTART IDENTITY CASCADE');
+        }
     }
 
     private function reshapeAndSeedCountries(): void

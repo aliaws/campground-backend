@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Services\OrganizationLocationResolver;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -17,6 +18,7 @@ use Illuminate\Notifications\Notifiable;
     'name',
     'email',
     'password',
+    'avatar_url',
     'roles',
     'status',
     'jwt_version',
@@ -30,6 +32,24 @@ class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
+
+    protected $table = 'engage_users';
+
+    /**
+     * The organization/location the *current request's token* is scoped to
+     * (see SessionJwt's `loc` claim + JwtGuard::user()) — a real declared
+     * property, not a magic/Eloquent attribute, so it's never persisted,
+     * never serialized, and never touches mass assignment. Deliberately not
+     * set by default: only JwtGuard sets it, after authenticating a real
+     * request, so this has no effect on a User instance used outside an
+     * HTTP request (factories, tests, tinker, console commands).
+     */
+    protected ?string $activeLocationId = null;
+
+    public function setActiveLocationId(?string $locationId): void
+    {
+        $this->activeLocationId = $locationId;
+    }
 
     public const STATUS_PENDING = 'pending';
 
@@ -107,27 +127,51 @@ class User extends Authenticatable
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(EngageCustomer::class);
     }
 
     public function locationLinks(): HasMany
     {
-        return $this->hasMany(UserLocation::class);
+        return $this->hasMany(EngageUserLocation::class);
     }
 
     public function organizationLocations(): BelongsToMany
     {
         return $this->belongsToMany(
             EngageOrganizationLocation::class,
-            'users_locations',
+            'engage_users_locations',
             'user_id',
             'engage_organization_location_id'
         )->withTimestamps();
     }
 
-    /** First linked location id, else system default. */
+    /**
+     * First linked, non-blocked location id; else the system default.
+     *
+     * Super-admin is the one deliberate exception: it always returns null,
+     * never falling through to the system default. Super-admin genuinely
+     * owns no location — before this check existed, a super-admin (who by
+     * construction has zero locationLinks) silently fell through to
+     * operating inside the default organization, exactly like every other
+     * unlinked user. That's the bug this line fixes.
+     */
     public function primaryLocationId(): ?string
     {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $activeId = $this->activeLocationIds()[0] ?? null;
+
+        if (is_string($activeId) && $activeId !== '') {
+            return $activeId;
+        }
+
+        // Every linked org (if any) is blocked, or there are no links at
+        // all — fall back to the first link regardless of block status
+        // (org.active middleware/AuthController::login() are what actually
+        // enforce blocking; this method is resolution, not enforcement),
+        // then the system default.
         $fromJunction = $this->relationLoaded('locationLinks')
             ? $this->locationLinks->first()?->engage_organization_location_id
             : $this->locationLinks()->value('engage_organization_location_id');
@@ -137,10 +181,31 @@ class User extends Authenticatable
         }
 
         try {
-            return \App\Services\OrganizationLocationResolver::resolveDefaultLocationId();
+            return OrganizationLocationResolver::resolveDefaultLocationId();
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /** This user's location links whose organization is not blocked. */
+    public function activeLocationLinks(): HasMany
+    {
+        return $this->locationLinks()->whereHas(
+            'organizationLocation',
+            fn ($query) => $query->where('status', EngageOrganizationLocation::STATUS_ACTIVE)
+        );
+    }
+
+    /** @return list<string> */
+    public function activeLocationIds(): array
+    {
+        return $this->activeLocationLinks()->pluck('engage_organization_location_id')->all();
+    }
+
+    /** False only when this user has at least one location link and every one of them is blocked. */
+    public function hasAnyActiveOrganization(): bool
+    {
+        return $this->activeLocationLinks()->exists();
     }
 
     public function belongsToLocation(string $locationId): bool
@@ -160,7 +225,7 @@ class User extends Authenticatable
 
     public function attachLocation(string $locationId): void
     {
-        UserLocation::query()->firstOrCreate([
+        EngageUserLocation::query()->firstOrCreate([
             'user_id' => $this->id,
             'engage_organization_location_id' => $locationId,
         ]);
@@ -168,15 +233,51 @@ class User extends Authenticatable
 
     /**
      * Active Engage organization location for scoping business data.
+     *
+     * Prefers the location the current request's token was explicitly
+     * scoped to (set by JwtGuard from the JWT's `loc` claim once the user
+     * has picked an organization — see POST /auth/select-organization) as
+     * long as the user still actually belongs to it. Falls back to
+     * primaryLocationId()'s pre-existing "first linked, else system
+     * default" behavior otherwise — so a single-organization user, a
+     * pre-selection token, or any call site outside an HTTP request
+     * (console, tests) all resolve exactly as they did before this existed.
      */
     public function resolveOrganizationLocationId(): string
     {
+        if ($this->hasSelectedActiveLocation()) {
+            return $this->activeLocationId;
+        }
+
         $id = $this->primaryLocationId();
         if (! is_string($id) || $id === '') {
             throw new \RuntimeException('User is not linked to an organization location.');
         }
 
         return $id;
+    }
+
+    /** Same preference order as resolveOrganizationLocationId(), but null-safe for display purposes (UserResource) rather than throwing. */
+    public function activeOrPrimaryLocationId(): ?string
+    {
+        if ($this->hasSelectedActiveLocation()) {
+            return $this->activeLocationId;
+        }
+
+        return $this->primaryLocationId();
+    }
+
+    /**
+     * True only when the current request's token was explicitly scoped to
+     * an organization the user still belongs to (via POST
+     * /auth/select-organization, or auto-embedded at login for a
+     * single-organization user) — as opposed to just falling back to
+     * "whichever location happens to be linked first." This is the signal
+     * the frontend uses to know whether to show the organization picker.
+     */
+    public function hasSelectedActiveLocation(): bool
+    {
+        return $this->activeLocationId !== null && $this->belongsToLocation($this->activeLocationId);
     }
 
     public function createdByUser(): BelongsTo
@@ -186,7 +287,7 @@ class User extends Authenticatable
 
     public function verifications(): HasMany
     {
-        return $this->hasMany(UserVerification::class);
+        return $this->hasMany(EngageUserVerification::class);
     }
 
     /** @return list<string> */
