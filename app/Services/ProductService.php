@@ -52,7 +52,7 @@ class ProductService
         }
 
         if (! empty($filters['category_id'])) {
-            $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
+            $query->whereHas('categories', fn (Builder $q) => $q->where('engage_categories.id', $filters['category_id']));
         }
 
         // Rental-side counterpart of category_id above — Manage Service's
@@ -216,7 +216,7 @@ class ProductService
         }
 
         if (! empty($filters['category_id'])) {
-            $query->whereHas('categories', fn (Builder $q) => $q->where('categories.id', $filters['category_id']));
+            $query->whereHas('categories', fn (Builder $q) => $q->where('engage_categories.id', $filters['category_id']));
         }
 
         // service_category_id is deliberately a distinct param from
