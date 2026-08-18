@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\BookingService;
 use App\Services\CustomerAccountService;
 use App\Services\CustomerService;
+use App\Services\GhlLocationContext;
 use App\Services\GhlService;
 use App\Services\OrganizationLocationResolver;
 use App\Services\RentalResolver;
@@ -25,6 +26,7 @@ class PublicBookingController extends Controller
         private CustomerAccountService $customerAccountService,
         private RentalResolver $rentalResolver,
         private GhlService $ghlService,
+        private GhlLocationContext $ghlLocationContext,
     ) {}
 
     /** Price a booking (nightly breakdown + rule discounts) without creating it. */
@@ -51,6 +53,15 @@ class PublicBookingController extends Controller
             ], 404);
         }
 
+        // A guest request has no authenticated user for GhlClient to derive
+        // credentials from — without this, live rental pricing/availability
+        // would be read using whichever organization's token happens to
+        // resolve first, not necessarily this specific product's own org.
+        // Scoped to the *product's* org (not resolveDefaultLocationId()'s
+        // result) so this stays correct once browsing spans multiple
+        // organizations, not just today's single-default-org catalog.
+        $this->ghlLocationContext->set($product->engage_organization_location_id);
+
         try {
             $quote = $this->bookingService->quote(
                 $product,
@@ -71,6 +82,8 @@ class PublicBookingController extends Controller
                 'data' => null,
                 'message' => 'Live availability is temporarily unavailable. Please try again.',
             ], 422);
+        } finally {
+            $this->ghlLocationContext->set(null);
         }
 
         return response()->json([
@@ -117,6 +130,11 @@ class PublicBookingController extends Controller
             $request->only(['name', 'email', 'phone'])
         );
 
+        // Same reasoning as quote() above — scope to this specific
+        // product's own organization, not just whatever token happens to
+        // resolve first for an unauthenticated request.
+        $this->ghlLocationContext->set($product->engage_organization_location_id);
+
         try {
             $booking = $this->bookingService->create([
                 'customer_id' => $customer->id,
@@ -133,6 +151,8 @@ class PublicBookingController extends Controller
                 'data' => null,
                 'message' => $e->getMessage(),
             ], 422);
+        } finally {
+            $this->ghlLocationContext->set(null);
         }
 
         return response()->json([
@@ -161,8 +181,14 @@ class PublicBookingController extends Controller
         // page polls this endpoint waiting for payment_status to flip to paid.
         // reconcileInvoiceStatus() may return a freshly-reloaded model, so
         // re-attach the relations the resource needs.
-        $booking = $this->ghlService->reconcileInvoiceStatus($booking)
-            ->loadMissing('customer', 'product', 'productRental');
+        $this->ghlLocationContext->set($booking->engage_organization_location_id);
+
+        try {
+            $booking = $this->ghlService->reconcileInvoiceStatus($booking)
+                ->loadMissing('customer', 'product', 'productRental');
+        } finally {
+            $this->ghlLocationContext->set(null);
+        }
 
         return response()->json([
             'success' => true,

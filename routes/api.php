@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\Public\PublicEngageController;
 use App\Http\Controllers\Api\V1\Public\PublicProductController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
+use App\Http\Controllers\Api\V1\Public\PublicShopController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
 use App\Http\Controllers\Api\V1\RentalTransactionController;
 use App\Http\Controllers\Api\V1\ReportController;
@@ -75,6 +76,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
             Route::get('/shop/products', [PublicProductController::class, 'index']);
+            Route::get('/shop/orders/{productTransaction}', [PublicShopController::class, 'show']);
             Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);
             Route::get('/engage/installation-url-template', [PublicEngageController::class, 'installationUrlTemplate']);
             Route::get('/countries', [PublicCountryController::class, 'index']);
@@ -87,6 +89,7 @@ Route::prefix('v1')->group(function () {
         });
         Route::middleware('throttle:customer-booking')->group(function () {
             Route::post('/bookings', [PublicBookingController::class, 'store']);
+            Route::post('/shop/checkout', [PublicShopController::class, 'checkout']);
         });
 
         // Self-service organization registration — see
