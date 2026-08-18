@@ -188,7 +188,7 @@ class GhlBookingService
             // Text2Pay invoice will fail at checkout with "No valid payment method available."
             'liveMode' => false,
             'action' => 'send',
-            'userId' => $this->client->getSetting()?->user_id,
+            'userId' => $this->client->getUserId(),
         ];
 
         try {
@@ -266,16 +266,24 @@ class GhlBookingService
                 'email' => $customer->email ?? '',
             ],
             'issueDate' => now()->format('Y-m-d'),
-            'sentTo' => [
-                'email' => [$customer->email],
-            ],
             'liveMode' => false,
             // Cash: 'draft', no email — already paid in person, a "please
             // pay" email would be wrong. Card: 'send' — emails the customer
             // a real payment link, exactly like the booking Online flow.
-            'action' => $isCash ? 'draft' : 'send',
-            'userId' => $this->client->getSetting()?->user_id,
+            // Forced to 'draft' regardless of payment method when there's no
+            // email at all (e.g. a phone-only guest Shop checkout) — GHL
+            // rejects `sentTo.email` outright when it isn't a real email
+            // ("sentTo.each value in email must be an email"), and 'draft'
+            // still returns a real, usable invoiceUrl (the caller hands that
+            // straight to the customer itself, so an email isn't the only
+            // way they ever see it).
+            'action' => ($isCash || ! $customer->email) ? 'draft' : 'send',
+            'userId' => $this->client->getUserId(),
         ];
+
+        if ($customer->email) {
+            $payload['sentTo'] = ['email' => [$customer->email]];
+        }
 
         $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
         $this->logOutbound('product-sale.invoice-created', $payload, $response);
@@ -343,7 +351,7 @@ class GhlBookingService
         }
 
         $locationId = $this->client->getLocationId();
-        $userId = $this->client->getSetting()?->user_id;
+        $userId = $this->client->getUserId();
         if (! $locationId || ! $userId) {
             return;
         }
