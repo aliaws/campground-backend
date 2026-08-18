@@ -295,9 +295,15 @@ class SettingsController extends Controller
 
     private function callbackRedirect(string $query): RedirectResponse
     {
-        $frontendUrl = config('app.frontend_url');
+        // /settings/engage/tokens was the pre-RBAC-redesign route — that
+        // whole app/settings/** tree was deleted outright when the real
+        // Engage Tokens page moved to /admin/engages/tokens (see CLAUDE.md's
+        // 2026-08-13 RBAC changelog entry), but this redirect target was
+        // never updated to match, so a real, successful token
+        // refresh/reconnect landed on a 404 every time.
+        $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
 
-        return redirect("{$frontendUrl}/settings/engage/tokens?{$query}");
+        return redirect("{$frontendUrl}/admin/engages/tokens?{$query}");
     }
 
     private function registrationCallbackRedirect(string $query): RedirectResponse

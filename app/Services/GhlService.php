@@ -8,7 +8,9 @@ use App\Models\EngageCustomer;
 use App\Models\EngageCustomerLocation;
 use App\Models\EngageProductTransaction;
 use App\Models\EngageRentalTransaction;
+use App\Models\User;
 use App\Models\WebhookLog;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 
 class GhlService
@@ -200,74 +202,26 @@ class GhlService
                         ($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')
                     ) ?: ($contact['name'] ?? 'Unknown');
                     $email = $contact['email'] ?? null;
+                    $phone = $contact['phone'] ?? null;
 
                     // A customer archived by a prior delete-sync run (see
                     // softDeleteMissingCustomers()/CustomerService::
                     // archiveCustomer() below) whose contact has reappeared
-                    // in GHL needs restoring first. Matched by EMAIL, not
-                    // ghl_contact_id — a contact removed and re-added in GHL
-                    // is assigned a brand-new id, so an id-based match would
-                    // never find the archived row and would silently create
-                    // a genuine duplicate Customer instead. Only checked
-                    // when there's no already-active link for this contact
-                    // id at this location (the common case), to avoid an
-                    // extra query per row on every sync. restoreFromArchive()
-                    // re-attaches the customer's CustomerLocation row for
-                    // this location with this ghl_contact_id, so the lookup
-                    // right below will find it.
+                    // in GHL needs restoring first. Matched by email/phone,
+                    // not ghl_contact_id — a contact removed and re-added in
+                    // GHL is assigned a brand-new id, so an id-based match
+                    // would never find the archived row and would silently
+                    // create a genuine duplicate Customer instead. Only
+                    // checked when there's no already-active link for this
+                    // contact id at this location (the common case), to
+                    // avoid an extra query per row on every sync.
                     $hasActiveMatch = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
                         ->where('ghl_contact_id', $contact['id'])
                         ->exists();
                     $restored = false;
 
-                    if (! $hasActiveMatch && $email) {
-                        $archive = app(CustomerService::class)->findArchiveByEmail($locationId, $email);
-
-                        if ($archive) {
-                            app(CustomerService::class)->restoreFromArchive($archive, $contact['id']);
-                            $restored = true;
-                        } else {
-                            // Not archived, but an active Customer at this
-                            // location may already exist under this email
-                            // with no ghl_contact_id link yet (or a stale
-                            // one) — e.g. a customer created locally before
-                            // ever syncing, or a link that was lost outside
-                            // the normal archive/restore path. customers.email
-                            // is globally unique, so falling through to
-                            // EngageCustomer::create() below would otherwise throw
-                            // a duplicate-key error instead of silently
-                            // creating a duplicate — re-linking here is what
-                            // makes the sync self-healing rather than just
-                            // failing loudly on every subsequent run.
-                            $existingLink = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
-                                ->whereHas('customer', function ($q) use ($email) {
-                                    $q->whereRaw('LOWER(email) = ?', [strtolower($email)]);
-                                })
-                                ->first();
-
-                            if ($existingLink) {
-                                $existingLink->update(['ghl_contact_id' => $contact['id']]);
-                                $restored = true;
-                            } else {
-                                // No location link at all yet, but a Customer
-                                // with this email may still exist globally
-                                // (e.g. created for a different location, or
-                                // a pre-location-model legacy row) — attach
-                                // this location to it instead of colliding
-                                // with the global unique(email) constraint.
-                                $existingCustomer = EngageCustomer::withTrashed()
-                                    ->whereRaw('LOWER(email) = ?', [strtolower($email)])
-                                    ->first();
-
-                                if ($existingCustomer) {
-                                    if ($existingCustomer->trashed()) {
-                                        $existingCustomer->restore();
-                                    }
-                                    $existingCustomer->attachLocation($locationId, $contact['id']);
-                                    $restored = true;
-                                }
-                            }
-                        }
+                    if (! $hasActiveMatch) {
+                        $restored = $this->findAndRelinkExistingCustomer($locationId, $contact['id'], $email, $phone) !== null;
                     }
 
                     $link = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
@@ -279,7 +233,7 @@ class GhlService
                         $customer->update([
                             'name' => $name,
                             'email' => $email,
-                            'phone' => $contact['phone'] ?? null,
+                            'phone' => $phone,
                             'ghl_sync_status' => 'synced',
                             'ghl_last_synced_at' => now(),
                         ]);
@@ -290,16 +244,59 @@ class GhlService
                             $results['updated']++;
                         }
                     } else {
-                        $customer = EngageCustomer::create([
-                            'name' => $name,
-                            'email' => $email,
-                            'phone' => $contact['phone'] ?? null,
-                            'ghl_sync_status' => 'synced',
-                            'ghl_last_synced_at' => now(),
-                            'created_by' => 'Lead Connector Sync',
-                        ]);
-                        $customer->attachLocation($locationId, $contact['id']);
-                        $results['created']++;
+                        try {
+                            $customer = EngageCustomer::create([
+                                'name' => $name,
+                                'email' => $email,
+                                'phone' => $phone,
+                                'ghl_sync_status' => 'synced',
+                                'ghl_last_synced_at' => now(),
+                                'created_by' => 'Lead Connector Sync',
+                            ]);
+                            $customer->attachLocation($locationId, $contact['id']);
+                            $results['created']++;
+                        } catch (QueryException $e) {
+                            // Unique-email/phone race: another process (e.g.
+                            // the scheduled engage:sync-all cron overlapping
+                            // this manual "Pull Data" run, or the same email
+                            // appearing on two GHL contacts within this one
+                            // page) committed a matching customer between our
+                            // lookup above and this insert. No amount of
+                            // pre-checking closes a genuine
+                            // check-then-insert race — recover by
+                            // re-resolving now that the racing transaction
+                            // has committed, instead of failing this contact.
+                            if (! str_contains($e->getMessage(), 'engage_customers_email_unique')) {
+                                throw $e;
+                            }
+
+                            $customer = $this->findAndRelinkExistingCustomer($locationId, $contact['id'], $email, $phone);
+
+                            if (! $customer) {
+                                throw $e;
+                            }
+
+                            $customer->update([
+                                'name' => $name,
+                                'email' => $email,
+                                'phone' => $phone,
+                                'ghl_sync_status' => 'synced',
+                                'ghl_last_synced_at' => now(),
+                            ]);
+                            $results['restored']++;
+                        }
+                    }
+
+                    // If this contact already has a customer-portal login
+                    // (User.customer_id), keep their own location links in
+                    // sync too — User::attachLocation() is firstOrCreate, so
+                    // this is purely additive across locations: a customer
+                    // who purchased at Location A and is now also appearing
+                    // at Location B via this pull ends up linked to both,
+                    // never just the most recently synced one.
+                    $portalUser = User::where('customer_id', $customer->id)->first();
+                    if ($portalUser) {
+                        $portalUser->attachLocation($locationId);
                     }
 
                     $results['pulled']++;
@@ -330,6 +327,70 @@ class GhlService
         }
 
         return $results;
+    }
+
+    /**
+     * Finds an existing customer this GHL contact should be linked to
+     * instead of creating a duplicate — checked in three tiers per
+     * identifier (archived-at-this-location -> already-linked-at-this-
+     * location-under-a-different/no ghl_contact_id -> exists-globally,
+     * possibly at another location entirely) — tried by email first, then
+     * by phone (GHL contacts frequently carry one but not the other).
+     * `engage_customers.email` is a *global* unique index (not per
+     * location), so a customer already active at one location reappearing
+     * under a different location's pull must be found here and just
+     * link-attached, never re-created. Returns null only when truly
+     * nothing matches, meaning a brand-new Customer is actually warranted.
+     */
+    private function findAndRelinkExistingCustomer(string $locationId, string $contactId, ?string $email, ?string $phone): ?EngageCustomer
+    {
+        $customerService = app(CustomerService::class);
+
+        foreach ([['email', $email], ['phone', $phone]] as [$column, $value]) {
+            if (! $value) {
+                continue;
+            }
+
+            if ($column === 'email') {
+                $archive = $customerService->findArchiveByEmail($locationId, $value);
+
+                if ($archive) {
+                    return $customerService->restoreFromArchive($archive, $contactId);
+                }
+            }
+
+            $existingLink = EngageCustomerLocation::where('engage_organization_location_id', $locationId)
+                ->whereHas('customer', function ($q) use ($column, $value) {
+                    if ($column === 'email') {
+                        $q->whereRaw('LOWER(email) = ?', [strtolower($value)]);
+                    } else {
+                        $q->where('phone', $value);
+                    }
+                })
+                ->first();
+
+            if ($existingLink) {
+                $existingLink->update(['ghl_contact_id' => $contactId]);
+
+                return EngageCustomer::find($existingLink->customer_id);
+            }
+
+            $existingCustomer = EngageCustomer::withTrashed()
+                ->when($column === 'email', fn ($q) => $q->whereRaw('LOWER(email) = ?', [strtolower($value)]))
+                ->when($column === 'phone', fn ($q) => $q->where('phone', $value))
+                ->first();
+
+            if ($existingCustomer) {
+                if ($existingCustomer->trashed()) {
+                    $existingCustomer->restore();
+                }
+                $existingCustomer->attachLocation($locationId, $contactId);
+
+                return $existingCustomer;
+            }
+        }
+
+        return null;
     }
 
     /**

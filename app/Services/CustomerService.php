@@ -7,6 +7,7 @@ use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
 use App\Models\EngageProductTransaction;
 use App\Models\EngageRentalTransaction;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -90,7 +91,71 @@ class CustomerService
             }
         }
 
-        $customer = EngageCustomer::create($data + ['created_by' => $createdBy]);
+        // Still no match scoped to this location — but `engage_customers`.
+        // email is a *global* unique index (not per location), so a
+        // customer already active at a *different* location under this
+        // email/phone must be found and just link-attached here, or the
+        // create() below throws a duplicate-key error instead of silently
+        // creating a duplicate. Real scenario this covers: a customer buys
+        // at Location A (creates the row), then later buys at Location B —
+        // Location B's findOrCreate() must attach, not collide.
+        if (! empty($data['email'])) {
+            $customer = EngageCustomer::withTrashed()
+                ->whereRaw('LOWER(email) = ?', [strtolower($data['email'])])
+                ->first();
+        }
+
+        if (! $customer && ! empty($data['phone'])) {
+            $customer = EngageCustomer::withTrashed()
+                ->where('phone', $data['phone'])
+                ->first();
+        }
+
+        if ($customer) {
+            if ($customer->trashed()) {
+                $customer->restore();
+            }
+
+            $patch = array_filter([
+                'email' => $customer->email ?: ($data['email'] ?? null),
+                'phone' => $customer->phone ?: ($data['phone'] ?? null),
+                'address' => $customer->address ?: ($data['address'] ?? null),
+            ]);
+
+            if ($patch) {
+                $customer->update($patch);
+            }
+
+            $customer->attachLocation($locationId);
+
+            return $customer;
+        }
+
+        try {
+            $customer = EngageCustomer::create($data + ['created_by' => $createdBy]);
+        } catch (QueryException $e) {
+            // Check-then-insert race (e.g. a concurrent booking/GHL-sync
+            // creating the same email between the lookups above and this
+            // insert) — recover by re-resolving instead of failing the
+            // whole request.
+            if (! str_contains($e->getMessage(), 'engage_customers_email_unique')) {
+                throw $e;
+            }
+
+            $customer = null;
+            if (! empty($data['email'])) {
+                $customer = EngageCustomer::withTrashed()->whereRaw('LOWER(email) = ?', [strtolower($data['email'])])->first();
+            }
+
+            if (! $customer) {
+                throw $e;
+            }
+
+            if ($customer->trashed()) {
+                $customer->restore();
+            }
+        }
+
         $customer->attachLocation($locationId);
 
         return $customer;
