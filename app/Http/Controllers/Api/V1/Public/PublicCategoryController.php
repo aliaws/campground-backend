@@ -13,9 +13,18 @@ class PublicCategoryController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        // Public browsing only ever wants categories a guest could actually
+        // click into and see something — an empty category (no active,
+        // in-store products) is just dead-end noise in a filter list. Staff
+        // management (CategoryController::index()) deliberately keeps
+        // showing empty ones, since that's exactly where an admin would go
+        // to add products to them.
+        $browsableProducts = fn ($q) => $q->where('status', 'active')->where('available_in_store', true);
+
         $query = EngageCategory::where('engage_organization_location_id', OrganizationLocationResolver::resolveDefaultLocationId())
             ->where('is_active', true)
-            ->withCount('products');
+            ->whereHas('products', $browsableProducts)
+            ->withCount(['products' => $browsableProducts]);
 
         if ($request->filled('industry_type')) {
             $query->where('industry_type', $request->industry_type);
