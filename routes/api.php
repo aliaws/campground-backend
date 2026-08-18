@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Customer\CustomerPasswordController;
 use App\Http\Controllers\Api\V1\Customer\CustomerPortalController;
 use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
+use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\OrganizationProfileController;
 use App\Http\Controllers\Api\V1\PermissionController;
@@ -250,6 +251,13 @@ Route::prefix('v1')->group(function () {
             Route::post('/services/pull-ghl', [ServiceController::class, 'pullFromGhl']);
 
             Route::get('/reports/summary', [ReportController::class, 'summary']);
+
+            // Owner-only dashboard entity-count summary — narrower than the
+            // owner+admin role: check this Tier 2 group already enforces, so
+            // gated with its own permission action rather than relying on
+            // the group's role:owner,admin alone.
+            Route::get('/dashboard/organization-stats', [DashboardController::class, 'organizationStats'])
+                ->middleware('permission:dashboard.organization_stats.view');
 
             Route::post('/categories', [CategoryController::class, 'store']);
             Route::get('/categories/{category}', [CategoryController::class, 'show']);

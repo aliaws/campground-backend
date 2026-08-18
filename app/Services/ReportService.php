@@ -3,14 +3,54 @@
 namespace App\Services;
 
 use App\Models\EngageBooking;
+use App\Models\EngageCategory;
+use App\Models\EngageCustomer;
+use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
+use App\Models\EngageProductRentalCategory;
 use App\Models\EngageProductTransaction;
 use App\Models\EngageRentalTransaction;
+use App\Models\User;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 
 class ReportService
 {
+    /**
+     * Entity-count summary for the owner-only dashboard section — plain
+     * "how many X does this org have" counts, not filtered to
+     * active/draft-only the way a management page's default list view
+     * might be. EngageCustomer/User have no direct org column (customers
+     * are global rows linked via engage_customers_locations; users can
+     * belong to multiple orgs via engage_users_locations), so both are
+     * counted via their location-link relation, matching the exact scoping
+     * CustomerController::index()/StaffController::index() already use.
+     */
+    public function organizationStats(string $locationId): array
+    {
+        return [
+            'total_customers' => EngageCustomer::whereHas(
+                'locationLinks',
+                fn ($q) => $q->where('engage_organization_location_id', $locationId)
+            )->count(),
+            'total_users' => User::query()
+                ->where(function ($q) {
+                    foreach ([User::ROLE_OWNER, User::ROLE_ADMIN, User::ROLE_STAFF] as $role) {
+                        $q->orWhereJsonContains('roles', $role);
+                    }
+                })
+                ->whereHas(
+                    'locationLinks',
+                    fn ($q) => $q->where('engage_organization_location_id', $locationId)
+                )->count(),
+            'total_rental_categories' => EngageProductRentalCategory::where('engage_organization_location_id', $locationId)->count(),
+            'total_rental_services' => EngageProduct::byLocation($locationId)->whereNotNull('product_rental_id')->count(),
+            'total_bookings' => EngageBooking::where('engage_organization_location_id', $locationId)->count(),
+            'total_pos_product_categories' => EngageCategory::where('engage_organization_location_id', $locationId)->count(),
+            'total_pos_products' => EngageProduct::byLocation($locationId)->whereNull('product_rental_id')->count(),
+        ];
+    }
+
     public function summary(string $locationId): array
     {
         $today = Carbon::today();

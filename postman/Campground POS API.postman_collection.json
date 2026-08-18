@@ -4410,6 +4410,31 @@
                 "description": "Today's paid revenue, occupancy %, check-ins today, avg stay nights, bookings-per-weekday, revenue-by-category \u2014 all computed live.\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
               },
               "response": []
+            },
+            {
+              "name": "Dashboard Organization Stats",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/dashboard/organization-stats",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "dashboard",
+                    "organization-stats"
+                  ]
+                },
+                "description": "Entity-count summary for the owner-only dashboard section: total_customers, total_users, total_rental_categories, total_rental_services, total_bookings, total_pos_product_categories, total_pos_products \u2014 all scoped to the caller's own organization.\n\nRoles: owner ONLY (not admin, unlike every other entry in this folder \u2014 see config/permissions.php's dashboard.organization_stats.view). Admin/staff/superadmin get 403."
+              },
+              "response": []
             }
           ],
           "auth": {
@@ -5295,6 +5320,52 @@
               }
             }
           ]
+        },
+        {
+          "name": "Dashboard Organization Stats as Admin -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/organization-stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "organization-stats"
+              ]
+            },
+            "description": "dashboard.organization_stats.view is owner-only, deliberately narrower than the owner+admin role every other dashboard/reports action in this collection allows. Expect 403 here even though admin passes Report Summary."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "response": []
         }
       ]
     }

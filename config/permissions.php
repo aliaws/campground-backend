@@ -42,6 +42,14 @@ return [
             'group' => 'dashboard', 'label' => 'View reports',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
+        // Deliberately owner-only, not owner+admin like every other
+        // dashboard/org-scoped action in this file — an explicit,
+        // narrower ask (organization-wide entity counts, not day-to-day
+        // operational data).
+        'dashboard.organization_stats.view' => [
+            'group' => 'dashboard', 'label' => "View the organization's entity-count summary on the dashboard",
+            'roles' => ['owner'], 'decider' => 'role+org',
+        ],
         'platform.dashboard.view' => [
             'group' => 'platform', 'label' => 'View the super-admin platform dashboard',
             'roles' => ['superadmin'], 'decider' => 'role',
