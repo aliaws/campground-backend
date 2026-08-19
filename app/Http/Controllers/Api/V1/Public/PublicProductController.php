@@ -36,6 +36,7 @@ class PublicProductController extends Controller
             'sort' => $request->input('sort'),
             'page' => $request->input('page'),
             'per_page' => $request->input('per_page'),
+            'organization_ids' => $request->input('organization_ids', []),
         ];
 
         $products = $this->productService->listStorefront($filters);

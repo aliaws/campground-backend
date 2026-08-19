@@ -309,6 +309,24 @@ class ProductService
             $query->whereHas('rentals', fn (Builder $q) => $q->where('service_category_id', $ghlCategoryId ?? '__none__'));
         }
 
+        // Array counterpart to service_category_id above, additive and
+        // only ever sent by the public storefront (2026-08-19): once
+        // PublicServiceCategoryResource::groupByName() collapses several
+        // organizations' identically-named categories into one filter
+        // chip, selecting that chip needs to match rentals under ANY of
+        // the underlying per-org category ids, not just one.
+        if (! empty($filters['service_category_ids']) && is_array($filters['service_category_ids'])) {
+            $ghlCategoryIds = EngageProductRentalCategory::whereIn('id', $filters['service_category_ids'])
+                ->pluck('ghl_category_id')
+                ->filter()
+                ->values();
+
+            $query->whereHas('rentals', fn (Builder $q) => $q->whereIn(
+                'service_category_id',
+                $ghlCategoryIds->isEmpty() ? ['__none__'] : $ghlCategoryIds
+            ));
+        }
+
         $services = $query->get();
 
         if (isset($filters['min_price']) && $filters['min_price'] !== '') {
@@ -358,9 +376,19 @@ class ProductService
             return;
         }
 
-        $query->whereIn(
-            'engage_organization_location_id',
-            EngageOrganizationLocation::active()->pluck('id')
-        );
+        $activeIds = EngageOrganizationLocation::active()->pluck('id');
+
+        // Narrows the public storefront to a caller-picked subset of
+        // organizations (2026-08-19, the customer homepage's Organization
+        // filter) — always intersected with the already-active set above,
+        // never trusted on its own, so a blocked/uninstalled org id passed
+        // in via the querystring can never leak its inventory back in.
+        // Additive: only PublicServiceController sends this key today, so
+        // every other existing caller (Shop included) is unaffected.
+        if (! empty($filters['organization_ids']) && is_array($filters['organization_ids'])) {
+            $activeIds = $activeIds->intersect($filters['organization_ids'])->values();
+        }
+
+        $query->whereIn('engage_organization_location_id', $activeIds);
     }
 }

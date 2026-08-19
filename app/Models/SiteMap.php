@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SiteMap extends Model
@@ -27,5 +28,10 @@ class SiteMap extends Model
     public function elements(): HasMany
     {
         return $this->hasMany(SiteMapElement::class)->orderBy('z_index');
+    }
+
+    public function organizationLocation(): BelongsTo
+    {
+        return $this->belongsTo(EngageOrganizationLocation::class, 'engage_organization_location_id');
     }
 }

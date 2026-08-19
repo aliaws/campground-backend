@@ -109,6 +109,12 @@ class EngageOrganizationLocation extends Model
         return $this->hasMany(EngageToken::class, 'engage_organization_location_id');
     }
 
+    /** Inverse of EngageProduct::organizationLocation(). */
+    public function products(): HasMany
+    {
+        return $this->hasMany(EngageProduct::class, 'engage_organization_location_id');
+    }
+
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(
