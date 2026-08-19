@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Customer\UpdateCustomerProfileRequest;
 use App\Http\Resources\CustomerPortalBookingResource;
 use App\Http\Resources\UserResource;
-use App\Models\Booking;
-use App\Models\Customer;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
@@ -32,9 +32,23 @@ class CustomerPortalController extends Controller
             return $this->missingCustomerResponse();
         }
 
+        // Deliberately NOT org-scoped — a customer can have real bookings
+        // across multiple organizations (EngageCustomer belongsToMany
+        // EngageOrganizationLocation), and this endpoint's own security
+        // boundary is customer_id (only the authenticated customer's own
+        // rows, via resolveCustomer() above), not org membership. This used
+        // to also filter by $request->user()->resolveOrganizationLocationId()
+        // — a straight `tenant_id` -> `engage_organization_location_id`
+        // rename that silently turned a harmless "usually null, no-op"
+        // filter into an always-resolving one: resolveOrganizationLocationId()
+        // walks the STAFF-only engage_users_locations link table, which a
+        // customer-role User has no real membership in, so it either threw
+        // or (for an account that happened to pick up a stray link) resolved
+        // to some arbitrary single org — silently hiding every booking the
+        // customer had at any *other* org. Found live 2026-08-19: a real
+        // customer with 2 real confirmed bookings saw "No bookings yet".
         $bookings = $this->bookingService->list([
             'customer_id' => $customer->id,
-            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         // Same self-heal as bookingShow()/BookingController::index() — without
@@ -46,7 +60,7 @@ class CustomerPortalController extends Controller
         // anything is unpaid, so sequential calls here would directly slow
         // down how quickly a customer sees their own payment reflected.
         $reconciled = $this->ghlService->reconcileInvoiceStatusBatch($bookings->getCollection());
-        $bookings->setCollection(collect($reconciled)->map(function (Booking $booking) {
+        $bookings->setCollection(collect($reconciled)->map(function (EngageBooking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
                 : $booking->load(['customer', 'product', 'productRental', 'transactions']);
@@ -59,7 +73,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function bookingShow(Request $request, Booking $booking): JsonResponse
+    public function bookingShow(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -80,7 +94,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function cancelBooking(Request $request, Booking $booking): JsonResponse
+    public function cancelBooking(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -123,7 +137,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    public function invoice(Request $request, Booking $booking): JsonResponse
+    public function invoice(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $booking)) {
             return $response;
@@ -174,7 +188,7 @@ class CustomerPortalController extends Controller
         ]);
     }
 
-    private function denyUnlessOwned(Request $request, Booking $booking): ?JsonResponse
+    private function denyUnlessOwned(Request $request, EngageBooking $booking): ?JsonResponse
     {
         $customer = $this->resolveCustomer($request);
 
@@ -193,7 +207,7 @@ class CustomerPortalController extends Controller
         return null;
     }
 
-    private function resolveCustomer(Request $request): ?Customer
+    private function resolveCustomer(Request $request): ?EngageCustomer
     {
         /** @var User $user */
         $user = $request->user();
@@ -202,7 +216,7 @@ class CustomerPortalController extends Controller
             return null;
         }
 
-        return Customer::find($user->customer_id);
+        return EngageCustomer::find($user->customer_id);
     }
 
     private function missingCustomerResponse(): JsonResponse

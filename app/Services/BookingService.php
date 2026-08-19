@@ -3,9 +3,9 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Booking;
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageBooking;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 
@@ -21,7 +21,7 @@ class BookingService
 
     public function list(array $filters = []): LengthAwarePaginator
     {
-        $query = Booking::query();
+        $query = EngageBooking::query();
 
         if (! empty($filters['engage_organization_location_id'])) {
             $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
@@ -57,14 +57,14 @@ class BookingService
      * still throw (hard validation), and GHL being unreachable throws a
      * RuntimeException the controllers turn into a friendly 422.
      */
-    public function quote(Product $product, ProductRental $rental, string $checkIn, string $checkOut, int $quantity = 1): array
+    public function quote(EngageProduct $product, EngageProductRental $rental, string $checkIn, string $checkOut, int $quantity = 1): array
     {
         $detail = $this->gateway->fetchRentalDetail($rental);
 
         return $this->quoteFromDetail($detail, $rental, $checkIn, $checkOut, $quantity);
     }
 
-    private function quoteFromDetail(GhlServiceDetail $detail, ProductRental $rental, string $checkIn, string $checkOut, int $quantity): array
+    private function quoteFromDetail(GhlServiceDetail $detail, EngageProductRental $rental, string $checkIn, string $checkOut, int $quantity): array
     {
         $this->assertDurationAllowed($detail, $checkIn, $checkOut);
 
@@ -81,13 +81,13 @@ class BookingService
      * ceiling comes from the live GHL detail; bookings are counted locally
      * per rental variant (each variant's stock is independent).
      */
-    public function remainingStock(ProductRental $rental, ?int $stock, string $checkIn, string $checkOut): ?int
+    public function remainingStock(EngageProductRental $rental, ?int $stock, string $checkIn, string $checkOut): ?int
     {
         if ($stock === null) {
             return null;
         }
 
-        $booked = (int) Booking::where('product_rental_id', $rental->id)
+        $booked = (int) EngageBooking::where('product_rental_id', $rental->id)
             ->where('status', '!=', 'cancelled')
             ->where('check_in_date', '<', $checkOut)
             ->where('check_out_date', '>', $checkIn)
@@ -107,7 +107,7 @@ class BookingService
      *                             local-only (see $deferGhl below). When false (customer-submitted), it's created as
      *                             a 'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
      */
-    public function create(array $data, bool $autoConfirm = true): Booking
+    public function create(array $data, bool $autoConfirm = true): EngageBooking
     {
         $resolved = $this->resolver->resolve($data['product_id'], $data['engage_organization_location_id']);
 
@@ -127,7 +127,7 @@ class BookingService
             );
         }
 
-        $booking = Booking::create(array_merge($data, [
+        $booking = EngageBooking::create(array_merge($data, [
             'product_id' => $product->id,
             'product_rental_id' => $rental->id,
             'quantity' => $quantity,
@@ -179,7 +179,7 @@ class BookingService
      * link), marks it confirmed, and creates the local transaction record. This is
      * the ONLY path that should ever move a booking out of 'requested'.
      */
-    public function confirm(Booking $booking): Booking
+    public function confirm(EngageBooking $booking): EngageBooking
     {
         if ($booking->status !== 'requested') {
             throw new \InvalidArgumentException('Only requested bookings can be confirmed this way.');
@@ -187,6 +187,39 @@ class BookingService
 
         $this->ghlBookingService->createBooking($booking);
         $booking->update(['status' => 'confirmed']);
+        $this->rentalTransactionService->createFromBooking($booking);
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Retries the Text2Pay invoice for a 'requested' ('card'/online) booking
+     * that never got one — the known gap where create()'s else branch (see
+     * above) swallows a GHL failure into a log line, leaving a booking that
+     * came back 201 with no invoice/transaction and no way for the customer
+     * to pay. Unlike confirm() above, this does NOT skip straight to a real
+     * GHL calendar booking + 'confirmed' status — it retries the *original*
+     * step (create the invoice, leave the booking 'requested' awaiting the
+     * customer's online payment), exactly as if create() had succeeded the
+     * first time.
+     *
+     * Guarded on no invoice already existing — createText2PayInvoice()
+     * would otherwise create a genuine duplicate invoice for a booking that
+     * already has one, and createFromBooking() has no dedupe of its own
+     * (always inserts a new row).
+     */
+    public function retryInvoice(EngageBooking $booking): EngageBooking
+    {
+        if ($booking->status !== 'requested') {
+            throw new \InvalidArgumentException('Only a requested booking can have its invoice retried.');
+        }
+
+        if ($booking->ghl_invoice_id || $booking->ghl_invoice_url) {
+            throw new \InvalidArgumentException('This booking already has an invoice.');
+        }
+
+        $this->ghlBookingService->createText2PayInvoice($booking);
         $this->rentalTransactionService->createFromBooking($booking);
         $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
@@ -204,7 +237,7 @@ class BookingService
      *
      * Idempotent / webhook-safe: no-op when already confirmed or cancelled.
      */
-    public function autoConfirmAfterPayment(Booking $booking): Booking
+    public function autoConfirmAfterPayment(EngageBooking $booking): EngageBooking
     {
         if (in_array($booking->status, ['confirmed', 'cancelled'], true)) {
             return $booking;
@@ -248,7 +281,7 @@ class BookingService
      * call it explicitly when the transaction was already paid so a stuck
      * Paid + pending/requested row can self-heal on a second Pay click.
      */
-    public function payCash(Booking $booking): Booking
+    public function payCash(EngageBooking $booking): EngageBooking
     {
         if (! $booking->ghl_booking_id) {
             try {
@@ -274,7 +307,7 @@ class BookingService
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
     }
 
-    public function updateStatus(Booking $booking, string $status): Booking
+    public function updateStatus(EngageBooking $booking, string $status): EngageBooking
     {
         if ($booking->status === 'requested' && $status === 'confirmed') {
             throw new \InvalidArgumentException('Use the confirm action to confirm a requested booking.');
@@ -298,7 +331,7 @@ class BookingService
      * Record actual customer check-in/check-out times locally. Not synced to GHL.
      * Only allowed when the booking is confirmed and fully paid.
      */
-    public function updateCheckInOut(Booking $booking, array $data): Booking
+    public function updateCheckInOut(EngageBooking $booking, array $data): EngageBooking
     {
         if ($booking->status !== 'confirmed') {
             throw new \InvalidArgumentException('Check-in/out can only be updated for confirmed bookings.');

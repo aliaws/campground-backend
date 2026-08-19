@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -24,7 +24,7 @@ class GhlImageSyncService
      *
      * Non-blocking: failures are logged but do not abort the product pull.
      */
-    public function pullImageFromGhl(Product $product, string $ghlImageUrl): void
+    public function pullImageFromGhl(EngageProduct $product, string $ghlImageUrl): void
     {
         if (! $ghlImageUrl) {
             return;
@@ -34,8 +34,8 @@ class GhlImageSyncService
         if ($product->ghl_image_url === $ghlImageUrl && $product->image) {
             Log::info('GHL image pull skipped — already in sync', [
                 'product_id' => $product->id,
-                'direction'  => 'pull',
-                'ghl_url'    => $ghlImageUrl,
+                'direction' => 'pull',
+                'ghl_url' => $ghlImageUrl,
             ]);
 
             return;
@@ -43,8 +43,8 @@ class GhlImageSyncService
 
         Log::info('GHL image pull started', [
             'product_id' => $product->id,
-            'direction'  => 'pull',
-            'ghl_url'    => $ghlImageUrl,
+            'direction' => 'pull',
+            'ghl_url' => $ghlImageUrl,
         ]);
 
         try {
@@ -59,27 +59,27 @@ class GhlImageSyncService
                 ?? pathinfo(parse_url($ghlImageUrl, PHP_URL_PATH), PATHINFO_EXTENSION)
                 ?: 'jpg';
 
-            $filename = Str::random(40) . '.' . ltrim($ext, '.');
+            $filename = Str::random(40).'.'.ltrim($ext, '.');
             Storage::disk('public')->put("products/{$filename}", $response->body());
 
-            $relativePath = '/storage/products/' . $filename;
+            $relativePath = '/storage/products/'.$filename;
 
             $product->update([
-                'image'         => $relativePath,
+                'image' => $relativePath,
                 'ghl_image_url' => $ghlImageUrl,
             ]);
 
             Log::info('GHL image pull succeeded', [
                 'product_id' => $product->id,
-                'direction'  => 'pull',
+                'direction' => 'pull',
                 'local_path' => $relativePath,
             ]);
         } catch (\Exception $e) {
             Log::error('GHL image pull failed', [
                 'product_id' => $product->id,
-                'direction'  => 'pull',
-                'ghl_url'    => $ghlImageUrl,
-                'error'      => $e->getMessage(),
+                'direction' => 'pull',
+                'ghl_url' => $ghlImageUrl,
+                'error' => $e->getMessage(),
             ]);
             // Non-blocking — image failure should not abort the product pull
         }
@@ -104,7 +104,7 @@ class GhlImageSyncService
      * uploadImage() clears ghl_image_url whenever the user replaces the file),
      * so the cached URL is returned without re-uploading.
      */
-    public function pushImageToGhl(Product $product): ?string
+    public function pushImageToGhl(EngageProduct $product): ?string
     {
         if (! $product->image) {
             return null;
@@ -135,7 +135,7 @@ class GhlImageSyncService
         // Anything else (bare filename, unknown scheme) — skip; never send to GHL
         Log::warning('GHL image push skipped — unrecognised image format', [
             'product_id' => $product->id,
-            'image'      => $product->image,
+            'image' => $product->image,
         ]);
 
         return null;
@@ -143,27 +143,27 @@ class GhlImageSyncService
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    private function uploadLocalImage(Product $product): ?string
+    private function uploadLocalImage(EngageProduct $product): ?string
     {
-        $disk         = Storage::disk('public');
+        $disk = Storage::disk('public');
         $relativePath = ltrim(substr($product->image, strlen('/storage')), '/');
 
         if (! $disk->exists($relativePath)) {
             Log::warning('GHL image push skipped — local file not found', [
                 'product_id' => $product->id,
-                'path'       => $product->image,
+                'path' => $product->image,
             ]);
 
             return null;
         }
 
         $localPath = $disk->path($relativePath);
-        $filename  = basename($localPath);
-        $mimeType  = mime_content_type($localPath) ?: 'image/jpeg';
+        $filename = basename($localPath);
+        $mimeType = mime_content_type($localPath) ?: 'image/jpeg';
 
         Log::info('GHL image push started', [
             'product_id' => $product->id,
-            'direction'  => 'push',
+            'direction' => 'push',
             'local_path' => $product->image,
         ]);
 
@@ -172,8 +172,8 @@ class GhlImageSyncService
 
             Log::info('GHL image upload raw response', [
                 'product_id' => $product->id,
-                'direction'  => 'push',
-                'response'   => $uploadResponse,
+                'direction' => 'push',
+                'response' => $uploadResponse,
             ]);
 
             // GHL v2: { "uploadedFiles": { "filename.jpg": "https://cdn..." } }
@@ -186,7 +186,7 @@ class GhlImageSyncService
 
             if (! $cdnUrl) {
                 throw new \RuntimeException(
-                    'No CDN URL in GHL upload response: ' . json_encode($uploadResponse)
+                    'No CDN URL in GHL upload response: '.json_encode($uploadResponse)
                 );
             }
 
@@ -194,16 +194,16 @@ class GhlImageSyncService
 
             Log::info('GHL image push succeeded', [
                 'product_id' => $product->id,
-                'direction'  => 'push',
-                'cdn_url'    => $cdnUrl,
+                'direction' => 'push',
+                'cdn_url' => $cdnUrl,
             ]);
 
             return $cdnUrl;
         } catch (\Exception $e) {
             Log::error('GHL image push failed', [
                 'product_id' => $product->id,
-                'direction'  => 'push',
-                'error'      => $e->getMessage(),
+                'direction' => 'push',
+                'error' => $e->getMessage(),
             ]);
 
             return null;
@@ -213,13 +213,13 @@ class GhlImageSyncService
     private function extensionFromMime(string $mime): ?string
     {
         return match (strtolower(trim(explode(';', $mime)[0]))) {
-            'image/jpeg'    => 'jpg',
-            'image/png'     => 'png',
-            'image/gif'     => 'gif',
-            'image/webp'    => 'webp',
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
             'image/svg+xml' => 'svg',
-            'image/avif'    => 'avif',
-            default         => null,
+            'image/avif' => 'avif',
+            default => null,
         };
     }
 }

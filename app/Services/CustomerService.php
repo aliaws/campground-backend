@@ -2,11 +2,12 @@
 
 namespace App\Services;
 
-use App\Models\Booking;
-use App\Models\Customer;
 use App\Models\CustomerArchive;
-use App\Models\ProductTransaction;
-use App\Models\RentalTransaction;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
+use App\Models\EngageProductTransaction;
+use App\Models\EngageRentalTransaction;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -24,12 +25,12 @@ class CustomerService
      *                              User::createdByLabel()) — never overwrites an existing
      *                              customer's original creator on a dedup match.
      */
-    public function findOrCreate(array $data, string $locationId, ?string $createdBy = null): Customer
+    public function findOrCreate(array $data, string $locationId, ?string $createdBy = null): EngageCustomer
     {
         $customer = null;
 
         if (! empty($data['email'])) {
-            $customer = Customer::whereHas(
+            $customer = EngageCustomer::whereHas(
                 'locationLinks',
                 fn ($q) => $q->where('engage_organization_location_id', $locationId)
             )
@@ -38,7 +39,7 @@ class CustomerService
         }
 
         if (! $customer && ! empty($data['phone'])) {
-            $customer = Customer::whereHas(
+            $customer = EngageCustomer::whereHas(
                 'locationLinks',
                 fn ($q) => $q->where('engage_organization_location_id', $locationId)
             )
@@ -90,7 +91,71 @@ class CustomerService
             }
         }
 
-        $customer = Customer::create($data + ['created_by' => $createdBy]);
+        // Still no match scoped to this location — but `engage_customers`.
+        // email is a *global* unique index (not per location), so a
+        // customer already active at a *different* location under this
+        // email/phone must be found and just link-attached here, or the
+        // create() below throws a duplicate-key error instead of silently
+        // creating a duplicate. Real scenario this covers: a customer buys
+        // at Location A (creates the row), then later buys at Location B —
+        // Location B's findOrCreate() must attach, not collide.
+        if (! empty($data['email'])) {
+            $customer = EngageCustomer::withTrashed()
+                ->whereRaw('LOWER(email) = ?', [strtolower($data['email'])])
+                ->first();
+        }
+
+        if (! $customer && ! empty($data['phone'])) {
+            $customer = EngageCustomer::withTrashed()
+                ->where('phone', $data['phone'])
+                ->first();
+        }
+
+        if ($customer) {
+            if ($customer->trashed()) {
+                $customer->restore();
+            }
+
+            $patch = array_filter([
+                'email' => $customer->email ?: ($data['email'] ?? null),
+                'phone' => $customer->phone ?: ($data['phone'] ?? null),
+                'address' => $customer->address ?: ($data['address'] ?? null),
+            ]);
+
+            if ($patch) {
+                $customer->update($patch);
+            }
+
+            $customer->attachLocation($locationId);
+
+            return $customer;
+        }
+
+        try {
+            $customer = EngageCustomer::create($data + ['created_by' => $createdBy]);
+        } catch (QueryException $e) {
+            // Check-then-insert race (e.g. a concurrent booking/GHL-sync
+            // creating the same email between the lookups above and this
+            // insert) — recover by re-resolving instead of failing the
+            // whole request.
+            if (! str_contains($e->getMessage(), 'engage_customers_email_unique')) {
+                throw $e;
+            }
+
+            $customer = null;
+            if (! empty($data['email'])) {
+                $customer = EngageCustomer::withTrashed()->whereRaw('LOWER(email) = ?', [strtolower($data['email'])])->first();
+            }
+
+            if (! $customer) {
+                throw $e;
+            }
+
+            if ($customer->trashed()) {
+                $customer->restore();
+            }
+        }
+
         $customer->attachLocation($locationId);
 
         return $customer;
@@ -137,7 +202,7 @@ class CustomerService
      * DB level too. A customer with no email is keyed by customer_id
      * instead (can never collide on email, so no dedup risk either way).
      */
-    public function archiveCustomer(Customer $customer, string $locationId, string $reason = 'ghl_removed'): void
+    public function archiveCustomer(EngageCustomer $customer, string $locationId, string $reason = 'ghl_removed'): void
     {
         DB::transaction(function () use ($customer, $locationId, $reason) {
             $attributes = [
@@ -197,11 +262,11 @@ class CustomerService
      * a stale archive record behind, so the same customer can be archived
      * and restored again later without ever accumulating duplicates.
      */
-    public function restoreFromArchive(CustomerArchive $archive, ?string $newGhlContactId = null): Customer
+    public function restoreFromArchive(CustomerArchive $archive, ?string $newGhlContactId = null): EngageCustomer
     {
         return DB::transaction(function () use ($archive, $newGhlContactId) {
             $customer = $archive->customer_id
-                ? Customer::withTrashed()->find($archive->customer_id)
+                ? EngageCustomer::withTrashed()->find($archive->customer_id)
                 : null;
 
             if ($customer) {
@@ -214,7 +279,7 @@ class CustomerService
                 // snapshot rather than losing the customer entirely; there's
                 // no history to reattach since the original id no longer
                 // exists.
-                $customer = Customer::create([
+                $customer = EngageCustomer::create([
                     'name' => $archive->name,
                     'email' => $archive->email,
                     'phone' => $archive->phone,
@@ -249,15 +314,15 @@ class CustomerService
      *
      * @return array{total: int, completed: Collection<int, Booking>, upcoming: Collection<int, Booking>, cancelled: Collection<int, Booking>}
      */
-    public function classifyBookingsForDeletion(Customer $customer): array
+    public function classifyBookingsForDeletion(EngageCustomer $customer): array
     {
         $today = now()->startOfDay();
         $bookings = $customer->bookings()->with('product')->get();
 
         $cancelled = $bookings->where('status', 'cancelled')->values();
         $active = $bookings->where('status', '!=', 'cancelled');
-        $completed = $active->filter(fn (Booking $b) => $b->check_out_date->lt($today))->values();
-        $upcoming = $active->filter(fn (Booking $b) => ! $b->check_out_date->lt($today))->values();
+        $completed = $active->filter(fn (EngageBooking $b) => $b->check_out_date->lt($today))->values();
+        $upcoming = $active->filter(fn (EngageBooking $b) => ! $b->check_out_date->lt($today))->values();
 
         return [
             'total' => $bookings->count(),
@@ -288,13 +353,13 @@ class CustomerService
      *
      * @throws \RuntimeException if a required GHL booking deletion fails — nothing is deleted locally in that case
      */
-    public function hardDelete(Customer $customer): void
+    public function hardDelete(EngageCustomer $customer): void
     {
         $today = now()->startOfDay();
         $bookings = $customer->bookings()->get();
 
         $upcoming = $bookings->filter(
-            fn (Booking $b) => $b->status !== 'cancelled' && ! $b->check_out_date->lt($today) && $b->ghl_booking_id
+            fn (EngageBooking $b) => $b->status !== 'cancelled' && ! $b->check_out_date->lt($today) && $b->ghl_booking_id
         );
 
         foreach ($upcoming as $booking) {
@@ -315,8 +380,8 @@ class CustomerService
             // history now spans two independent tables (2026-08-10
             // transactions refactor). Neither has soft deletes, so a plain
             // delete() is already permanent — no withTrashed() needed.
-            RentalTransaction::where('customer_id', $customer->id)->delete();
-            ProductTransaction::where('customer_id', $customer->id)->delete(); // cascades to product_transaction_items via FK
+            EngageRentalTransaction::where('customer_id', $customer->id)->delete();
+            EngageProductTransaction::where('customer_id', $customer->id)->delete(); // cascades to product_transaction_items via FK
 
             foreach ($bookings as $booking) {
                 $booking->delete();

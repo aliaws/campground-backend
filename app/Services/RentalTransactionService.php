@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\Booking;
-use App\Models\RentalTransaction;
+use App\Models\EngageBooking;
+use App\Models\EngageRentalTransaction;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 
@@ -28,7 +28,7 @@ class RentalTransactionService
 
     public function list(array $filters = []): LengthAwarePaginator
     {
-        $query = RentalTransaction::query();
+        $query = EngageRentalTransaction::query();
 
         if (! empty($filters['engage_organization_location_id'])) {
             $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
@@ -66,12 +66,12 @@ class RentalTransactionService
      * passes 'paid' directly since it already knows the invoice is paid,
      * avoiding a fake create-then-mark-paid two-step.
      */
-    public function createFromBooking(Booking $booking, string $paymentMethod = 'card', string $status = 'pending'): RentalTransaction
+    public function createFromBooking(EngageBooking $booking, string $paymentMethod = 'card', string $status = 'pending'): EngageRentalTransaction
     {
         $quantity = max((int) ($booking->quantity ?? 1), 1);
         $unitPrice = round((float) $booking->total_amount / $quantity, 2);
 
-        return RentalTransaction::create([
+        return EngageRentalTransaction::create([
             'engage_organization_location_id' => $booking->engage_organization_location_id,
             'booking_id' => $booking->id,
             'ghl_invoice_id' => $booking->ghl_invoice_id,
@@ -105,7 +105,7 @@ class RentalTransactionService
      * (throws if already paid) — called ONLY from BookingService::payCash(),
      * same as the method it replaces.
      */
-    public function confirmPayment(RentalTransaction $rentalTransaction): RentalTransaction
+    public function confirmPayment(EngageRentalTransaction $rentalTransaction): EngageRentalTransaction
     {
         if ($rentalTransaction->isPaid()) {
             throw new \InvalidArgumentException('This transaction is already paid — payment status cannot be changed.');
@@ -129,7 +129,7 @@ class RentalTransactionService
      * the same booking). Replaces the direct ->update() bulk-flip inside
      * GhlService::markInvoiceStatus().
      */
-    public function syncPaidStatusFromGhl(RentalTransaction $rentalTransaction): RentalTransaction
+    public function syncPaidStatusFromGhl(EngageRentalTransaction $rentalTransaction): EngageRentalTransaction
     {
         if (! $rentalTransaction->isPaid()) {
             $rentalTransaction->update(['status' => 'paid', 'paid_at' => now()]);
@@ -146,20 +146,20 @@ class RentalTransactionService
      * updateOrCreate(['engage_organization_location_id','ghl_invoice_id']) can't match this row
      * and would create a duplicate ledger entry instead of updating it.
      */
-    public function syncGhlInvoiceIdFromBooking(Booking $booking): void
+    public function syncGhlInvoiceIdFromBooking(EngageBooking $booking): void
     {
         if (! $booking->ghl_invoice_id) {
             return;
         }
 
-        RentalTransaction::where('booking_id', $booking->id)
+        EngageRentalTransaction::where('booking_id', $booking->id)
             ->where(function ($q) use ($booking) {
                 $q->whereNull('ghl_invoice_id')->orWhere('ghl_invoice_id', '!=', $booking->ghl_invoice_id);
             })
             ->update(['ghl_invoice_id' => $booking->ghl_invoice_id, 'ghl_booking_id' => $booking->ghl_booking_id]);
     }
 
-    private function syncGhlInvoicePayment(RentalTransaction $rentalTransaction): void
+    private function syncGhlInvoicePayment(EngageRentalTransaction $rentalTransaction): void
     {
         $rentalTransaction->loadMissing('booking');
 
@@ -186,7 +186,7 @@ class RentalTransactionService
         }
     }
 
-    private function autoConfirmLinkedBooking(RentalTransaction $rentalTransaction): void
+    private function autoConfirmLinkedBooking(EngageRentalTransaction $rentalTransaction): void
     {
         $rentalTransaction->loadMissing('booking');
         $booking = $rentalTransaction->booking;

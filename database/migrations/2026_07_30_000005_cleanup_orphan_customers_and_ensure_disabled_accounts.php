@@ -17,19 +17,30 @@ return new class extends Migration
             return;
         }
 
-        $orphanIds = DB::table('customers')
+        $orphanQuery = DB::table('customers')
             ->whereNull('deleted_at')
             ->whereNotExists(function ($q) {
                 $q->select(DB::raw(1))
                     ->from('bookings')
                     ->whereColumn('bookings.customer_id', 'customers.id');
-            })
-            ->whereNotExists(function ($q) {
-                $q->select(DB::raw(1))
-                    ->from('transactions')
-                    ->whereColumn('transactions.customer_id', 'customers.id');
-            })
-            ->pluck('id');
+            });
+
+        // The legacy `transactions` table was superseded by
+        // rental_transactions/product_transactions later (2026-08-10) and
+        // may already be gone by the time this runs on a database that
+        // picked up later schema changes out of order — check whichever of
+        // the three actually exist rather than assuming one specific table.
+        foreach (['transactions', 'rental_transactions', 'product_transactions'] as $table) {
+            if (Schema::hasTable($table)) {
+                $orphanQuery->whereNotExists(function ($q) use ($table) {
+                    $q->select(DB::raw(1))
+                        ->from($table)
+                        ->whereColumn("{$table}.customer_id", 'customers.id');
+                });
+            }
+        }
+
+        $orphanIds = $orphanQuery->pluck('id');
 
         if ($orphanIds->isNotEmpty()) {
             // Detach / remove portal users linked only to these orphans.

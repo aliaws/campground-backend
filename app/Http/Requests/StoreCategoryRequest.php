@@ -19,6 +19,7 @@ class StoreCategoryRequest extends FormRequest
             'image' => ['nullable', 'string', 'max:2048'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
+            'show_on_homepage' => ['nullable', 'boolean'],
         ];
     }
 }

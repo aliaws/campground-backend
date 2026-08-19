@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "38ffd89c-2f5c-4c4c-a42f-ceca52c97884",
     "name": "Campground POS API",
-    "description": "# Campground POS API\n\n## How to use tokens\n1. Open **0. Auth \u2014 Login by Role**\n2. Run the login for the role you want (Owner / Staff / Customer / \u2026)\n3. Tests auto-save that role's token **and** set `active_token`\n4. Most authenticated folders use `{{active_token}}` (collection auth)\n5. Customer Portal folder forces `{{customer_token}}`\n6. Public Website folder uses **no auth**\n\n## Roles\n| Role | Typical use |\n|------|-------------|\n| owner | Location owner \u2014 POS + staff + map admin |\n| admin | Location admin (create via Staff API) |\n| staff | Day-to-day POS |\n| customer | Guest portal |\n| superadmin | SaaS (folder stub \u2014 later) |\n\nUpdate emails/passwords in collection variables or the companion environment.\n",
+    "description": "# Campground POS API\n\n## How to use tokens\n1. Open **0. Auth \u2014 Login by Role**\n2. Run the login for the role you want (Owner / Staff / Customer / \u2026)\n3. Tests auto-save that role's token **and** set `active_token`\n4. Most authenticated folders use `{{active_token}}` (collection auth)\n5. Customer Portal folder forces `{{customer_token}}`; folder 6 (Super Admin) forces `{{superadmin_token}}`\n6. Public Website folder uses **no auth**\n\n## Roles\n| Role | Typical use |\n|------|-------------|\n| owner | Location owner \u2014 POS + staff + map admin |\n| admin | Location admin (create via Staff API) |\n| staff | Day-to-day POS |\n| customer | Guest portal |\n| superadmin | SaaS platform \u2014 genuinely org-less, see folder 6 |\n\nUpdate emails/passwords in collection variables or the companion environment.\n\n## 2026-08-13 RBAC redesign\nFolders 4/5 were split by actual role gate, not just by \"staff vs admin\" convention: folder 4 is now read/day-to-day-only (owner+admin+staff), folder 5 is management/deletion/GHL-sync actions (owner+admin only \u2014 several requests moved here from folder 4 on 2026-08-13, kept their names). Folder 6 (Super Admin) is genuinely org-less: it cannot reach any folder 4/5 endpoint (see folder 9's negative tests), and exists to list/block organizations and read (never write) across all of them. See `config/permissions.php` in the backend repo for the single source of truth this collection mirrors.\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "27155710",
     "_collection_link": "https://manha-systems.postman.co/workspace/ads~778de663-6e02-466e-8e94-93bdf93bfaa6/collection/27155710-38ffd89c-2f5c-4c4c-a42f-ceca52c97884?action=share&source=collection_link&creator=27155710"
@@ -265,7 +265,7 @@
           ]
         },
         {
-          "name": "Login as Superadmin (later)",
+          "name": "Login as Superadmin",
           "request": {
             "method": "POST",
             "header": [
@@ -576,15 +576,94 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/public/categories",
+              "raw": "{{base_url}}/public/categories?industry_type=pos&homepage_only=1",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "public",
                 "categories"
+              ],
+              "query": [
+                {
+                  "key": "industry_type",
+                  "value": "pos",
+                  "description": "pos | rental. Omit to get both."
+                },
+                {
+                  "key": "homepage_only",
+                  "value": "1",
+                  "description": "Only categories with show_on_homepage=true (the guest homepage's curated \"Shop by Category\" showcase) \u2014 omit to get every active category, e.g. for the Shop page's own filter sidebar."
+                }
               ]
-            }
+            },
+            "description": "\n\nEach category now includes industry_type, rental_category_id, show_on_homepage, and products_count."
+          },
+          "response": []
+        },
+        {
+          "name": "List Shop Products (POS storefront)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/shop/products?search=firewood&category_ids[]={{category_id}}&min_price=5&max_price=50&available_only=1&sort=price_asc&per_page=12",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "shop",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "firewood",
+                  "disabled": true
+                },
+                {
+                  "key": "category_ids[]",
+                  "value": "{{category_id}}",
+                  "disabled": true,
+                  "description": "Repeat this key for multiple categories \u2014 OR'd together."
+                },
+                {
+                  "key": "min_price",
+                  "value": "5",
+                  "disabled": true
+                },
+                {
+                  "key": "max_price",
+                  "value": "50",
+                  "disabled": true
+                },
+                {
+                  "key": "available_only",
+                  "value": "1",
+                  "disabled": true,
+                  "description": "track_product_inventory=false OR quantity>0 \u2014 local fields only, no live GHL stock call (this is a public list endpoint)."
+                },
+                {
+                  "key": "sort",
+                  "value": "price_asc",
+                  "disabled": true,
+                  "description": "price_asc | price_desc | name. Omit for newest-first."
+                },
+                {
+                  "key": "per_page",
+                  "value": "12",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Backs the guest-facing Shop page (browsing standalone POS goods) \u2014 the sibling of List Public Services for rentals. Unauthenticated, rate-limited under customer-browse. Only active, available_in_store, non-rental products for the resolved default organization.\n\nMirrors ProductService::listStorefront()."
           },
           "response": []
         },
@@ -1418,7 +1497,7 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/products?search=cabin&product_type=PHYSICAL&is_rental=1&status=active&engage_sync_status=synced&category_id={{category_id}}&per_page=15",
+                  "raw": "{{base_url}}/products?search=cabin&product_type=PHYSICAL&is_rental=1&status=active&engage_sync_status=synced&category_id={{category_id}}&per_page=15&service_category_id={{service_category_id}}",
                   "host": [
                     "{{base_url}}"
                   ],
@@ -1460,64 +1539,16 @@
                       "key": "per_page",
                       "value": "15",
                       "disabled": true
+                    },
+                    {
+                      "key": "service_category_id",
+                      "value": "{{service_category_id}}",
+                      "disabled": true,
+                      "description": "Rental-side counterpart of category_id \u2014 filters to products whose rentals belong to this ServiceCategory (id, not ghl_category_id). Used by Manage Service's own category filter (is_rental=1)."
                     }
                   ]
                 },
                 "description": "Paginated. All query params optional/disabled by default \u2014 enable the ones you need."
-              },
-              "response": []
-            },
-            {
-              "name": "Create Product",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "type": "text/javascript",
-                    "exec": [
-                      "if (pm.response.code === 200 || pm.response.code === 201) {",
-                      "    const json = pm.response.json();",
-                      "    if (json.data && json.data.id) {",
-                      "        pm.collectionVariables.set('product_id', json.data.id);",
-                      "    }",
-                      "}"
-                    ]
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Firewood Bundle\",\n  \"product_type\": \"PHYSICAL\",\n  \"description\": \"Bundle of seasoned firewood, ~0.75 cu ft.\",\n  \"status\": \"active\",\n  \"available_in_store\": true,\n  \"tax_inclusive\": false,\n  \"is_taxes_enabled\": true,\n  \"track_product_inventory\": true,\n  \"price\": 12.5,\n  \"quantity\": 50,\n  \"category_ids\": []\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/products",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products"
-                  ]
-                },
-                "description": "`product_type`: DIGITAL|PHYSICAL|SERVICE. `status`: active|draft|archived. A SERVICE product only becomes a bookable rental once it has a `product_rental_id` (set via the GHL rental sync, not this endpoint)."
               },
               "response": []
             },
@@ -1540,244 +1571,6 @@
                   "path": [
                     "products",
                     "{{product_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Update Product",
-              "request": {
-                "method": "PUT",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Firewood Bundle (Updated)\",\n  \"price\": 14.0,\n  \"status\": \"active\"\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}"
-                  ]
-                },
-                "description": "All fields are `sometimes` \u2014 send only what changed."
-              },
-              "response": []
-            },
-            {
-              "name": "Delete Product",
-              "request": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}"
-                  ]
-                },
-                "description": "Soft delete."
-              },
-              "response": []
-            },
-            {
-              "name": "Upload Product Image",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "formdata",
-                  "formdata": [
-                    {
-                      "key": "image",
-                      "description": "Image file, max 2MB",
-                      "type": "file",
-                      "src": []
-                    }
-                  ]
-                },
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}/image",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}",
-                    "image"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Attach Categories to Product",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"category_ids\": [\n    \"{{category_id}}\"\n  ]\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}/categories",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}",
-                    "categories"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Sync Product to GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}/sync-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}",
-                    "sync-ghl"
-                  ]
-                },
-                "description": "Regular catalog products only (not rentals \u2014 those sync via Services pull-ghl)."
-              },
-              "response": []
-            },
-            {
-              "name": "Pull Product from GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/products/{{product_id}}/pull-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "{{product_id}}",
-                    "pull-ghl"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Bulk Sync Products to GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/products/bulk-sync-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "bulk-sync-ghl"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Bulk Pull Products from GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/products/bulk-pull-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "products",
-                    "bulk-pull-ghl"
                   ]
                 }
               },
@@ -1955,30 +1748,6 @@
               "response": []
             },
             {
-              "name": "Delete Customer",
-              "request": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/customers/{{customer_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "customers",
-                    "{{customer_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
               "name": "Sync Customer to GHL",
               "request": {
                 "method": "POST",
@@ -1998,54 +1767,6 @@
                     "customers",
                     "{{customer_id}}",
                     "sync-ghl"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Bulk Sync Customers to GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/customers/bulk-sync-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "customers",
-                    "bulk-sync-ghl"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Bulk Pull Customers from GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/customers/bulk-pull-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "customers",
-                    "bulk-pull-ghl"
                   ]
                 }
               },
@@ -2119,31 +1840,6 @@
                   ]
                 },
                 "description": "Bookable rentals only (product_rental_id not null). Local, fast \u2014 no live GHL calls."
-              },
-              "response": []
-            },
-            {
-              "name": "Pull Services from GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/services/pull-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "services",
-                    "pull-ghl"
-                  ]
-                },
-                "description": "Hits GHL `calendars/services?industryType=rental` and upserts the rental catalog (products + product_rentals)."
               },
               "response": []
             },
@@ -2742,46 +2438,6 @@
           }
         },
         {
-          "name": "Reports",
-          "item": [
-            {
-              "name": "Report Summary",
-              "request": {
-                "method": "GET",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/reports/summary",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "reports",
-                    "summary"
-                  ]
-                },
-                "description": "Today's paid revenue, occupancy %, check-ins today, avg stay nights, bookings-per-weekday, revenue-by-category \u2014 all computed live."
-              },
-              "response": []
-            }
-          ],
-          "auth": {
-            "type": "bearer",
-            "bearer": [
-              {
-                "key": "token",
-                "value": "{{active_token}}",
-                "type": "string"
-              }
-            ]
-          }
-        },
-        {
           "name": "Categories",
           "item": [
             {
@@ -2796,203 +2452,22 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/categories",
+                  "raw": "{{base_url}}/categories?industry_type=pos",
                   "host": [
                     "{{base_url}}"
                   ],
                   "path": [
                     "categories"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Create Category",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "type": "text/javascript",
-                    "exec": [
-                      "if (pm.response.code === 200 || pm.response.code === 201) {",
-                      "    const json = pm.response.json();",
-                      "    if (json.data && json.data.id) {",
-                      "        pm.collectionVariables.set('category_id', json.data.id);",
-                      "    }",
-                      "}"
-                    ]
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Cabins\",\n  \"sort_order\": 1,\n  \"is_active\": true\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
+                  ],
+                  "query": [
+                    {
+                      "key": "industry_type",
+                      "value": "pos",
+                      "description": "pos | rental. Omit to get both. A category is industry_type=rental (with rental_category_id set) when GHL calendars/service-categories associated it via associationId \u2014 see GhlServiceSyncService::pullServiceCategories()."
                     }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/categories",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories"
                   ]
                 },
-                "description": "`slug` auto-derived from `name` if omitted."
-              },
-              "response": []
-            },
-            {
-              "name": "Get Category",
-              "request": {
-                "method": "GET",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/categories/{{category_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories",
-                    "{{category_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Update Category",
-              "request": {
-                "method": "PUT",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Cabins & Cottages\",\n  \"is_active\": true\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/categories/{{category_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories",
-                    "{{category_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Delete Category",
-              "request": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/categories/{{category_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories",
-                    "{{category_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Sync Category to GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/categories/{{category_id}}/sync-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories",
-                    "{{category_id}}",
-                    "sync-ghl"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Bulk Sync Categories to GHL",
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/categories/bulk-sync-ghl",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "categories",
-                    "bulk-sync-ghl"
-                  ]
-                }
+                "description": "\n\nEach category now also carries industry_type ('pos'/'rental', default 'pos') and rental_category_id (FK to a ServiceCategory, set only when GHL's pull matched this category's engage_collection_id against a service category's associationId). Filter to industry_type=pos for a Product-Categories-only view (e.g. the Manage Categories admin page)."
               },
               "response": []
             }
@@ -3033,121 +2508,6 @@
                 }
               },
               "response": []
-            },
-            {
-              "name": "Create Amenity",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "type": "text/javascript",
-                    "exec": [
-                      "if (pm.response.code === 200 || pm.response.code === 201) {",
-                      "    const json = pm.response.json();",
-                      "    if (json.data && json.data.id) {",
-                      "        pm.collectionVariables.set('amenity_id', json.data.id);",
-                      "    }",
-                      "}"
-                    ]
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"WiFi\",\n  \"icon\": \"wifi\"\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/amenities",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "amenities"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Update Amenity",
-              "request": {
-                "method": "PUT",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Free WiFi\",\n  \"icon\": \"wifi\",\n  \"is_active\": true\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "amenities",
-                    "{{amenity_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Delete Amenity",
-              "request": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "amenities",
-                    "{{amenity_id}}"
-                  ]
-                }
-              },
-              "response": []
             }
           ],
           "auth": {
@@ -3182,121 +2542,6 @@
                   ],
                   "path": [
                     "features"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Create Feature",
-              "event": [
-                {
-                  "listen": "test",
-                  "script": {
-                    "type": "text/javascript",
-                    "exec": [
-                      "if (pm.response.code === 200 || pm.response.code === 201) {",
-                      "    const json = pm.response.json();",
-                      "    if (json.data && json.data.id) {",
-                      "        pm.collectionVariables.set('feature_id', json.data.id);",
-                      "    }",
-                      "}"
-                    ]
-                  }
-                }
-              ],
-              "request": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\"\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/features",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "features"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Update Feature",
-              "request": {
-                "method": "PUT",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  },
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\",\n  \"is_active\": true\n}",
-                  "options": {
-                    "raw": {
-                      "language": "json"
-                    }
-                  }
-                },
-                "url": {
-                  "raw": "{{base_url}}/features/{{feature_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "features",
-                    "{{feature_id}}"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
-              "name": "Delete Feature",
-              "request": {
-                "method": "DELETE",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/features/{{feature_id}}",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "features",
-                    "{{feature_id}}"
                   ]
                 }
               },
@@ -4241,30 +3486,6 @@
               "response": []
             },
             {
-              "name": "Get Countries",
-              "request": {
-                "method": "GET",
-                "header": [
-                  {
-                    "key": "Accept",
-                    "value": "application/json",
-                    "type": "text"
-                  }
-                ],
-                "url": {
-                  "raw": "{{base_url}}/settings/countries",
-                  "host": [
-                    "{{base_url}}"
-                  ],
-                  "path": [
-                    "settings",
-                    "countries"
-                  ]
-                }
-              },
-              "response": []
-            },
-            {
               "name": "Get Custom Fields",
               "request": {
                 "method": "GET",
@@ -4345,11 +3566,985 @@
               }
             ]
           }
+        },
+        {
+          "name": "Products",
+          "item": [
+            {
+              "name": "Create Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('product_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Firewood Bundle\",\n  \"product_type\": \"PHYSICAL\",\n  \"description\": \"Bundle of seasoned firewood, ~0.75 cu ft.\",\n  \"status\": \"active\",\n  \"available_in_store\": true,\n  \"tax_inclusive\": false,\n  \"is_taxes_enabled\": true,\n  \"track_product_inventory\": true,\n  \"price\": 12.5,\n  \"quantity\": 50,\n  \"category_ids\": []\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products"
+                  ]
+                },
+                "description": "`product_type`: DIGITAL|PHYSICAL|SERVICE. `status`: active|draft|archived. A SERVICE product only becomes a bookable rental once it has a `product_rental_id` (set via the GHL rental sync, not this endpoint).\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Product",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Firewood Bundle (Updated)\",\n  \"price\": 14.0,\n  \"status\": \"active\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}"
+                  ]
+                },
+                "description": "All fields are `sometimes` \u2014 send only what changed.\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Product",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}"
+                  ]
+                },
+                "description": "Soft delete.\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Upload Product Image",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "image",
+                      "description": "Image file, max 2MB",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/image",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "image"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Attach Categories to Product",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"category_ids\": [\n    \"{{category_id}}\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/categories",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "categories"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Sync Product to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "sync-ghl"
+                  ]
+                },
+                "description": "Regular catalog products only (not rentals \u2014 those sync via Services pull-ghl).\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Pull Product from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/{{product_id}}/pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "{{product_id}}",
+                    "pull-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Products to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "bulk-sync-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Pull Products from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/products/bulk-pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "products",
+                    "bulk-pull-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Customers",
+          "item": [
+            {
+              "name": "Delete Customer",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Customers to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "bulk-sync-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Pull Customers from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/bulk-pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "bulk-pull-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "List Archived Customers",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/archived",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "archived"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff -> 403 (permission: customer.archive.view)."
+              },
+              "response": []
+            },
+            {
+              "name": "Restore Archived Customer",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/customers/archived/{{archive_id}}/restore",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "customers",
+                    "archived",
+                    "{{archive_id}}",
+                    "restore"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff -> 403 (permission: customer.archive.restore). Set {{archive_id}} manually from a List Archived Customers response first."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Services (Rentals)",
+          "item": [
+            {
+              "name": "Pull Services from GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/services/pull-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "services",
+                    "pull-ghl"
+                  ]
+                },
+                "description": "Hits GHL `calendars/services?industryType=rental` and upserts the rental catalog (products + product_rentals).\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('category_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cabins\",\n  \"sort_order\": 1,\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/categories",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories"
+                  ]
+                },
+                "description": "`slug` auto-derived from `name` if omitted.\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Get Category",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Category",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cabins & Cottages\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Sync Category to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/{{category_id}}/sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "{{category_id}}",
+                    "sync-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Bulk Sync Categories to GHL",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/categories/bulk-sync-ghl",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "categories",
+                    "bulk-sync-ghl"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Amenities",
+          "item": [
+            {
+              "name": "Create Amenity",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('amenity_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"WiFi\",\n  \"icon\": \"wifi\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/amenities",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Amenity",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Free WiFi\",\n  \"icon\": \"wifi\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities",
+                    "{{amenity_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Amenity",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/amenities/{{amenity_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "amenities",
+                    "{{amenity_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Features",
+          "item": [
+            {
+              "name": "Create Feature",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const json = pm.response.json();",
+                      "    if (json.data && json.data.id) {",
+                      "        pm.collectionVariables.set('feature_id', json.data.id);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/features",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Update Feature",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Lake View\",\n  \"icon\": \"water\",\n  \"is_active\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/features/{{feature_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features",
+                    "{{feature_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Feature",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/features/{{feature_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "features",
+                    "{{feature_id}}"
+                  ]
+                },
+                "description": "Roles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Reports",
+          "item": [
+            {
+              "name": "Report Summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/reports/summary",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "reports",
+                    "summary"
+                  ]
+                },
+                "description": "Today's paid revenue, occupancy %, check-ins today, avg stay nights, bookings-per-weekday, revenue-by-category \u2014 all computed live.\n\nRoles: owner, admin. Staff now gets 403 here (see config/permissions.php)."
+              },
+              "response": []
+            },
+            {
+              "name": "Dashboard Organization Stats",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/dashboard/organization-stats",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "dashboard",
+                    "organization-stats"
+                  ]
+                },
+                "description": "Entity-count summary for the owner-only dashboard section: total_customers, total_users, total_rental_categories, total_rental_services, total_bookings, total_pos_product_categories, total_pos_products \u2014 all scoped to the caller's own organization.\n\nRoles: owner ONLY (not admin, unlike every other entry in this folder \u2014 see config/permissions.php's dashboard.organization_stats.view). Admin/staff/superadmin get 403."
+              },
+              "response": []
+            }
+          ],
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              {
+                "key": "token",
+                "value": "{{active_token}}",
+                "type": "string"
+              }
+            ]
+          }
         }
       ]
     },
     {
-      "name": "6. Super Admin (later)",
+      "name": "6. Super Admin",
       "description": "Placeholder for SaaS-level routes. Login as Superadmin is already under Auth. Add platform routes here when built.",
       "auth": {
         "type": "bearer",
@@ -4458,11 +4653,331 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations"
+              ]
+            },
+            "description": "Roles: superadmin only. Every other role -> 403 (proves super-admin is genuinely org-less: it's excluded from Tier 1 too)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  var rows = json.data || [];",
+                  "  if (rows.length) {",
+                  "    pm.collectionVariables.set('organization_id', rows[0].id);",
+                  "    console.log('Saved organization_id=' + rows[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Organization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Block Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/block",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "block"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Non-payment (Postman test)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Roles: superadmin only. Blocking is per-organization \u2014 a multi-org user keeps working under any other, non-blocked organization."
+          },
+          "response": []
+        },
+        {
+          "name": "Unblock Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/unblock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "unblock"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Rentals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/rentals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "rentals"
+              ]
+            },
+            "description": "Read-only cross-org drill-down. Reuses ProductService::listServices() directly \u2014 does NOT run live GHL invoice reconciliation (unlike the staff Bookings/Product Transactions list endpoints)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "products"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "bookings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Product Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations/{{organization_id}}/product-transactions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations",
+                "{{organization_id}}",
+                "product-transactions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Engage Identifiers (all organizations)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/engage-identifiers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "engage-identifiers"
+              ]
+            },
+            "description": "Read-only \u2014 identifiers/status/token METADATA only, never access_token/refresh_token. This is the \"Engage Identifiers only\" view; Refresh Token / Data Sync are owner/admin-only actions super-admin cannot reach."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Countries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/settings/countries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "settings",
+                "countries"
+              ]
+            },
+            "description": "Roles: superadmin only now (moved off owner/admin \u2014 same controller method, gate changed). Folder default auth (superadmin_token) applies."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "7. Webhooks",
+      "name": "7. Permissions",
+      "item": [
+        {
+          "name": "Get Permission Matrix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/permissions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "permissions"
+              ]
+            },
+            "description": "Open to any authenticated role (including customer) \u2014 the matrix has no secrets. Returns every {action, role, decider} triple plus the caller's own allowed-action list (data.self.allowed), which the frontend uses instead of hardcoded role checks."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Webhooks",
       "item": [
         {
           "name": "Engage Inbound Webhook",
@@ -4510,6 +5025,442 @@
       "auth": {
         "type": "noauth"
       }
+    },
+    {
+      "name": "9. Authorization Regression (negative tests)",
+      "description": "Executable authorization checks for the roles that changed in the 2026-08-13 RBAC redesign. This repo has no PHPUnit test suite, so this folder is the closest thing to a regression suite for access control \u2014 run it top-to-bottom after logging in as each role (folder 0) to populate {{customer_id}} etc. first.",
+      "item": [
+        {
+          "name": "Staff cannot delete a customer",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staff_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Staff cannot delete a customer -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff cannot view archived customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers/archived",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "archived"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staff_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Staff cannot view archived customers -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff cannot refresh the Engage token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/settings/engage/refresh-token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "settings",
+                "engage",
+                "refresh-token"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staff_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Staff cannot refresh the Engage token -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff cannot trigger a GHL data sync",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/settings/engage/pull-ghl",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "settings",
+                "engage",
+                "pull-ghl"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staff_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Staff cannot trigger a GHL data sync -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff cannot view reports",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/summary",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "summary"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staff_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Staff cannot view reports -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner cannot access the super-admin organizations list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/superadmin/organizations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "superadmin",
+                "organizations"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{owner_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Owner cannot access the super-admin organizations list -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Super-admin cannot access ordinary org-scoped product list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{superadmin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Super-admin cannot access ordinary org-scoped product list -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer cannot access staff bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{customer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Authorization regression check \u2014 expects 403."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Customer cannot access staff bookings -> 403\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard Organization Stats as Admin -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/organization-stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "organization-stats"
+              ]
+            },
+            "description": "dashboard.organization_stats.view is owner-only, deliberately narrower than the owner+admin role every other dashboard/reports action in this collection allows. Expect 403 here even though admin passes Report Summary."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
     }
   ],
   "auth": {
@@ -4593,6 +5544,10 @@
     },
     {
       "key": "engage_organization_location_id",
+      "value": ""
+    },
+    {
+      "key": "organization_id",
       "value": ""
     },
     {
