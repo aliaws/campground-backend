@@ -32,9 +32,23 @@ class CustomerPortalController extends Controller
             return $this->missingCustomerResponse();
         }
 
+        // Deliberately NOT org-scoped — a customer can have real bookings
+        // across multiple organizations (EngageCustomer belongsToMany
+        // EngageOrganizationLocation), and this endpoint's own security
+        // boundary is customer_id (only the authenticated customer's own
+        // rows, via resolveCustomer() above), not org membership. This used
+        // to also filter by $request->user()->resolveOrganizationLocationId()
+        // — a straight `tenant_id` -> `engage_organization_location_id`
+        // rename that silently turned a harmless "usually null, no-op"
+        // filter into an always-resolving one: resolveOrganizationLocationId()
+        // walks the STAFF-only engage_users_locations link table, which a
+        // customer-role User has no real membership in, so it either threw
+        // or (for an account that happened to pick up a stray link) resolved
+        // to some arbitrary single org — silently hiding every booking the
+        // customer had at any *other* org. Found live 2026-08-19: a real
+        // customer with 2 real confirmed bookings saw "No bookings yet".
         $bookings = $this->bookingService->list([
             'customer_id' => $customer->id,
-            'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 
         // Same self-heal as bookingShow()/BookingController::index() — without

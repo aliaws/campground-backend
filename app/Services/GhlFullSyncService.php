@@ -433,39 +433,68 @@ class GhlFullSyncService
                     'product_rental_id' => $primary->id,
                 ]);
             } else {
-                EngageRentalTransaction::updateOrCreate(
-                    ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],
-                    array_merge([
-                        'booking_id' => $localBooking->id,
-                        'ghl_booking_id' => $localBooking->ghl_booking_id,
-                        'customer_id' => $customer->id,
-                        'customer_name' => $customerName,
-                        'customer_email' => $customerEmail,
-                        'product_id' => $primary->product_id,
-                        'product_rental_id' => $primary->id,
-                        'rental_name' => $primary->name,
-                        'amount' => $rentalAmount,
-                        'status' => 'paid',
-                        'check_in_date' => $localBooking->check_in_date,
-                        'check_out_date' => $localBooking->check_out_date,
-                        'notes' => null,
-                        'paid_at' => $paidAt,
-                        'raw_payload' => $invoice,
-                    ], $localBooking->wasRecentlyCreated ? [
-                        // Only backfill these when the Booking was just
-                        // created purely from GHL sync data (necessarily an
-                        // online/GHL-processed payment). A pre-existing
-                        // Booking's own RentalTransaction row already carries
-                        // its own correct payment_method/quantity/unit_price
-                        // (set at real booking-creation time via
-                        // RentalTransactionService::createFromBooking()) —
-                        // overwriting them here would silently corrupt e.g. a
-                        // cash payment into 'card'.
-                        'payment_method' => 'card',
-                        'quantity' => 1,
-                        'unit_price' => $rentalAmount,
-                    ] : [])
-                );
+                $rentalValues = array_merge([
+                    'engage_organization_location_id' => $tenantId,
+                    'ghl_invoice_id' => $ghlInvoiceId,
+                    'booking_id' => $localBooking->id,
+                    'ghl_booking_id' => $localBooking->ghl_booking_id,
+                    'customer_id' => $customer->id,
+                    'customer_name' => $customerName,
+                    'customer_email' => $customerEmail,
+                    'product_id' => $primary->product_id,
+                    'product_rental_id' => $primary->id,
+                    'rental_name' => $primary->name,
+                    'amount' => $rentalAmount,
+                    'status' => 'paid',
+                    'check_in_date' => $localBooking->check_in_date,
+                    'check_out_date' => $localBooking->check_out_date,
+                    'notes' => null,
+                    'paid_at' => $paidAt,
+                    'raw_payload' => $invoice,
+                ], $localBooking->wasRecentlyCreated ? [
+                    // Only backfill these when the Booking was just
+                    // created purely from GHL sync data (necessarily an
+                    // online/GHL-processed payment). A pre-existing
+                    // Booking's own RentalTransaction row already carries
+                    // its own correct payment_method/quantity/unit_price
+                    // (set at real booking-creation time via
+                    // RentalTransactionService::createFromBooking()) —
+                    // overwriting them here would silently corrupt e.g. a
+                    // cash payment into 'card'.
+                    'payment_method' => 'card',
+                    'quantity' => 1,
+                    'unit_price' => $rentalAmount,
+                ] : []);
+
+                // Real bug found live 2026-08-19: matching purely by
+                // ghl_invoice_id let this create a genuine *duplicate*
+                // RentalTransaction for a booking that already had one,
+                // whenever GHL reported a different invoice id for the
+                // same booking than what was captured at real
+                // booking-creation time (e.g. a customer's Text2Pay invoice
+                // that got recreated) — the new row then had no
+                // payment_method (the wasRecentlyCreated guard above
+                // correctly refused to guess one), showing as blank on the
+                // POS Rental Transactions page even though the *original*
+                // row already had the real one. A booking only ever has
+                // one RentalTransaction (RentalTransactionService::
+                // createFromBooking()'s "exactly one line per booking"
+                // invariant), so if one already exists for this booking,
+                // update that same row — carrying its already-correct
+                // payment_method forward untouched — instead of matching
+                // by ghl_invoice_id and risking a second row.
+                $existingForBooking = ! $localBooking->wasRecentlyCreated
+                    ? EngageRentalTransaction::where('booking_id', $localBooking->id)->first()
+                    : null;
+
+                if ($existingForBooking) {
+                    $existingForBooking->update($rentalValues);
+                } else {
+                    EngageRentalTransaction::updateOrCreate(
+                        ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],
+                        $rentalValues
+                    );
+                }
                 $wroteRental = true;
             }
         }
