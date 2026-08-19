@@ -45,8 +45,10 @@ class PublicBookingController extends Controller
         }
 
         [$product, $rental] = $resolved;
+        $organization = $product->organizationLocation;
 
-        if ($product->status !== 'active') {
+        if ($product->status !== 'active'
+            || ! $organization || $organization->isBlocked() || $organization->isUninstalled()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -108,8 +110,10 @@ class PublicBookingController extends Controller
         }
 
         [$product] = $resolved;
+        $organization = $product->organizationLocation;
 
-        if ($product->status !== 'active') {
+        if ($product->status !== 'active'
+            || ! $organization || $organization->isBlocked() || $organization->isUninstalled()) {
             return response()->json([
                 'success' => false,
                 'data' => null,

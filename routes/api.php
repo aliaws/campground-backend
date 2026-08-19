@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicCmsPageController;
 use App\Http\Controllers\Api\V1\Public\PublicCountryController;
 use App\Http\Controllers\Api\V1\Public\PublicEngageController;
+use App\Http\Controllers\Api\V1\Public\PublicOrganizationController;
 use App\Http\Controllers\Api\V1\Public\PublicProductController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
@@ -75,6 +76,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/services/{product}', [PublicServiceController::class, 'show']);
             Route::get('/categories', [PublicCategoryController::class, 'index']);
             Route::get('/service-categories', [PublicServiceCategoryController::class, 'index']);
+            Route::get('/organizations', [PublicOrganizationController::class, 'index']);
             Route::get('/shop/products', [PublicProductController::class, 'index']);
             Route::get('/shop/orders/{productTransaction}', [PublicShopController::class, 'show']);
             Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);

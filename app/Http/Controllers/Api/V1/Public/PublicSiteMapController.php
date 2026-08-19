@@ -3,46 +3,84 @@
 namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\SiteMapResource;
+use App\Http\Resources\PublicSiteMapResource;
+use App\Models\EngageOrganizationLocation;
 use App\Models\SiteMap;
-use App\Services\OrganizationLocationResolver;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
+/**
+ * 2026-08-19: aggregated across every (or a caller-selected subset of)
+ * active organization, mirroring PublicServiceController/
+ * PublicCategoryController's existing "no single default org" pattern —
+ * previously this hardcoded OrganizationLocationResolver::
+ * resolveDefaultLocationId() and only ever showed one organization's map.
+ */
 class PublicSiteMapController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
+        $activeIds = EngageOrganizationLocation::active()->pluck('id');
 
-        // Customers only ever see ONE map — whichever the staff builder has
-        // marked as default. Falls back to the oldest map for locations that
-        // haven't explicitly picked a default yet (e.g. before this feature
-        // existed), so the customer-facing page never shows a blank state by default.
-        $map = SiteMap::where('engage_organization_location_id', $locationId)->where('is_default', true)->first()
-            ?? SiteMap::where('engage_organization_location_id', $locationId)->oldest()->first();
+        $requestedIds = $request->input('organization_ids', []);
+        if (! empty($requestedIds) && is_array($requestedIds)) {
+            $activeIds = $activeIds->intersect($requestedIds)->values();
+        }
 
-        $maps = $map ? collect([$map]) : collect();
+        // One map per organization — whichever the staff builder has
+        // marked default there, falling back to the oldest for an org that
+        // hasn't explicitly picked one yet. An org with no map at all
+        // simply contributes nothing to the list.
+        $maps = $activeIds
+            ->map(fn (string $orgId) => SiteMap::where('engage_organization_location_id', $orgId)->where('is_default', true)->first()
+                ?? SiteMap::where('engage_organization_location_id', $orgId)->oldest()->first())
+            ->filter()
+            ->values();
+
+        // ->map()/->filter() above yield a plain Support Collection, not an
+        // Eloquent one — ::load() is Eloquent-collection-only.
+        $maps = EloquentCollection::make($maps->all())->load('organizationLocation');
 
         return response()->json([
             'success' => true,
-            'data' => SiteMapResource::collection($maps),
+            'data' => PublicSiteMapResource::collection($maps),
             'message' => 'Maps retrieved.',
         ]);
     }
 
     public function show(SiteMap $siteMap): JsonResponse
     {
-        if ($siteMap->engage_organization_location_id !== OrganizationLocationResolver::resolveDefaultLocationId()) {
+        $organization = $siteMap->organizationLocation;
+
+        if (! $organization || $organization->isBlocked() || $organization->isUninstalled()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
         }
 
-        $siteMap->load(['elements' => function ($query) {
-            $query->where('is_visible', true);
-        }, 'elements.productRental.product', 'elements.iconType']);
+        $siteMap->load([
+            'organizationLocation',
+            'elements' => function ($query) {
+                // A 'rental' pin is only included if its underlying listing
+                // is still bookable (active + isRental()) — i.e. has an
+                // accessible Service Details page to link to. Decorative
+                // 'icon' pins are unaffected. The map's own organization is
+                // already confirmed active above, so no further per-element
+                // org check is needed here.
+                $query->where('is_visible', true)->where(function ($q) {
+                    $q->where('type', '!=', 'rental')
+                        ->orWhereHas(
+                            'productRental.product',
+                            fn ($p) => $p->where('status', 'active')->whereNotNull('product_rental_id')
+                        );
+                });
+            },
+            'elements.productRental.product',
+            'elements.iconType',
+        ]);
 
         return response()->json([
             'success' => true,
-            'data' => new SiteMapResource($siteMap),
+            'data' => new PublicSiteMapResource($siteMap),
             'message' => 'Map retrieved.',
         ]);
     }

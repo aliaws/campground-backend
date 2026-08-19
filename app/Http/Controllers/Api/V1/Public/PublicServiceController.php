@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api\V1\Public;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\LiveServiceResource;
-use App\Http\Resources\ServiceResource;
+use App\Http\Resources\PublicLiveServiceResource;
+use App\Http\Resources\PublicServiceResource;
 use App\Http\Resources\ServiceVariantResource;
 use App\Models\EngageProduct;
 use App\Services\GhlLocationContext;
@@ -33,13 +33,21 @@ class PublicServiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $filters = $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']);
+        $filters['service_category_ids'] = $request->input('service_category_ids', []);
+        $filters['organization_ids'] = $request->input('organization_ids', []);
 
         $services = $this->productService->listServices($filters);
+
+        // Needed for PublicServiceResource's organization attribution below
+        // — listServices() (shared with the staff ServiceController) has
+        // no reason to eager-load this for POS, so it's loaded here,
+        // scoped to this public controller only.
+        $services->getCollection()->loadMissing('organizationLocation');
 
         return response()->json([
             'success' => true,
             'data' => [
-                'data' => ServiceResource::collection($services),
+                'data' => PublicServiceResource::collection($services),
                 'current_page' => $services->currentPage(),
                 'last_page' => $services->lastPage(),
                 'per_page' => $services->perPage(),
@@ -53,7 +61,10 @@ class PublicServiceController extends Controller
 
     public function show(EngageProduct $product): JsonResponse
     {
-        if ($product->status !== 'active' || ! $product->isRental()) {
+        $organization = $product->organizationLocation;
+
+        if ($product->status !== 'active' || ! $product->isRental()
+            || ! $organization || $organization->isBlocked() || $organization->isUninstalled()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
@@ -61,7 +72,7 @@ class PublicServiceController extends Controller
             ], 404);
         }
 
-        $product->load(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features']);
+        $product->load(['rentals.serviceCategory', 'defaultRental.serviceCategory', 'categories', 'amenities', 'features', 'organizationLocation']);
 
         // A guest request has no authenticated user for GhlClient to derive
         // credentials from — scope to this specific product's own
@@ -80,7 +91,7 @@ class PublicServiceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => new LiveServiceResource($product, $details, $paymentsByGhlId),
+                'data' => new PublicLiveServiceResource($product, $details, $paymentsByGhlId),
                 'message' => 'Service retrieved.',
             ]);
         } catch (\Exception $e) {
@@ -91,7 +102,7 @@ class PublicServiceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => new ServiceResource($product),
+                'data' => new PublicServiceResource($product),
                 'message' => 'Service retrieved.',
             ]);
         } finally {
@@ -115,8 +126,10 @@ class PublicServiceController extends Controller
         }
 
         [$product, $rental] = $resolved;
+        $organization = $product->organizationLocation;
 
-        if ($product->status !== 'active' || ! $product->isRental()) {
+        if ($product->status !== 'active' || ! $product->isRental()
+            || ! $organization || $organization->isBlocked() || $organization->isUninstalled()) {
             return response()->json([
                 'success' => false,
                 'data' => null,
