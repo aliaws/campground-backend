@@ -29,8 +29,14 @@ class PublicCategoryController extends Controller
         // belong to the same organization (see PublicShopController), so
         // collapsing two different orgs' "Snacks" into one filter chip
         // would just make that cross-org-cart rejection more confusing.
+        $activeIds = EngageOrganizationLocation::active()->pluck('id');
+        $requestedIds = $request->input('organization_ids', []);
+        if (! empty($requestedIds) && is_array($requestedIds)) {
+            $activeIds = $activeIds->intersect($requestedIds)->values();
+        }
+
         $query = EngageCategory::where('is_active', true)
-            ->whereIn('engage_organization_location_id', EngageOrganizationLocation::active()->pluck('id'))
+            ->whereIn('engage_organization_location_id', $activeIds)
             ->whereHas('products', $browsableProducts)
             ->withCount(['products' => $browsableProducts]);
 
