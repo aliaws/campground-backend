@@ -79,6 +79,22 @@ class EngageCustomer extends Model
         )->withPivot(['id', 'ghl_contact_id'])->withTimestamps();
     }
 
+    /**
+     * The organization name to show as an email sender when no single,
+     * unambiguous organization is already known at the call site (e.g.
+     * "forgot password," which only has an email to look up) — the
+     * customer's first-linked organization, matching the same "first
+     * linked, else nothing" convention User::primaryLocationId() already
+     * uses for staff. Null (never "Laravel") when this customer has no
+     * organization link at all; callers fall back to config('mail.from.name').
+     */
+    public function primaryOrganizationName(): ?string
+    {
+        return $this->organizationLocations()
+            ->orderBy('engage_customers_locations.created_at')
+            ->value('name');
+    }
+
     /** The customer portal login linked to this customer, if one has been created. */
     public function customerAccount(): HasOne
     {

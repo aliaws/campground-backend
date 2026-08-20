@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\SendsFromOrganization;
 use App\Models\EngageOrganizationLocation;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
@@ -13,7 +14,7 @@ use Illuminate\Queue\SerializesModels;
 /** Sent to business_email after Complete Registration is submitted, mirrors CustomerRegistrationMail's shape. */
 class OrganizationRegistrationMail extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsFromOrganization, SerializesModels;
 
     public function __construct(
         public EngageOrganizationLocation $organization,
@@ -25,6 +26,7 @@ class OrganizationRegistrationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: $this->organizationFromAddress($this->organization->name),
             subject: 'Activate your organization',
         );
     }

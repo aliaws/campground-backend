@@ -132,7 +132,8 @@ class PublicBookingController extends Controller
 
         $this->customerAccountService->ensureCustomerAccount(
             $customer,
-            $request->only(['name', 'email', 'phone'])
+            $request->only(['name', 'email', 'phone']),
+            organizationId: $locationId
         );
 
         // Same reasoning as quote() above — scope to this specific

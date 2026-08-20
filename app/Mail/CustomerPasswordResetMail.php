@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\SendsFromOrganization;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -11,16 +12,18 @@ use Illuminate\Queue\SerializesModels;
 
 class CustomerPasswordResetMail extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsFromOrganization, SerializesModels;
 
     public function __construct(
         public User $customerUser,
         public string $token,
+        public ?string $organizationName = null,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: $this->organizationFromAddress($this->organizationName),
             subject: 'Reset your account password',
         );
     }
