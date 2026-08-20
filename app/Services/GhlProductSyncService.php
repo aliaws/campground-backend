@@ -656,7 +656,17 @@ class GhlProductSyncService
             'product_type' => in_array($type, ['PHYSICAL', 'DIGITAL', 'SERVICE']) ? $type : 'PHYSICAL',
             'description' => $ghlProduct['description'] ?? null,
             'status' => 'active',
-            'image' => $ghlProduct['image'] ?? null,
+            // GHL's regular Products API (GET /products/) only ever
+            // returns a single `image` field, not an array — wrapped into
+            // one position:0 entry, the same shape rental services store
+            // multiple images in. `image` itself is a computed accessor
+            // derived from images[0], see EngageProduct::image().
+            'images' => empty($ghlProduct['image']) ? [] : [[
+                '_id' => null,
+                'url' => $ghlProduct['image'],
+                'name' => $name,
+                'position' => 0,
+            ]],
             'available_in_store' => $ghlProduct['availableInStore'] ?? true,
             'ghl_product_id' => $ghlId,
             'engage_sync_status' => 'pending',

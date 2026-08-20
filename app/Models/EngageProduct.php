@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -54,24 +55,67 @@ class EngageProduct extends Model
     }
 
     /**
-     * The images array to expose when no live GHL data is available —
-     * prefers the real stored `images` column (populated by
-     * GhlServiceSyncService's pull, see "Support Multiple Service Images"),
-     * falling back to a synthesized single-element array from the legacy
-     * `image` column for any row that hasn't been re-pulled since that
-     * column was added, and to an empty array when there's no image at all.
+     * `image` is a computed attribute, not a real column — `images` (a real
+     * JSON column) is the single source of truth for every image this
+     * product has. This keeps every pre-existing `$product->image` read and
+     * `['image' => $url]` write across the app (product cards, the staff
+     * upload form, GhlImageSyncService/GhlProductSyncService's GHL-CDN
+     * upload-cache logic, etc.) working completely unchanged: reading
+     * returns the position:0 image's URL, and writing replaces (or
+     * removes, on null) just the position:0 entry while preserving every
+     * other image a multi-photo rental service might have — a single-image
+     * write path (a regular product upload, a GHL products pull) can never
+     * accidentally wipe out a rental's other gallery photos.
+     */
+    protected function image(): Attribute
+    {
+        return Attribute::make(
+            get: function () {
+                $images = $this->images ?? [];
+                if ($images === []) {
+                    return null;
+                }
+
+                $first = collect($images)->firstWhere('position', 0) ?? $images[0];
+
+                return $first['url'] ?? null;
+            },
+            set: function (?string $value) {
+                $rest = collect($this->images ?? [])
+                    ->filter(fn ($img) => ($img['position'] ?? null) !== 0)
+                    ->values()
+                    ->all();
+
+                // A mutator that returns [otherAttribute => value] bypasses
+                // that attribute's own cast pipeline entirely (Laravel sets
+                // the raw value straight into $attributes) — `images` still
+                // has its own `array` cast via casts(), which expects a JSON
+                // string in storage, so it must be encoded here explicitly
+                // or the next read of $product->images crashes json_decode()
+                // on an already-decoded array. Confirmed via a live crash
+                // during verification, not a hypothetical.
+                if ($value === null || $value === '') {
+                    return ['images' => json_encode($rest)];
+                }
+
+                $newFirst = ['url' => $value, 'name' => $this->name, 'position' => 0, '_id' => null];
+
+                return ['images' => json_encode(array_merge([$newFirst], $rest))];
+            },
+        );
+    }
+
+    /**
+     * The images array to expose when no live GHL data is available — the
+     * real stored `images` column (populated by GhlServiceSyncService's
+     * pull, see "Support Multiple Service Images"), or an empty array when
+     * this product has no image at all.
      *
      * @return array<int, array{_id: ?string, url: ?string, name: ?string, position: int}>
      */
     public function localImagesFallback(): array
     {
-        if (! empty($this->images)) {
-            return $this->images;
-        }
-
-        return $this->image
-            ? [['url' => $this->image, 'name' => $this->name, 'position' => 0, '_id' => null]]
-            : [];
+        return $this->images ?? [];
     }
 
     // ── Scopes ────────────────────────────────────────────────────────────────

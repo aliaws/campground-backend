@@ -59,25 +59,29 @@ final readonly class GhlServiceDetail
     }
 
     /**
-     * The image to use everywhere a single image is required (listings,
-     * cards, maps, search results, etc.) — always the position:0 entry from
-     * the full `images` array when one exists, per the "first image is the
-     * default image everywhere" requirement; falls back to GHL's own
-     * `coverImage` field only when there's no images array to derive a
-     * position-0 entry from at all (e.g. a service with zero images, or a
-     * payload shape GHL sends without one).
+     * The full images array to persist into `engage_products.images` —
+     * `images()` as-is when GHL returned one, or a synthesized single-entry
+     * array from the legacy `coverImage` field when it didn't (a service
+     * with zero images in the array, or a payload shape without one at
+     * all). `images` is the only column write sites need to set — `image`
+     * on `EngageProduct` is a computed accessor derived from this array's
+     * position:0 entry, see `EngageProduct::image()` — so this single
+     * method covers both the "full gallery" and "single cover image" cases
+     * a caller ever needs from a service detail.
+     *
+     * @return array<int, array{_id: ?string, url: ?string, name: string, position: int}>
      */
-    public function defaultImageUrl(): ?string
+    public function imagesForPersistence(): array
     {
         $images = $this->images();
 
-        if ($images === []) {
-            return $this->coverImage();
+        if ($images !== []) {
+            return $images;
         }
 
-        $first = collect($images)->firstWhere('position', 0) ?? $images[0];
+        $cover = $this->coverImage();
 
-        return $first['url'] ?? $this->coverImage();
+        return $cover ? [['_id' => null, 'url' => $cover, 'name' => $this->name() ?? 'Image 1', 'position' => 0]] : [];
     }
 
     /** null = unlimited stock. */
