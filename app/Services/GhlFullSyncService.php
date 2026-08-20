@@ -488,7 +488,49 @@ class GhlFullSyncService
                     : null;
 
                 if ($existingForBooking) {
-                    $existingForBooking->update($rentalValues);
+                    // Real bug found live in production 2026-08-20: GHL can
+                    // attach more than one invoice id to the same calendar
+                    // appointment (e.g. a deposit + balance invoice, or a
+                    // re-issued invoice) — when that happens,
+                    // resolveLocalBooking() legitimately resolves the SAME
+                    // local Booking for two different ghl_invoice_ids, so
+                    // $existingForBooking here can be a row that already
+                    // belongs to a *different* invoice than the one being
+                    // processed right now. Forcing its ghl_invoice_id to the
+                    // current $ghlInvoiceId then violates the
+                    // (org, ghl_invoice_id) unique constraint whenever that
+                    // invoice id is already the canonical row for a
+                    // *different* RentalTransaction (confirmed via the real
+                    // production error — a duplicate-key violation on this
+                    // exact update). Guard against it: if this invoice id
+                    // already belongs to a different row, refresh only its
+                    // safe, invoice-level fields (never booking/rental
+                    // identity, which may legitimately belong to a
+                    // different local Booking than $existingForBooking's)
+                    // and leave $existingForBooking itself untouched rather
+                    // than risk misattributing it or crashing the sync.
+                    $conflictingOwner = $existingForBooking->ghl_invoice_id === $ghlInvoiceId
+                        ? null
+                        : EngageRentalTransaction::where('engage_organization_location_id', $tenantId)
+                            ->where('ghl_invoice_id', $ghlInvoiceId)
+                            ->first();
+
+                    if ($conflictingOwner) {
+                        $conflictingOwner->update([
+                            'status' => $rentalValues['status'],
+                            'amount' => $rentalValues['amount'],
+                            'paid_at' => $rentalValues['paid_at'],
+                            'raw_payload' => $rentalValues['raw_payload'],
+                        ]);
+
+                        Log::info('Skipped reassigning a RentalTransaction to an invoice id already owned by a different row — refreshed the existing owner instead', [
+                            'ghl_invoice_id' => $ghlInvoiceId,
+                            'existing_for_booking_id' => $existingForBooking->id,
+                            'conflicting_owner_id' => $conflictingOwner->id,
+                        ]);
+                    } else {
+                        $existingForBooking->update($rentalValues);
+                    }
                 } else {
                     EngageRentalTransaction::updateOrCreate(
                         ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],

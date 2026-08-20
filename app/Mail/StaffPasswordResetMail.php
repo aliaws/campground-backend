@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Mail\Concerns\SendsFromOrganization;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -12,16 +13,18 @@ use Illuminate\Queue\SerializesModels;
 /** Forgot-password flow for staff logins (owner/admin/staff/superadmin) — mirrors CustomerPasswordResetMail's shape, separate mailable since the reset link points at the staff /reset-password page, not the customer portal's. */
 class StaffPasswordResetMail extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsFromOrganization, SerializesModels;
 
     public function __construct(
         public User $staffUser,
         public string $token,
+        public ?string $organizationName = null,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
+            from: $this->organizationFromAddress($this->organizationName),
             subject: 'Reset your password',
         );
     }

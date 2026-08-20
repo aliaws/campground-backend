@@ -107,7 +107,8 @@ class PublicShopController extends Controller
 
             $this->customerAccountService->ensureCustomerAccount(
                 $customer,
-                $request->only(['name', 'email', 'phone'])
+                $request->only(['name', 'email', 'phone']),
+                organizationId: $locationId
             );
 
             $lineItems = collect($items)->map(fn (array $item) => [

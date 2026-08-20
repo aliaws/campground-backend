@@ -112,7 +112,13 @@ return [
 
     'from' => [
         'address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
-        'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
+        // Last-resort fallback only — every real Mailable in this app sets its
+        // own per-organization sender name (see app/Mail/Concerns/SendsFromOrganization.php),
+        // this is only reached when no organization can be resolved at all
+        // (e.g. a superadmin action). Deliberately never Laravel's own stock
+        // 'Laravel' default, which is what customers were actually seeing
+        // whenever MAIL_FROM_NAME/APP_NAME weren't set in a given environment.
+        'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Campground Rentals')),
     ],
 
 ];

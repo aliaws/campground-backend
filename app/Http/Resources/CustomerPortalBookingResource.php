@@ -17,6 +17,7 @@ class CustomerPortalBookingResource extends JsonResource
         return [
             'id' => $this->id,
             'product_name' => $this->whenLoaded('product', fn () => $this->product->name),
+            'organization_name' => $this->whenLoaded('organizationLocation', fn () => $this->organizationLocation?->name),
             'booking_start_time' => $this->booking_start_time,
             'booking_end_time' => $this->booking_end_time,
             'check_in_date' => $this->check_in_date?->format('Y-m-d'),

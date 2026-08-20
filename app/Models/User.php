@@ -268,6 +268,19 @@ class User extends Authenticatable
     }
 
     /**
+     * The organization name to show as an email sender for this staff user
+     * (forgot-password, etc.) — null for superadmin (genuinely org-less) or
+     * an unlinked user, in which case callers fall back to
+     * config('mail.from.name'), never a hardcoded/framework-default name.
+     */
+    public function primaryOrganizationName(): ?string
+    {
+        $locationId = $this->activeOrPrimaryLocationId();
+
+        return $locationId ? EngageOrganizationLocation::find($locationId)?->name : null;
+    }
+
+    /**
      * True only when the current request's token was explicitly scoped to
      * an organization the user still belongs to (via POST
      * /auth/select-organization, or auto-embedded at login for a

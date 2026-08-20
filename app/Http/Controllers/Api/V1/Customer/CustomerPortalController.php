@@ -5,13 +5,17 @@ namespace App\Http\Controllers\Api\V1\Customer;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Customer\UpdateCustomerProfileRequest;
 use App\Http\Resources\CustomerPortalBookingResource;
+use App\Http\Resources\CustomerPortalOrderResource;
 use App\Http\Resources\UserResource;
 use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
+use App\Models\EngageProductTransaction;
 use App\Models\User;
 use App\Services\BookingService;
 use App\Services\GhlBookingService;
+use App\Services\GhlLocationContext;
 use App\Services\GhlService;
+use App\Services\ProductTransactionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +26,8 @@ class CustomerPortalController extends Controller
         private BookingService $bookingService,
         private GhlBookingService $ghlBookingService,
         private GhlService $ghlService,
+        private ProductTransactionService $productTransactionService,
+        private GhlLocationContext $ghlLocationContext,
     ) {}
 
     public function bookings(Request $request): JsonResponse
@@ -63,7 +69,7 @@ class CustomerPortalController extends Controller
         $bookings->setCollection(collect($reconciled)->map(function (EngageBooking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
-                : $booking->load(['customer', 'product', 'productRental', 'transactions']);
+                : $booking->load(['customer', 'product', 'productRental', 'transactions', 'organizationLocation']);
         }));
 
         return response()->json([
@@ -85,7 +91,7 @@ class CustomerPortalController extends Controller
         // customer who pays via the GHL-hosted invoice page can come back to
         // their own booking card and still see "Unpaid" indefinitely.
         $booking = $this->ghlService->reconcileInvoiceStatus($booking);
-        $booking->loadMissing('customer', 'product', 'productRental', 'transactions');
+        $booking->loadMissing('customer', 'product', 'productRental', 'transactions', 'organizationLocation');
 
         return response()->json([
             'success' => true,
@@ -152,6 +158,52 @@ class CustomerPortalController extends Controller
         ]);
     }
 
+    public function orders(Request $request): JsonResponse
+    {
+        $customer = $this->resolveCustomer($request);
+
+        if (! $customer) {
+            return $this->missingCustomerResponse();
+        }
+
+        // Deliberately NOT org-scoped — customer-id boundary across multiple organizations
+        $orders = $this->productTransactionService->list([
+            'customer_id' => $customer->id,
+            'booking_id' => 'null', // Standalone shop orders
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => CustomerPortalOrderResource::collection($orders),
+            'message' => 'Orders retrieved.',
+        ]);
+    }
+
+    public function orderShow(Request $request, EngageProductTransaction $order): JsonResponse
+    {
+        if ($response = $this->denyUnlessOrderOwned($request, $order)) {
+            return $response;
+        }
+
+        if ($order->engage_organization_location_id) {
+            $this->ghlLocationContext->set($order->engage_organization_location_id);
+        }
+
+        try {
+            $order = $this->ghlService->reconcileProductTransactionInvoiceStatus($order);
+        } finally {
+            $this->ghlLocationContext->set(null);
+        }
+
+        $order->loadMissing(['customer', 'items.product', 'organizationLocation', 'booking']);
+
+        return response()->json([
+            'success' => true,
+            'data' => new CustomerPortalOrderResource($order),
+            'message' => 'Order retrieved.',
+        ]);
+    }
+
     public function updateProfile(UpdateCustomerProfileRequest $request): JsonResponse
     {
         /** @var User $user */
@@ -197,6 +249,25 @@ class CustomerPortalController extends Controller
         }
 
         if ($booking->customer_id !== $customer->id) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Unauthorized.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    private function denyUnlessOrderOwned(Request $request, EngageProductTransaction $order): ?JsonResponse
+    {
+        $customer = $this->resolveCustomer($request);
+
+        if (! $customer) {
+            return $this->missingCustomerResponse();
+        }
+
+        if ($order->customer_id !== $customer->id) {
             return response()->json([
                 'success' => false,
                 'data' => null,

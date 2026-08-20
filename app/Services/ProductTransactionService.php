@@ -57,7 +57,7 @@ class ProductTransactionService
             $query->where('booking_id', $filters['booking_id']);
         }
 
-        return $query->with(['customer', 'items.product', 'booking'])
+        return $query->with(['customer', 'items.product', 'booking', 'organizationLocation'])
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }

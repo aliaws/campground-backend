@@ -41,7 +41,7 @@ class StaffAccountService
         $token = $this->issueActionToken($user, $ttl);
 
         try {
-            Mail::to($user->email)->send(new StaffPasswordResetMail($user, $token));
+            Mail::to($user->email)->send(new StaffPasswordResetMail($user, $token, $user->primaryOrganizationName()));
         } catch (\Throwable $e) {
             Log::error('Staff password reset email failed', [
                 'user_id' => $user->id,

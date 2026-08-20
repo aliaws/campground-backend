@@ -58,6 +58,32 @@ final readonly class GhlServiceDetail
         ])->values()->all();
     }
 
+    /**
+     * The full images array to persist into `engage_products.images` —
+     * `images()` as-is when GHL returned one, or a synthesized single-entry
+     * array from the legacy `coverImage` field when it didn't (a service
+     * with zero images in the array, or a payload shape without one at
+     * all). `images` is the only column write sites need to set — `image`
+     * on `EngageProduct` is a computed accessor derived from this array's
+     * position:0 entry, see `EngageProduct::image()` — so this single
+     * method covers both the "full gallery" and "single cover image" cases
+     * a caller ever needs from a service detail.
+     *
+     * @return array<int, array{_id: ?string, url: ?string, name: string, position: int}>
+     */
+    public function imagesForPersistence(): array
+    {
+        $images = $this->images();
+
+        if ($images !== []) {
+            return $images;
+        }
+
+        $cover = $this->coverImage();
+
+        return $cover ? [['_id' => null, 'url' => $cover, 'name' => $this->name() ?? 'Image 1', 'position' => 0]] : [];
+    }
+
     /** null = unlimited stock. */
     public function quantity(): ?int
     {

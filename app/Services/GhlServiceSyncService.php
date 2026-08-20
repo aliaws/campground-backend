@@ -749,7 +749,12 @@ class GhlServiceSyncService
             'description' => $detail->description(),
             'slug' => $detail->slug(),
             'status' => $detail->isActive() ? 'active' : 'draft',
-            'image' => $detail->coverImage(),
+            // `images` alone is sufficient — `image` is a computed
+            // accessor derived from images[0] (position:0), see
+            // EngageProduct::image(). imagesForPersistence() also folds in
+            // the coverImage-only fallback for a service GHL sent with no
+            // images array at all.
+            'images' => $detail->imagesForPersistence(),
             'ghl_product_id' => $detail->paymentsProductId(),
             'quantity' => $detail->quantity(),
             'price' => $detail->basePrice() ?? $detail->paymentAmount(),
@@ -861,7 +866,10 @@ class GhlServiceSyncService
         $listingUpdate = array_filter([
             'name' => $baseDetail->name(),
             'description' => $baseDetail->description(),
-            'image' => $baseDetail->coverImage(),
+            // `image` is a computed accessor derived from images[0]
+            // (position:0), see EngageProduct::image() — only `images`
+            // needs writing.
+            'images' => $baseDetail->imagesForPersistence(),
             'ghl_product_id' => $baseDetail->paymentsProductId(),
             'quantity' => $baseDetail->quantity(),
             'price' => $basePrice,

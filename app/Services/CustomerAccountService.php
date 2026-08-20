@@ -6,6 +6,7 @@ use App\Mail\CustomerPasswordResetMail;
 use App\Mail\CustomerRegistrationMail;
 use App\Mail\CustomerVerificationMail;
 use App\Models\EngageCustomer;
+use App\Models\EngageOrganizationLocation;
 use App\Models\EngageUserVerification;
 use App\Models\User;
 use App\Support\ActionJwt;
@@ -105,8 +106,15 @@ class CustomerAccountService
      *                           emailing an unsolicited "verify your account" message to someone who didn't
      *                           ask for one. The public booking widget always leaves this true.
      * @param  User|null  $createdBy  Staff/admin who created the account; null for self/public booking.
+     * @param  string|null  $organizationId  The specific organization this account/booking belongs to, when
+     *                                       the caller already knows it (e.g. PublicBookingController::store()'s
+     *                                       already-resolved product organization) — takes priority over
+     *                                       $createdBy's own org and the system default, since neither of
+     *                                       those is necessarily the actual organization a public request is
+     *                                       for on a multi-organization deployment. Also what the verification/
+     *                                       welcome email's sender name is derived from.
      */
-    public function ensureCustomerAccount(EngageCustomer $customer, array $contactData = [], bool $sendEmail = true, ?User $createdBy = null): void
+    public function ensureCustomerAccount(EngageCustomer $customer, array $contactData = [], bool $sendEmail = true, ?User $createdBy = null, ?string $organizationId = null): void
     {
         $email = strtolower(trim((string) ($contactData['email'] ?? $customer->email ?? '')));
 
@@ -114,8 +122,9 @@ class CustomerAccountService
             return;
         }
 
-        DB::transaction(function () use ($customer, $contactData, $email, $sendEmail, $createdBy) {
-            $locationId = $createdBy?->resolveOrganizationLocationId()
+        DB::transaction(function () use ($customer, $contactData, $email, $sendEmail, $createdBy, $organizationId) {
+            $locationId = $organizationId
+                ?? $createdBy?->resolveOrganizationLocationId()
                 ?? OrganizationLocationResolver::resolveDefaultLocationId();
 
             $existing = User::whereRaw('LOWER(email) = ?', [$email])
@@ -136,7 +145,7 @@ class CustomerAccountService
                 $customerUser->attachLocation($locationId);
                 $customer->attachLocation($locationId);
 
-                $this->initiateVerification($customerUser, CustomerVerificationMail::class, $sendEmail);
+                $this->initiateVerification($customerUser, CustomerVerificationMail::class, $sendEmail, $locationId);
 
                 return;
             }
@@ -175,11 +184,15 @@ class CustomerAccountService
     /**
      * @param  class-string  $mailableClass  CustomerVerificationMail (default — booking/contact-created path)
      *                                       or CustomerRegistrationMail (direct self-registration via /customer/register).
-     *                                       Both share the same (User, code, token) constructor signature.
+     *                                       Both share the same (User, code, token, organizationName) constructor signature.
      * @param  bool  $sendEmail  Always generates and stores a fresh verification row regardless — false only
      *                           skips actually emailing it (see ensureCustomerAccount()'s $sendEmail doc).
+     * @param  string|null  $organizationId  The organization to name as the email's sender, when already known
+     *                                       (threaded from ensureCustomerAccount()) — falls back to the
+     *                                       customer's own first-linked organization when omitted (e.g. the
+     *                                       resend-verification path, which only has an email to look up).
      */
-    public function initiateVerification(User $customerUser, string $mailableClass = CustomerVerificationMail::class, bool $sendEmail = true): void
+    public function initiateVerification(User $customerUser, string $mailableClass = CustomerVerificationMail::class, bool $sendEmail = true, ?string $organizationId = null): void
     {
         if (! $customerUser->email) {
             throw new \InvalidArgumentException('An email address is required to create a customer account.');
@@ -202,8 +215,12 @@ class CustomerAccountService
             return;
         }
 
+        $organizationName = $organizationId
+            ? EngageOrganizationLocation::find($organizationId)?->name
+            : $customerUser->customer?->primaryOrganizationName();
+
         try {
-            Mail::to($customerUser->email)->send(new $mailableClass($customerUser, $code, $jwt));
+            Mail::to($customerUser->email)->send(new $mailableClass($customerUser, $code, $jwt, $organizationName));
         } catch (\Throwable $e) {
             Log::error('Customer verification email failed', [
                 'user_id' => $customerUser->id,
@@ -328,7 +345,9 @@ class CustomerAccountService
         );
 
         try {
-            Mail::to($customerUser->email)->send(new CustomerPasswordResetMail($customerUser, $jwt));
+            Mail::to($customerUser->email)->send(
+                new CustomerPasswordResetMail($customerUser, $jwt, $customerUser->customer?->primaryOrganizationName())
+            );
         } catch (\Throwable $e) {
             Log::error('Customer password reset email failed', [
                 'user_id' => $customerUser->id,
