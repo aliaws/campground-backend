@@ -23,6 +23,7 @@ class EngageProduct extends Model
         'status',
         'available_in_store',
         'image',
+        'images',
         'tax_inclusive',
         'is_taxes_enabled',
         'engage_organization_location_id',
@@ -42,6 +43,7 @@ class EngageProduct extends Model
     {
         return [
             'available_in_store' => 'boolean',
+            'images' => 'array',
             'tax_inclusive' => 'boolean',
             'is_taxes_enabled' => 'boolean',
             'track_product_inventory' => 'boolean',
@@ -49,6 +51,27 @@ class EngageProduct extends Model
             'quantity' => 'integer',
             'price' => 'decimal:2',
         ];
+    }
+
+    /**
+     * The images array to expose when no live GHL data is available —
+     * prefers the real stored `images` column (populated by
+     * GhlServiceSyncService's pull, see "Support Multiple Service Images"),
+     * falling back to a synthesized single-element array from the legacy
+     * `image` column for any row that hasn't been re-pulled since that
+     * column was added, and to an empty array when there's no image at all.
+     *
+     * @return array<int, array{_id: ?string, url: ?string, name: ?string, position: int}>
+     */
+    public function localImagesFallback(): array
+    {
+        if (! empty($this->images)) {
+            return $this->images;
+        }
+
+        return $this->image
+            ? [['url' => $this->image, 'name' => $this->name, 'position' => 0, '_id' => null]]
+            : [];
     }
 
     // ── Scopes ────────────────────────────────────────────────────────────────

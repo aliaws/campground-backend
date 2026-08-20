@@ -58,6 +58,28 @@ final readonly class GhlServiceDetail
         ])->values()->all();
     }
 
+    /**
+     * The image to use everywhere a single image is required (listings,
+     * cards, maps, search results, etc.) — always the position:0 entry from
+     * the full `images` array when one exists, per the "first image is the
+     * default image everywhere" requirement; falls back to GHL's own
+     * `coverImage` field only when there's no images array to derive a
+     * position-0 entry from at all (e.g. a service with zero images, or a
+     * payload shape GHL sends without one).
+     */
+    public function defaultImageUrl(): ?string
+    {
+        $images = $this->images();
+
+        if ($images === []) {
+            return $this->coverImage();
+        }
+
+        $first = collect($images)->firstWhere('position', 0) ?? $images[0];
+
+        return $first['url'] ?? $this->coverImage();
+    }
+
     /** null = unlimited stock. */
     public function quantity(): ?int
     {

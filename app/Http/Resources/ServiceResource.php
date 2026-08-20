@@ -43,7 +43,7 @@ class ServiceResource extends JsonResource
             'bookingUnit' => 'day',
             'quantity' => $product->quantity ?? 1,
             'maxQuantity' => $product->quantity ?? 1,
-            'images' => $product->image ? [['url' => $product->image, 'name' => $product->name, 'position' => 0, '_id' => null]] : [],
+            'images' => $product->localImagesFallback(),
             'serviceCategoryId' => $defaultRental?->service_category_id,
             'serviceCategoryName' => $defaultRental?->serviceCategory?->name,
             'categoryName' => $product->categories?->first()?->name,
