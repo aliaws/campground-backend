@@ -61,6 +61,11 @@ class EngageProductTransaction extends Model
         return $this->belongsTo(EngageCustomer::class);
     }
 
+    public function organizationLocation(): BelongsTo
+    {
+        return $this->belongsTo(EngageOrganizationLocation::class, 'engage_organization_location_id');
+    }
+
     public function booking(): BelongsTo
     {
         return $this->belongsTo(EngageBooking::class);
@@ -84,5 +89,24 @@ class EngageProductTransaction extends Model
     public function isDraft(): bool
     {
         return $this->status === 'draft';
+    }
+
+    /**
+     * Public GHL-hosted invoice view page (derived from ghl_invoice_url host).
+     */
+    public function ghlInvoiceViewUrl(): ?string
+    {
+        if (! $this->ghl_invoice_id || ! $this->ghl_invoice_url) {
+            return null;
+        }
+
+        $host = parse_url($this->ghl_invoice_url, PHP_URL_HOST);
+        $scheme = parse_url($this->ghl_invoice_url, PHP_URL_SCHEME) ?? 'https';
+
+        if (! $host) {
+            return null;
+        }
+
+        return "{$scheme}://{$host}/invoice/{$this->ghl_invoice_id}";
     }
 }

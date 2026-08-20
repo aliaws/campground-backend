@@ -134,6 +134,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/bookings/{booking}', [CustomerPortalController::class, 'bookingShow']);
             Route::post('/bookings/{booking}/cancel', [CustomerPortalController::class, 'cancelBooking']);
             Route::get('/bookings/{booking}/invoice', [CustomerPortalController::class, 'invoice']);
+            Route::get('/orders', [CustomerPortalController::class, 'orders']);
+            Route::get('/orders/{order}', [CustomerPortalController::class, 'orderShow']);
             Route::put('/profile', [CustomerPortalController::class, 'updateProfile']);
         });
     });
