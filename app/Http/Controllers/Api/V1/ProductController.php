@@ -131,6 +131,57 @@ class ProductController extends Controller
         ]);
     }
 
+    /**
+     * Gallery management for a service's full `images` array (Manage
+     * Service's edit form) — additive, appends a new image rather than
+     * replacing the cover the way uploadImage() above does.
+     */
+    public function addImage(Request $request, EngageProduct $product): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $request->validate(['image' => 'required|image|max:2048']);
+        $product = $this->productService->addImage($product, $request->file('image'));
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Image added.',
+        ]);
+    }
+
+    public function removeImage(Request $request, EngageProduct $product, int $position): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $product = $this->productService->removeImage($product, $position);
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Image removed.',
+        ]);
+    }
+
+    public function setCoverImage(Request $request, EngageProduct $product, int $position): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $product = $this->productService->setCoverImage($product, $position);
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Cover image updated.',
+        ]);
+    }
+
     public function attachCategories(Request $request, EngageProduct $product): JsonResponse
     {
         if ($response = $this->denyUnlessOwned($request, $product)) {

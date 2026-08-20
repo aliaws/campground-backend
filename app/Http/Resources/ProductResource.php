@@ -17,6 +17,11 @@ class ProductResource extends JsonResource
             'status' => $this->status,
             'available_in_store' => $this->available_in_store,
             'image' => $this->image,
+            // Full gallery (position:0 == the `image` above) — see
+            // EngageProduct::localImagesFallback(). Added so the Manage
+            // Service edit form can load/display/manage every image a
+            // service has, not just its single cover photo.
+            'images' => $this->localImagesFallback(),
             'tax_inclusive' => $this->tax_inclusive,
             'is_taxes_enabled' => $this->is_taxes_enabled,
             'track_product_inventory' => $this->track_product_inventory,

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
@@ -100,9 +101,19 @@ class ProductService
         // pulled out the same way as amenity/feature ids above, since they
         // live on EngageProductRental, not EngageProduct itself.
         $rentalData = array_intersect_key($data, array_flip(['listing_price', 'service_duration_unit', 'security_deposit_amount']));
+        // Manage Service's Category field — see UpdateProductRequest's doc
+        // comment: the value is the raw GHL category id already stored
+        // as-is on product_rentals.service_category_id, so no local-id
+        // translation is needed here, only routing it to the right row.
+        $hasServiceCategoryUpdate = array_key_exists('service_category_id', $data);
+        $serviceCategoryGhlId = $data['service_category_id'] ?? null;
+        // Manage Service's Variants tab — never the base/default rental
+        // (that's $rentalData above), only the other variant rows.
+        $variants = $data['variants'] ?? null;
         unset(
             $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
             $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
+            $data['service_category_id'],
         );
 
         $product->update($data);
@@ -129,7 +140,88 @@ class ProductService
             $product->resolveBaseRental()?->update($rentalData);
         }
 
+        if ($hasServiceCategoryUpdate && $product->isRental()) {
+            $product->resolveBaseRental()?->update(['service_category_id' => $serviceCategoryGhlId]);
+        }
+
+        // Scoped to product_id === $product->id — never trusts an id's mere
+        // presence in the validated payload as proof of ownership, since a
+        // client could otherwise pass another product's variant id.
+        if ($variants !== null && $product->isRental()) {
+            foreach ($variants as $variantData) {
+                if (empty($variantData['id'])) {
+                    continue;
+                }
+
+                $variantUpdate = array_intersect_key($variantData, array_flip(['listing_price', 'is_active']));
+                if ($variantUpdate === []) {
+                    continue;
+                }
+
+                EngageProductRental::where('id', $variantData['id'])
+                    ->where('product_id', $product->id)
+                    ->update($variantUpdate);
+            }
+        }
+
         return $product->fresh()->load(self::EAGER);
+    }
+
+    public function addImage(EngageProduct $product, UploadedFile $image): EngageProduct
+    {
+        $path = $image->store('products', 'public');
+        $images = $product->images ?? [];
+        $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
+        $images[] = ['_id' => null, 'url' => Storage::url($path), 'name' => $product->name, 'position' => $nextPosition];
+
+        $product->update(['images' => $images]);
+
+        return $product->fresh();
+    }
+
+    public function removeImage(EngageProduct $product, int $position): EngageProduct
+    {
+        $images = collect($product->images ?? [])
+            ->reject(fn ($img) => ($img['position'] ?? null) === $position)
+            ->values()
+            ->map(fn ($img, $i) => array_merge($img, ['position' => $i]))
+            ->all();
+
+        // Removing whatever was at position:0 changes the cover image
+        // (EngageProduct::image() reads position:0) — clear the GHL-CDN
+        // cache marker the same way uploadImage() already does whenever
+        // the effective cover photo changes, so a later GHL sync re-uploads
+        // the new cover instead of reusing a stale cached URL.
+        $update = ['images' => $images];
+        if ($position === 0) {
+            $update['ghl_image_url'] = null;
+        }
+
+        $product->update($update);
+
+        return $product->fresh();
+    }
+
+    /** Reorders so the given position becomes the new position:0 (cover/default image). */
+    public function setCoverImage(EngageProduct $product, int $position): EngageProduct
+    {
+        $images = collect($product->images ?? []);
+        $target = $images->firstWhere('position', $position);
+
+        if (! $target || $position === 0) {
+            return $product;
+        }
+
+        $rest = $images->reject(fn ($img) => ($img['position'] ?? null) === $position)->values();
+        $reordered = collect([$target])->concat($rest)
+            ->values()
+            ->map(fn ($img, $i) => array_merge($img, ['position' => $i]))
+            ->all();
+
+        // See removeImage()'s comment — the cover image is changing here too.
+        $product->update(['images' => $reordered, 'ghl_image_url' => null]);
+
+        return $product->fresh();
     }
 
     public function delete(EngageProduct $product): bool
