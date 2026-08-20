@@ -69,7 +69,7 @@ class CustomerPortalController extends Controller
         $bookings->setCollection(collect($reconciled)->map(function (EngageBooking $booking) {
             return $booking->relationLoaded('customer')
                 ? $booking
-                : $booking->load(['customer', 'product', 'productRental', 'transactions']);
+                : $booking->load(['customer', 'product', 'productRental', 'transactions', 'organizationLocation']);
         }));
 
         return response()->json([
@@ -91,7 +91,7 @@ class CustomerPortalController extends Controller
         // customer who pays via the GHL-hosted invoice page can come back to
         // their own booking card and still see "Unpaid" indefinitely.
         $booking = $this->ghlService->reconcileInvoiceStatus($booking);
-        $booking->loadMissing('customer', 'product', 'productRental', 'transactions');
+        $booking->loadMissing('customer', 'product', 'productRental', 'transactions', 'organizationLocation');
 
         return response()->json([
             'success' => true,

@@ -78,6 +78,11 @@ class EngageBooking extends Model
         return $this->belongsTo(EngageProductRental::class);
     }
 
+    public function organizationLocation(): BelongsTo
+    {
+        return $this->belongsTo(EngageOrganizationLocation::class, 'engage_organization_location_id');
+    }
+
     /**
      * Retargeted to EngageRentalTransaction as of the 2026-08-10 transactions
      * refactor (was Transaction — that generic table/model no longer
