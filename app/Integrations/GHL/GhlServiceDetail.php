@@ -95,6 +95,17 @@ final readonly class GhlServiceDetail
         return isset($this->raw['maxQuantity']) ? (int) $this->raw['maxQuantity'] : null;
     }
 
+    /**
+     * The real Lead Connector flag deciding whether this service/variant
+     * tracks stock at all — the single source of truth for the Inventory &
+     * Pricing tab's "Inventory" switch, confirmed present on both the
+     * services-list and service-detail API responses.
+     */
+    public function hasQuantityEnabled(): bool
+    {
+        return (bool) ($this->raw['hasQuantityEnabled'] ?? false);
+    }
+
     public function bookingUnit(): ?string
     {
         return $this->raw['bookingUnit'] ?? null;
@@ -319,5 +330,23 @@ final readonly class GhlServiceDetail
         $rule = $this->pricingRule();
 
         return isset($rule['base_price']) ? (float) $rule['base_price'] : null;
+    }
+
+    /**
+     * The raw discount-rule array to persist onto
+     * engage_product_rentals.pricing_rules — Lead Connector's "Advanced
+     * Pricing" categories (Seasonal/date_range, Day of week, Duration
+     * discounts, Quantity discounts), one entry per configured rule, stored
+     * exactly as returned (same "GHL's own field names, no renaming"
+     * convention as bookingSettingsForPersistence() above) rather than
+     * parsed into a translated shape — this app doesn't need to understand
+     * every rule type's internal fields to store and redisplay them
+     * faithfully, only to pass them through unchanged.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function pricingRulesForPersistence(): array
+    {
+        return $this->pricingRule()['rules'] ?? [];
     }
 }

@@ -68,6 +68,59 @@ class UpdateProductRequest extends FormRequest
             'variants.*.id' => ['required_with:variants', 'string', 'exists:engage_product_rentals,id'],
             'variants.*.listing_price' => ['nullable', 'numeric', 'min:0'],
             'variants.*.is_active' => ['nullable', 'boolean'],
+            // Inventory & Pricing tab's per-variant Stock field — same
+            // local-only, base-row-excluded convention as listing_price/
+            // is_active above (see ProductService::update()'s doc comment).
+            // Null means "unlimited" (matches GhlServiceDetail::quantity()),
+            // so it's nullable rather than required. The base rental's own
+            // entry is synthesized by the frontend and also flows through
+            // this same array (see ProductService::update()'s handling) —
+            // carrying only `id`/`quantity`/`pricing_rules`, never
+            // `listing_price`/`is_active`.
+            'variants.*.quantity' => ['nullable', 'integer', 'min:0'],
+            // Real Lead Connector `hasQuantityEnabled` flag, per-row (unlike
+            // is_variants_enabled below, this one is genuinely meaningful
+            // per variant) — the frontend's one shared "Inventory" toggle
+            // sends the same value for every row in this array, base
+            // included, so every row stays consistent with what's shown.
+            'variants.*.has_quantity_enabled' => ['nullable', 'boolean'],
+            // Advanced Pricing discount rules — replaces the row's entire
+            // pricing_rules array on save (same "whole object" convention as
+            // booking_settings), field names confirmed against a real
+            // captured Lead Connector response, not guessed. `match`'s
+            // meaningful sub-keys vary by `type` (date_range: from/to,
+            // day_of_week: dayOfWeek, duration_discount: duration/
+            // durationUnit, quantity_discount: min) — all left individually
+            // nullable/optional here (the frontend editor only ever submits
+            // the sub-keys relevant to each rule's own type) rather than
+            // conditionally required per type, matching this codebase's
+            // existing lenient-nested-array precedent (see
+            // booking_settings.serviceDurations.* above).
+            'variants.*.pricing_rules' => ['nullable', 'array'],
+            'variants.*.pricing_rules.*.type' => ['required_with:variants.*.pricing_rules', Rule::in(['date_range', 'day_of_week', 'duration_discount', 'quantity_discount'])],
+            'variants.*.pricing_rules.*.value' => ['required_with:variants.*.pricing_rules', 'numeric'],
+            'variants.*.pricing_rules.*.valueType' => ['nullable', Rule::in(['percentage', 'flat'])],
+            'variants.*.pricing_rules.*.sequence' => ['nullable', 'integer'],
+            'variants.*.pricing_rules.*.match' => ['nullable', 'array'],
+            'variants.*.pricing_rules.*.match.from' => ['nullable', 'string'],
+            'variants.*.pricing_rules.*.match.to' => ['nullable', 'string'],
+            'variants.*.pricing_rules.*.match.dayOfWeek' => ['nullable', 'integer', 'min:0', 'max:6'],
+            'variants.*.pricing_rules.*.match.duration' => ['nullable', 'integer', 'min:0'],
+            'variants.*.pricing_rules.*.match.durationUnit' => ['nullable', 'string', 'max:32'],
+            'variants.*.pricing_rules.*.match.min' => ['nullable', 'integer', 'min:0'],
+            // Inventory & Pricing tab's real, staff-editable Variants
+            // switch — persisted onto the base rental (same base-only
+            // convention as booking_period_type below) and pushed to Lead
+            // Connector as an explicit isVariantsEnabled value instead of
+            // the previous rentals-count-derived guess (see
+            // GhlServiceSyncService::buildServiceUpdatePayload()).
+            'is_variants_enabled' => ['nullable', 'boolean'],
+            // Base rental's own has_quantity_enabled — see the
+            // variants.*.has_quantity_enabled comment above; this top-level
+            // key is what actually reaches the base row (via
+            // ProductService::update()'s base-rental-only $rentalData
+            // intersect), same convention as booking_period_type below.
+            'has_quantity_enabled' => ['nullable', 'boolean'],
             // Manage Service's Booking Settings tab — bookingPeriodType gets
             // its own column (it drives which fields the form shows/hides);
             // everything else is one JSON object mirroring GHL's own raw

@@ -102,9 +102,15 @@ class ProductService
         // live on EngageProductRental, not EngageProduct itself.
         // booking_period_type/booking_settings (Manage Service's Booking
         // Settings tab) follow the identical base-rental-only convention.
+        // is_variants_enabled (Inventory & Pricing tab's real Variants
+        // switch) and has_quantity_enabled (its Inventory switch) follow
+        // the identical base-rental-only convention too — the latter also
+        // reaches every non-base variant row via the $variants array below,
+        // since it's genuinely a per-row concept, unlike is_variants_enabled.
         $rentalData = array_intersect_key($data, array_flip([
             'listing_price', 'service_duration_unit', 'security_deposit_amount',
-            'booking_period_type', 'booking_settings',
+            'booking_period_type', 'booking_settings', 'is_variants_enabled',
+            'has_quantity_enabled',
         ]));
 
         // Drop any fixed-duration interval missing a duration/durationUnit
@@ -130,6 +136,7 @@ class ProductService
             $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
             $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
             $data['service_category_id'], $data['booking_period_type'], $data['booking_settings'],
+            $data['is_variants_enabled'], $data['has_quantity_enabled'],
         );
 
         $product->update($data);
@@ -177,14 +184,19 @@ class ProductService
 
         // Scoped to product_id === $product->id — never trusts an id's mere
         // presence in the validated payload as proof of ownership, since a
-        // client could otherwise pass another product's variant id.
+        // client could otherwise pass another product's variant id. The
+        // base/default rental's own Inventory & Pricing edit (Stock +
+        // Advanced Pricing) flows through this exact same array too, as a
+        // synthesized entry carrying only id/quantity/pricing_rules — no
+        // special-casing needed here since the intersect below only ever
+        // touches whichever keys are actually present per entry.
         if ($variants !== null && $product->isRental()) {
             foreach ($variants as $variantData) {
                 if (empty($variantData['id'])) {
                     continue;
                 }
 
-                $variantUpdate = array_intersect_key($variantData, array_flip(['listing_price', 'is_active']));
+                $variantUpdate = array_intersect_key($variantData, array_flip(['listing_price', 'is_active', 'quantity', 'pricing_rules', 'has_quantity_enabled']));
                 if ($variantUpdate === []) {
                     continue;
                 }

@@ -113,6 +113,22 @@ class GhlServiceSyncService
         $bookingSettings = array_key_exists('booking_settings', $incoming) ? $incoming['booking_settings'] : ($rental->booking_settings ?? []);
         $quantity = (int) (array_key_exists('quantity', $incoming) ? ($incoming['quantity'] ?? 1) : ($product->quantity ?? 1));
         $locationId = $this->client->getLocationId();
+        // Prefers an explicit staff-set value (Manage Service's Inventory &
+        // Pricing tab's real Variants switch) over the previous
+        // rentals-count-based guess — falls back to that guess only when
+        // the caller genuinely didn't send one (e.g. a save from a form
+        // that predates this field, or any other caller of this method).
+        $isVariantsEnabled = array_key_exists('is_variants_enabled', $incoming)
+            ? (bool) $incoming['is_variants_enabled']
+            : ($rental->is_variants_enabled ?? $product->rentals()->count() > 1);
+        // Same explicit-value-first pattern — has_quantity_enabled is the
+        // single source of truth for whether this row tracks stock at all,
+        // replacing the previous `$quantity > 1` guess this push used to
+        // make (a guess against the *listing-wide* Quantity field, not this
+        // specific row's own tracked value).
+        $hasQuantityEnabled = array_key_exists('has_quantity_enabled', $incoming)
+            ? (bool) $incoming['has_quantity_enabled']
+            : ($rental->has_quantity_enabled ?? $quantity > 1);
 
         return [
             'industryType' => self::RENTAL_INDUSTRY,
@@ -123,7 +139,7 @@ class GhlServiceSyncService
             'coverImage' => $this->imageSync->pushImageToGhl($product),
             'isActive' => $isActive,
             'locationId' => $locationId,
-            'isVariantsEnabled' => $product->rentals()->count() > 1,
+            'isVariantsEnabled' => $isVariantsEnabled,
             'payment' => [
                 'amount' => $listingPrice,
                 'description' => $description,
@@ -132,7 +148,7 @@ class GhlServiceSyncService
             'useCustomForm' => false,
             'formId' => '',
             'quantity' => $quantity,
-            'hasQuantityEnabled' => $quantity > 1,
+            'hasQuantityEnabled' => $hasQuantityEnabled,
             'images' => $this->resolveServiceImagesForGhl($product),
             'preBuffer' => $bookingSettings['preBuffer'] ?? null,
             'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? 'min',
@@ -1049,6 +1065,29 @@ class GhlServiceSyncService
                 // own editable-on-base-only convention already works.
                 'booking_period_type' => $detail->bookingPeriodType(),
                 'booking_settings' => $detail->bookingSettingsForPersistence(),
+                // Inventory & Pricing tab (2026-08-21) — written per the
+                // exact GHL service id being upserted (base or variant), same
+                // convention as booking_period_type/booking_settings above:
+                // each variant is its own full GHL service record with its
+                // own quantity/pricingRule, so this keeps every row's Stock
+                // and Advanced Pricing rules fresh on every pull. quantity
+                // is deliberately NOT wrapped in array_filter's null-check
+                // exemption the way booking_settings/pricing_rules are (both
+                // always arrays, so array_filter's `!== null` check never
+                // drops them) — a real transition from a tracked number back
+                // to "unlimited" (null) won't overwrite an existing value
+                // here, matching this method's pre-existing behavior for
+                // every other nullable scalar field above.
+                'quantity' => $detail->quantity(),
+                'pricing_rules' => $detail->pricingRulesForPersistence(),
+                // The real Lead Connector flag deciding whether this exact
+                // row tracks stock at all — the single source of truth for
+                // the Inventory & Pricing tab's "Inventory" switch. A plain
+                // boolean, not wrapped in the null-check exemption above,
+                // but that's fine here: hasQuantityEnabled() itself never
+                // returns null (defaults false), so it's never dropped by
+                // array_filter's `!== null` check regardless.
+                'has_quantity_enabled' => $detail->hasQuantityEnabled(),
             ], fn ($value) => $value !== null)
         );
     }
@@ -1083,8 +1122,17 @@ class GhlServiceSyncService
             $product->update($listingUpdate);
         }
 
-        if ($baseRental && $basePrice !== null) {
-            $baseRental->update(['listing_price' => $basePrice]);
+        if ($baseRental) {
+            // isVariantsEnabled always sourced from the BASE listing's own
+            // detail response (`$baseDetail`) — a variant's own detail
+            // response carries this same field but it is NOT authoritative
+            // there (confirmed false on a real variant's own detail even
+            // when the base correctly says true) — never read it off a
+            // variant's own GhlServiceDetail.
+            $baseRental->update(array_filter([
+                'listing_price' => $basePrice,
+                'is_variants_enabled' => $baseDetail->isVariantsEnabled(),
+            ], fn ($value) => $value !== null));
         }
 
         $pruned = EngageProductRental::where('product_id', $product->id)

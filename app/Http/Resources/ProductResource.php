@@ -49,6 +49,18 @@ class ProductResource extends JsonResource
             // service_category_id/service_category_name above.
             'booking_period_type' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_period_type),
             'booking_settings' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_settings),
+            // Inventory & Pricing tab — real Lead Connector `isVariantsEnabled`
+            // flag (from the base listing's own detail response, never a
+            // variant's), same resolveBaseRental() convenience-field pattern
+            // as the two fields above. Drives whether the edit form shows the
+            // Variants table or a single inline Pricing card.
+            'is_variants_enabled' => $this->when($this->isRental(), fn () => (bool) $this->resolveBaseRental()?->is_variants_enabled),
+            // Real Lead Connector `hasQuantityEnabled` flag — the single
+            // source of truth for the edit form's shared "Inventory"
+            // switch, seeded from the base rental's own copy (the form's
+            // one shared toggle applies the same value to every row on
+            // save — see ProductsManager.tsx's handleSubmit()).
+            'has_quantity_enabled' => $this->when($this->isRental(), fn () => (bool) $this->resolveBaseRental()?->has_quantity_enabled),
             'ghl_product_id' => $this->ghl_product_id,
             'ghl_image_url' => $this->ghl_image_url,
             'engage_sync_status' => $this->engage_sync_status,
