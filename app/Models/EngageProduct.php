@@ -22,6 +22,7 @@ class EngageProduct extends Model
         'product_type',
         'description',
         'status',
+        'is_active',
         'available_in_store',
         'image',
         'images',
@@ -44,6 +45,7 @@ class EngageProduct extends Model
     {
         return [
             'available_in_store' => 'boolean',
+            'is_active' => 'boolean',
             'images' => 'array',
             'tax_inclusive' => 'boolean',
             'is_taxes_enabled' => 'boolean',
