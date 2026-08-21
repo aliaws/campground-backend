@@ -72,26 +72,33 @@ class UpdateProductRequest extends FormRequest
             // its own column (it drives which fields the form shows/hides);
             // everything else is one JSON object mirroring GHL's own raw
             // field names verbatim, see GhlServiceDetail::
-            // bookingSettingsForPersistence(). Unit fields are deliberately
-            // just "string" (not Rule::in against a fixed list) — the values
-            // pulled from a live GHL service aren't guaranteed to match
-            // whatever curated set the edit form's own dropdowns happen to
-            // offer, and rejecting an otherwise-valid GHL-sourced value here
-            // would silently corrupt a pull.
+            // bookingSettingsForPersistence(). Unit fields are validated
+            // against each field's own specific allowed set (matching
+            // BookingSettingsFields.tsx's identical per-field option lists
+            // on the frontend) — this is safe to enforce strictly here
+            // because this FormRequest only ever gates the staff-initiated
+            // save endpoint (ProductController::update()); the GHL pull
+            // ingestion path (GhlServiceSyncService::upsertRentalRow())
+            // writes straight to the model via Eloquent and never goes
+            // through this validation at all, so a real Lead Connector
+            // value outside these lists can still be pulled/stored — this
+            // only ever blocks a *manual* save from submitting one.
             'booking_period_type' => ['nullable', Rule::in(['date-time-selection', 'date-selection', 'fixed'])],
             'booking_settings' => ['nullable', 'array'],
             'booking_settings.minDuration' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.minDurationUnit' => ['nullable', 'string', 'max:32'],
+            // Minimum/Maximum Duration support only "day" — the edit form's
+            // own dropdown for these two is disabled and locked to it.
+            'booking_settings.minDurationUnit' => ['nullable', Rule::in(['day'])],
             'booking_settings.maxDuration' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.maxDurationUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.maxDurationUnit' => ['nullable', Rule::in(['day'])],
             'booking_settings.preBuffer' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.preBufferUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.preBufferUnit' => ['nullable', Rule::in(['min', 'hour', 'day'])],
             'booking_settings.postBuffer' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.postBufferUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.postBufferUnit' => ['nullable', Rule::in(['min', 'hour', 'day'])],
             'booking_settings.allowBookingAfter' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.allowBookingAfterUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.allowBookingAfterUnit' => ['nullable', Rule::in(['min', 'hour', 'day', 'week', 'month'])],
             'booking_settings.allowBookingFor' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.allowBookingForUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.allowBookingForUnit' => ['nullable', Rule::in(['day', 'week', 'month'])],
             'booking_settings.hasTimeSelection' => ['nullable', 'boolean'],
             'booking_settings.bookingStartTime' => ['nullable', 'date_format:H:i'],
             'booking_settings.bookingEndTime' => ['nullable', 'date_format:H:i'],
