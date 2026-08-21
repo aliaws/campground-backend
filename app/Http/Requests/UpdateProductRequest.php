@@ -68,6 +68,40 @@ class UpdateProductRequest extends FormRequest
             'variants.*.id' => ['required_with:variants', 'string', 'exists:engage_product_rentals,id'],
             'variants.*.listing_price' => ['nullable', 'numeric', 'min:0'],
             'variants.*.is_active' => ['nullable', 'boolean'],
+            // Manage Service's Booking Settings tab — bookingPeriodType gets
+            // its own column (it drives which fields the form shows/hides);
+            // everything else is one JSON object mirroring GHL's own raw
+            // field names verbatim, see GhlServiceDetail::
+            // bookingSettingsForPersistence(). Unit fields are deliberately
+            // just "string" (not Rule::in against a fixed list) — the values
+            // pulled from a live GHL service aren't guaranteed to match
+            // whatever curated set the edit form's own dropdowns happen to
+            // offer, and rejecting an otherwise-valid GHL-sourced value here
+            // would silently corrupt a pull.
+            'booking_period_type' => ['nullable', Rule::in(['date-time-selection', 'date-selection', 'fixed'])],
+            'booking_settings' => ['nullable', 'array'],
+            'booking_settings.minDuration' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.minDurationUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.maxDuration' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.maxDurationUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.preBuffer' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.preBufferUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.postBuffer' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.postBufferUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.allowBookingAfter' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.allowBookingAfterUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.allowBookingFor' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.allowBookingForUnit' => ['nullable', 'string', 'max:32'],
+            'booking_settings.hasTimeSelection' => ['nullable', 'boolean'],
+            'booking_settings.bookingStartTime' => ['nullable', 'date_format:H:i'],
+            'booking_settings.bookingEndTime' => ['nullable', 'date_format:H:i'],
+            'booking_settings.serviceDurations' => ['nullable', 'array'],
+            // Deliberately nullable, not required — a malformed/incomplete
+            // interval entry is filtered out in ProductService::update()
+            // before it ever reaches the database, rather than rejecting the
+            // entire save over one bad row.
+            'booking_settings.serviceDurations.*.duration' => ['nullable', 'numeric', 'min:0'],
+            'booking_settings.serviceDurations.*.durationUnit' => ['nullable', 'string', 'max:32'],
         ];
     }
 }

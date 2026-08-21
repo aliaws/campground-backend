@@ -15,6 +15,12 @@ class ProductResource extends JsonResource
             'product_type' => $this->product_type,
             'description' => $this->description,
             'status' => $this->status,
+            // The always-in-sync mirror of Lead Connector's own isActive
+            // flag for a rental (see the is_active migration's doc
+            // comment) — `status` stays around for goods and every
+            // pre-existing status-based query, but this is what Manage
+            // Service's edit form actually reads/writes for a rental.
+            'is_active' => $this->is_active,
             'available_in_store' => $this->available_in_store,
             'image' => $this->image,
             // Full gallery (position:0 == the `image` above) — see
@@ -38,6 +44,11 @@ class ProductResource extends JsonResource
             // simply has nothing to find on a non-rental product.
             'service_category_id' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->service_category_id),
             'service_category_name' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->serviceCategory?->name),
+            // Manage Service's Booking Settings tab — same
+            // resolveBaseRental() convenience-field pattern as
+            // service_category_id/service_category_name above.
+            'booking_period_type' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_period_type),
+            'booking_settings' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_settings),
             'ghl_product_id' => $this->ghl_product_id,
             'ghl_image_url' => $this->ghl_image_url,
             'engage_sync_status' => $this->engage_sync_status,

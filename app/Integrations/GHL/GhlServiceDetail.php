@@ -140,6 +140,112 @@ final readonly class GhlServiceDetail
         return $this->raw['bookingPeriodType'] ?? null;
     }
 
+    /**
+     * Booking Settings tab (2026-08-21) — one raw GHL key per accessor,
+     * following this class's own established pattern above. Unlike
+     * durationUnit() above (a pre-existing, differently-named fallback used
+     * elsewhere), these two read minDurationUnit/maxDurationUnit directly,
+     * since the Booking Settings tab needs them as two independent values,
+     * not one shared fallback.
+     */
+    public function minDurationUnit(): ?string
+    {
+        return $this->raw['minDurationUnit'] ?? null;
+    }
+
+    public function maxDurationUnit(): ?string
+    {
+        return $this->raw['maxDurationUnit'] ?? null;
+    }
+
+    public function hasTimeSelection(): bool
+    {
+        return (bool) ($this->raw['hasTimeSelection'] ?? false);
+    }
+
+    public function preBuffer(): ?int
+    {
+        return isset($this->raw['preBuffer']) ? (int) $this->raw['preBuffer'] : null;
+    }
+
+    public function preBufferUnit(): ?string
+    {
+        return $this->raw['preBufferUnit'] ?? null;
+    }
+
+    public function postBuffer(): ?int
+    {
+        return isset($this->raw['postBuffer']) ? (int) $this->raw['postBuffer'] : null;
+    }
+
+    public function postBufferUnit(): ?string
+    {
+        return $this->raw['postBufferUnit'] ?? null;
+    }
+
+    public function allowBookingAfter(): ?int
+    {
+        return isset($this->raw['allowBookingAfter']) ? (int) $this->raw['allowBookingAfter'] : null;
+    }
+
+    public function allowBookingAfterUnit(): ?string
+    {
+        return $this->raw['allowBookingAfterUnit'] ?? null;
+    }
+
+    public function allowBookingFor(): ?int
+    {
+        return isset($this->raw['allowBookingFor']) ? (int) $this->raw['allowBookingFor'] : null;
+    }
+
+    public function allowBookingForUnit(): ?string
+    {
+        return $this->raw['allowBookingForUnit'] ?? null;
+    }
+
+    /** Fixed-duration intervals ("2 day", "1 week", ...) — only meaningful when bookingPeriodType() === 'fixed'. */
+    public function serviceDurations(): array
+    {
+        return collect($this->raw['serviceDurations'] ?? [])->map(fn ($d) => [
+            'duration' => isset($d['duration']) ? (int) $d['duration'] : null,
+            'durationUnit' => $d['durationUnit'] ?? null,
+        ])->values()->all();
+    }
+
+    /**
+     * The full booking-period configuration to persist onto
+     * engage_product_rentals.booking_settings — one JSON object mirroring
+     * GHL's own raw field names verbatim (camelCase, not translated to
+     * snake_case) so nothing is lost or renamed on the way in, and so a
+     * later read-back can be compared directly against a fresh GHL payload.
+     * bookingPeriodType itself is stored separately (its own column, since
+     * it drives which fields the edit form shows) — deliberately not
+     * repeated inside this object.
+     *
+     * @return array{minDuration: ?int, minDurationUnit: ?string, maxDuration: ?int, maxDurationUnit: ?string, preBuffer: ?int, preBufferUnit: ?string, postBuffer: ?int, postBufferUnit: ?string, allowBookingAfter: ?int, allowBookingAfterUnit: ?string, allowBookingFor: ?int, allowBookingForUnit: ?string, hasTimeSelection: bool, bookingStartTime: ?string, bookingEndTime: ?string, serviceDurations: array}
+     */
+    public function bookingSettingsForPersistence(): array
+    {
+        return [
+            'minDuration' => $this->minDuration(),
+            'minDurationUnit' => $this->minDurationUnit(),
+            'maxDuration' => $this->maxDuration(),
+            'maxDurationUnit' => $this->maxDurationUnit(),
+            'preBuffer' => $this->preBuffer(),
+            'preBufferUnit' => $this->preBufferUnit(),
+            'postBuffer' => $this->postBuffer(),
+            'postBufferUnit' => $this->postBufferUnit(),
+            'allowBookingAfter' => $this->allowBookingAfter(),
+            'allowBookingAfterUnit' => $this->allowBookingAfterUnit(),
+            'allowBookingFor' => $this->allowBookingFor(),
+            'allowBookingForUnit' => $this->allowBookingForUnit(),
+            'hasTimeSelection' => $this->hasTimeSelection(),
+            'bookingStartTime' => $this->bookingStartTime(),
+            'bookingEndTime' => $this->bookingEndTime(),
+            'serviceDurations' => $this->serviceDurations(),
+        ];
+    }
+
     public function isVariantsEnabled(): bool
     {
         return (bool) ($this->raw['isVariantsEnabled'] ?? false);

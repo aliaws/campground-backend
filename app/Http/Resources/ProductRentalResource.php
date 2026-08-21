@@ -25,6 +25,8 @@ class ProductRentalResource extends JsonResource
             'max_quantity' => $this->max_quantity,
             'service_category_id' => $this->service_category_id,
             'service_id' => $this->service_id,
+            'booking_period_type' => $this->booking_period_type,
+            'booking_settings' => $this->booking_settings,
             'is_default' => $this->isBaseListing(),
         ];
     }

@@ -100,7 +100,23 @@ class ProductService
         // Base-rental pricing fields (Manage Service's Pricing section) —
         // pulled out the same way as amenity/feature ids above, since they
         // live on EngageProductRental, not EngageProduct itself.
-        $rentalData = array_intersect_key($data, array_flip(['listing_price', 'service_duration_unit', 'security_deposit_amount']));
+        // booking_period_type/booking_settings (Manage Service's Booking
+        // Settings tab) follow the identical base-rental-only convention.
+        $rentalData = array_intersect_key($data, array_flip([
+            'listing_price', 'service_duration_unit', 'security_deposit_amount',
+            'booking_period_type', 'booking_settings',
+        ]));
+
+        // Drop any fixed-duration interval missing a duration/durationUnit
+        // before it ever reaches the database — validation allows them
+        // through individually (see UpdateProductRequest's own comment) so
+        // one malformed row never rejects the whole save.
+        if (isset($rentalData['booking_settings']['serviceDurations'])) {
+            $rentalData['booking_settings']['serviceDurations'] = array_values(array_filter(
+                $rentalData['booking_settings']['serviceDurations'],
+                fn ($d) => isset($d['duration'], $d['durationUnit']) && $d['duration'] !== '' && $d['durationUnit'] !== ''
+            ));
+        }
         // Manage Service's Category field — see UpdateProductRequest's doc
         // comment: the value is the raw GHL category id already stored
         // as-is on product_rentals.service_category_id, so no local-id
@@ -113,7 +129,7 @@ class ProductService
         unset(
             $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
             $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
-            $data['service_category_id'],
+            $data['service_category_id'], $data['booking_period_type'], $data['booking_settings'],
         );
 
         $product->update($data);
@@ -142,6 +158,21 @@ class ProductService
 
         if ($hasServiceCategoryUpdate && $product->isRental()) {
             $product->resolveBaseRental()?->update(['service_category_id' => $serviceCategoryGhlId]);
+        }
+
+        // Keep both the product's own is_active and the base rental's
+        // is_active in lockstep with the product's status whenever a
+        // rental's status is saved — is_active (on both rows) is what
+        // actually mirrors Lead Connector's real isActive flag (see
+        // GhlServiceDetail::isActive()/GhlServiceSyncService::upsertRentalRow()),
+        // so without this they could silently drift apart the moment status
+        // was ever edited independently of a GHL pull. `status` itself is
+        // left completely untouched here for goods, which have no rental
+        // row and keep their own independent active/draft/archived status.
+        if (array_key_exists('status', $data) && $product->isRental()) {
+            $isActive = $data['status'] === 'active';
+            $product->update(['is_active' => $isActive]);
+            $product->resolveBaseRental()?->update(['is_active' => $isActive]);
         }
 
         // Scoped to product_id === $product->id — never trusts an id's mere

@@ -16,9 +16,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * product list's "From Price" column. They do NOT feed the live GHL quote
  * a guest actually pays for at booking time — that's still entirely
  * GhlRentalGateway/BookingPriceCalculator, unchanged, GHL-sourced, and not
- * persisted anywhere. Everything else about a rental (actual booking
- * windows, availability, real pricing rules) is fetched live from GHL,
- * never stored.
+ * persisted anywhere.
+ *
+ * booking_period_type/booking_settings (2026-08-21, Manage Service's
+ * "Booking Settings" tab) are a deliberate, narrow exception to "booking
+ * windows are never persisted" above — they mirror GHL's own booking-period
+ * *configuration* (min/max duration, buffers, scheduling notice, fixed
+ * intervals), not live availability/booking-time data, which is still
+ * fetched live via GhlRentalGateway/BookingPriceCalculator exactly as
+ * before and never touches this column.
  */
 class EngageProductRental extends Model
 {
@@ -40,6 +46,8 @@ class EngageProductRental extends Model
         'product_id',
         'service_category_id',
         'service_id',
+        'booking_period_type',
+        'booking_settings',
     ];
 
     protected function casts(): array
@@ -50,6 +58,7 @@ class EngageProductRental extends Model
             'map_position' => 'json',
             'listing_price' => 'decimal:2',
             'security_deposit_amount' => 'decimal:2',
+            'booking_settings' => 'array',
         ];
     }
 
