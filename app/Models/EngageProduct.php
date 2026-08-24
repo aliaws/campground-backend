@@ -57,6 +57,32 @@ class EngageProduct extends Model
     }
 
     /**
+     * Route-model binding (e.g. `GET /public/services/{product}`) tries
+     * `slug` first, falling back to the primary key (id) — so the
+     * customer-facing rental detail page can link with a real, readable
+     * slug while a bookmarked/shared id-based URL (or one built before
+     * this existed) still resolves exactly as before. `slug` is nullable
+     * and, unlike `id`, not enforced unique at the DB level (populated
+     * from GHL's own per-listing slug on sync, see
+     * GhlServiceSyncService::upsertBaseListing()) — a genuine slug
+     * collision across two different organizations' listings is possible
+     * in principle, in which case this resolves to whichever row the
+     * query happens to return first, same "not worth a bigger uniqueness
+     * project for an edge case" tradeoff already accepted elsewhere in
+     * this codebase. `whereNotNull` keeps a product with no slug yet from
+     * ever matching an empty-string route segment.
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        if ($field) {
+            return parent::resolveRouteBinding($value, $field);
+        }
+
+        return $this->where('slug', $value)->whereNotNull('slug')->first()
+            ?? parent::resolveRouteBinding($value, $field);
+    }
+
+    /**
      * `image` is a computed attribute, not a real column — `images` (a real
      * JSON column) is the single source of truth for every image this
      * product has. This keeps every pre-existing `$product->image` read and

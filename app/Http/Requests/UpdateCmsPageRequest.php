@@ -14,10 +14,11 @@ class UpdateCmsPageRequest extends FormRequest
 
     /**
      * content's shape depends on which fixed slug is being edited — the
-     * four freeform pages take a single body string, contact-us takes
-     * structured phone/email/address/text fields instead. No slug accepts
-     * both; StoreEngageSettingRequest already established the convention
-     * of one FormRequest branching on context.
+     * freeform pages (terms/privacy/support/about) take a single body
+     * string, contact-us/faq/header/footer/home-page/shop each take their
+     * own structured shape instead. No slug accepts more than one shape;
+     * StoreEngageSettingRequest already established the convention of one
+     * FormRequest branching on context.
      */
     public function rules(): array
     {
@@ -59,6 +60,7 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.layout' => ['required', 'array'],
                 'content.layout.logo_position' => ['required', 'string', 'in:left,right'],
                 'content.layout.theme_toggle_position' => ['required', 'string', 'in:left,right'],
+                'content.layout.store_switcher_position' => ['required', 'string', 'in:left,right,after-login'],
                 'content.layout.login_order' => ['required', 'array', 'size:2'],
                 'content.layout.login_order.*' => ['required', 'string', 'in:customer,staff'],
             ];
@@ -100,39 +102,105 @@ class UpdateCmsPageRequest extends FormRequest
             ];
         }
 
+        if ($slug === CmsPage::SLUG_HOME_PAGE) {
+            // Two named sections of one page, not just a hero on its own —
+            // the hero banner AND the "Our Rentals" section right below it
+            // on the homepage (app/(customer)/page.tsx) are both edited
+            // together here. $this->siteTitleRules()/styleRules() are
+            // plain dot-path builders, so nesting them under `hero.` needs
+            // no changes to either helper.
+            return $rules + $this->siteTitleRules('hero.heading') + $this->styleRules('hero.style') + [
+                'content' => ['required', 'array'],
+                'content.hero' => ['required', 'array'],
+                'content.hero.badge' => ['required', 'array'],
+                // Built-in icon-gallery key (lib/utils/mapIcons.ts on the
+                // frontend) — free-text rather than an `in:` whitelist kept
+                // in sync with that registry, same trust level already
+                // given to icon keys elsewhere (Amenity/Feature/site-map
+                // icon fields aren't whitelisted server-side either); an
+                // unrecognized key just falls back to the default pin icon
+                // at render time, it can't produce broken output.
+                'content.hero.badge.icon' => ['required', 'string', 'max:64'],
+                'content.hero.badge.text' => ['required', 'string', 'max:100'],
+                'content.hero.subtext' => ['required', 'string', 'max:500'],
+                // Optional overrides for the badge/subtext text color —
+                // null means "keep the current theme-token look", same
+                // fallback convention as the dark-mode color pairs above.
+                'content.hero.text_color' => ['nullable', 'string', 'max:20'],
+                'content.hero.text_color_dark' => ['nullable', 'string', 'max:20'],
+                'content.rentals_section' => ['required', 'array'],
+                'content.rentals_section.eyebrow_text' => ['required', 'string', 'max:100'],
+                'content.rentals_section.heading' => ['required', 'string', 'max:200'],
+                'content.rentals_section.show_site_map_link' => ['required', 'boolean'],
+                'content.rentals_section.site_map_link_text' => ['required', 'string', 'max:100'],
+            ];
+        }
+
+        if ($slug === CmsPage::SLUG_SHOP) {
+            return $rules + [
+                'content' => ['required', 'array'],
+                'content.badge' => ['required', 'array'],
+                'content.badge.icon' => ['required', 'string', 'max:64'],
+                'content.badge.text' => ['required', 'string', 'max:100'],
+                'content.heading' => ['required', 'string', 'max:200'],
+                'content.subtext' => ['required', 'string', 'max:500'],
+                'content.filters' => ['required', 'array'],
+                'content.filters.show_search' => ['required', 'boolean'],
+                'content.filters.show_categories' => ['required', 'boolean'],
+                'content.filters.show_price' => ['required', 'boolean'],
+                'content.filters.show_availability' => ['required', 'boolean'],
+                'content.filters.show_sort' => ['required', 'boolean'],
+                // Where the filters sidebar sits relative to the product
+                // grid — left (current default) or right.
+                'content.filters.position' => ['required', 'string', 'in:left,right'],
+            ];
+        }
+
         return $rules + [
             'content' => ['required', 'array'],
             'content.body' => ['required', 'string', 'max:50000'],
         ];
     }
 
-    /** Shared by header and footer — both have a logo + two-tone site title. */
-    private function siteTitleRules(): array
+    /**
+     * Shared by header, footer (both a logo + two-tone site title) and
+     * home-page's hero heading (a two-tone heading, no logo) — $path is a
+     * plain dot-notation prefix (e.g. 'site_title' or 'hero.heading'), so
+     * nesting this under another key needs no change to the method itself.
+     */
+    private function siteTitleRules(string $path = 'site_title'): array
     {
         return [
-            'content.site_title' => ['required', 'array'],
-            'content.site_title.primary_text' => ['required', 'string', 'max:100'],
-            'content.site_title.secondary_text' => ['nullable', 'string', 'max:100'],
-            'content.site_title.primary_color' => ['required', 'string', 'max:20'],
-            'content.site_title.secondary_color' => ['required', 'string', 'max:20'],
+            "content.{$path}" => ['required', 'array'],
+            "content.{$path}.primary_text" => ['required', 'string', 'max:100'],
+            "content.{$path}.secondary_text" => ['nullable', 'string', 'max:100'],
+            "content.{$path}.primary_color" => ['required', 'string', 'max:20'],
+            "content.{$path}.secondary_color" => ['required', 'string', 'max:20'],
             // Optional dark-mode overrides — fall back to the light-mode
             // colors above when unset (see CmsSiteTitle's frontend doc).
-            'content.site_title.primary_color_dark' => ['nullable', 'string', 'max:20'],
-            'content.site_title.secondary_color_dark' => ['nullable', 'string', 'max:20'],
+            "content.{$path}.primary_color_dark" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.secondary_color_dark" => ['nullable', 'string', 'max:20'],
         ];
     }
 
-    /** Shared by header and footer — background type/color/gradient/hover, image set separately via uploadImage(). */
-    private function styleRules(): array
+    /**
+     * Shared by header, footer, and home-page's hero — background
+     * type/color/gradient/hover, image set separately via uploadImage().
+     * $path is a plain dot-notation prefix, same convention as
+     * siteTitleRules() above (header/footer pass the default 'style',
+     * home-page passes 'hero.style' since that background belongs to the
+     * hero section specifically).
+     */
+    private function styleRules(string $path = 'style'): array
     {
         return [
-            'content.style' => ['required', 'array'],
-            'content.style.background_type' => ['required', 'string', 'in:default,solid,gradient,image'],
-            'content.style.background_color' => ['nullable', 'string', 'max:20'],
-            'content.style.gradient_from' => ['nullable', 'string', 'max:20'],
-            'content.style.gradient_to' => ['nullable', 'string', 'max:20'],
-            'content.style.gradient_direction' => ['nullable', 'string', 'max:20'],
-            'content.style.hover_color' => ['nullable', 'string', 'max:20'],
+            "content.{$path}" => ['required', 'array'],
+            "content.{$path}.background_type" => ['required', 'string', 'in:default,solid,gradient,image'],
+            "content.{$path}.background_color" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.gradient_from" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.gradient_to" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.gradient_direction" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.hover_color" => ['nullable', 'string', 'max:20'],
         ];
     }
 }

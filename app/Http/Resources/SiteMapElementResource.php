@@ -37,6 +37,7 @@ class SiteMapElementResource extends JsonResource
             'category' => $this->category,
             'rental' => $rental ? [
                 'product_id' => $product?->id,
+                'slug' => $product?->slug,
                 'name' => $product?->name,
                 'image' => $product?->image,
                 'price' => $product?->price,

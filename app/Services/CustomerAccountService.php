@@ -11,10 +11,12 @@ use App\Models\EngageUserVerification;
 use App\Models\User;
 use App\Support\ActionJwt;
 use App\Support\SessionJwt;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -405,6 +407,48 @@ class CustomerAccountService
         SessionJwt::revokeAllFor($customerUser);
 
         return SessionJwt::issue($customerUser->fresh());
+    }
+
+    /**
+     * Mirrors StaffAccountService::updateAvatar() exactly (same underlying
+     * `users.avatar_url` column, same public-disk storage convention) —
+     * kept as its own copy rather than shared, same "don't entangle two
+     * otherwise-independent account flows" reasoning already applied
+     * throughout this file's staff/customer split.
+     */
+    public function updateAvatar(User $customerUser, UploadedFile $file): User
+    {
+        if ($customerUser->avatar_url) {
+            $this->deleteAvatarFile($customerUser->avatar_url);
+        }
+
+        $path = $file->store('avatars', 'public');
+        $customerUser->avatar_url = Storage::url($path);
+        $customerUser->save();
+
+        return $customerUser->fresh();
+    }
+
+    public function deleteAvatar(User $customerUser): User
+    {
+        if ($customerUser->avatar_url) {
+            $this->deleteAvatarFile($customerUser->avatar_url);
+        }
+
+        $customerUser->avatar_url = null;
+        $customerUser->save();
+
+        return $customerUser->fresh();
+    }
+
+    private function deleteAvatarFile(string $avatarUrl): void
+    {
+        // avatar_url is a Storage::url() output (e.g. /storage/avatars/x.png)
+        // — strip the public disk's URL prefix to get back the storage path.
+        $path = ltrim(str_replace('/storage/', '', parse_url($avatarUrl, PHP_URL_PATH) ?? ''), '/');
+        if ($path !== '') {
+            Storage::disk('public')->delete($path);
+        }
     }
 
     /**

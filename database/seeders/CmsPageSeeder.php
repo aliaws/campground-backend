@@ -7,7 +7,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
 /**
- * Seeds the eight platform-wide CMS pages with real, usable starting content
+ * Seeds the ten platform-wide CMS pages with real, usable starting content
  * (not lorem-ipsum placeholders) — super-admin can edit any of it afterward
  * via /superadmin/pages. Safe to re-run: updateOrCreate keyed by slug.
  */
@@ -60,6 +60,16 @@ class CmsPageSeeder extends Seeder
                 'slug' => CmsPage::SLUG_FAQ,
                 'title' => 'Frequently Asked Questions',
                 'content' => ['items' => $this->faqItems()],
+            ],
+            [
+                'slug' => CmsPage::SLUG_HOME_PAGE,
+                'title' => 'Home Page',
+                'content' => $this->homePageContent(),
+            ],
+            [
+                'slug' => CmsPage::SLUG_SHOP,
+                'title' => 'Shop',
+                'content' => $this->shopContent(),
             ],
         ];
 
@@ -270,6 +280,10 @@ TEXT;
             'layout' => [
                 'logo_position' => 'left',
                 'theme_toggle_position' => 'right',
+                // Matches the store switcher's actual current hardcoded spot
+                // (right side of the desktop nav, just before the
+                // login/profile area) — see app/(customer)/layout.tsx.
+                'store_switcher_position' => 'right',
                 'login_order' => ['customer', 'staff'],
             ],
             'style' => [
@@ -336,6 +350,76 @@ TEXT;
                 'gradient_direction' => 'to right',
                 'background_image_url' => null,
                 'hover_color' => '#ffffff',
+            ],
+        ];
+    }
+
+    /**
+     * Matches the homepage's actual current hardcoded hero AND "Our
+     * Rentals" section exactly — the "apply what we have right now"
+     * starting point super-admin then edits from, same convention as
+     * headerContent()/footerContent() above. See app/(customer)/page.tsx's
+     * previous hardcoded JSX for what these values mirror; `{store}` in
+     * `hero.subtext` is a token (same convention as
+     * footer.copyright_text's `{year}`) the frontend expands to
+     * " at {selected store name}" when a store is selected, or removes
+     * entirely otherwise.
+     */
+    private function homePageContent(): array
+    {
+        return [
+            'hero' => [
+                'badge' => [
+                    'icon' => 'pin',
+                    'text' => 'Explore the outdoors',
+                ],
+                'heading' => [
+                    'primary_text' => 'Find your perfect',
+                    'secondary_text' => 'campsite getaway',
+                    'primary_color' => '#ffffff',
+                    'secondary_color' => '#fcd34d',
+                    'primary_color_dark' => null,
+                    'secondary_color_dark' => null,
+                ],
+                'subtext' => 'Browse and book campsites, cabins and glamping stays{store} — no account needed.',
+                'text_color' => null,
+                'text_color_dark' => null,
+                'style' => [
+                    'background_type' => 'default',
+                    'background_color' => null,
+                    'gradient_from' => null,
+                    'gradient_to' => null,
+                    'gradient_direction' => 'to right',
+                    'background_image_url' => null,
+                    'hover_color' => null,
+                ],
+            ],
+            'rentals_section' => [
+                'eyebrow_text' => 'Our rentals',
+                'heading' => 'Popular stays to book now',
+                'show_site_map_link' => true,
+                'site_map_link_text' => 'View site map',
+            ],
+        ];
+    }
+
+    /** Matches the shop page's actual current hardcoded banner/filters exactly — see app/(customer)/shop/page.tsx's previous hardcoded JSX. */
+    private function shopContent(): array
+    {
+        return [
+            'badge' => [
+                'icon' => 'store',
+                'text' => 'Camp store',
+            ],
+            'heading' => 'Shop',
+            'subtext' => 'Grab firewood, snacks, and camping essentials{store} — pick up on-site or add to your booking.',
+            'filters' => [
+                'show_search' => true,
+                'show_categories' => true,
+                'show_price' => true,
+                'show_availability' => true,
+                'show_sort' => true,
+                'position' => 'left',
             ],
         ];
     }

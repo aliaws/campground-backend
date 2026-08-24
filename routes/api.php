@@ -137,6 +137,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders', [CustomerPortalController::class, 'orders']);
             Route::get('/orders/{order}', [CustomerPortalController::class, 'orderShow']);
             Route::put('/profile', [CustomerPortalController::class, 'updateProfile']);
+            Route::post('/avatar', [CustomerPortalController::class, 'uploadAvatar']);
+            Route::delete('/avatar', [CustomerPortalController::class, 'deleteAvatar']);
         });
     });
 

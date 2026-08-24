@@ -12,6 +12,7 @@ use App\Models\EngageCustomer;
 use App\Models\EngageProductTransaction;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\CustomerAccountService;
 use App\Services\GhlBookingService;
 use App\Services\GhlLocationContext;
 use App\Services\GhlService;
@@ -28,6 +29,7 @@ class CustomerPortalController extends Controller
         private GhlService $ghlService,
         private ProductTransactionService $productTransactionService,
         private GhlLocationContext $ghlLocationContext,
+        private CustomerAccountService $customerAccountService,
     ) {}
 
     public function bookings(Request $request): JsonResponse
@@ -237,6 +239,36 @@ class CustomerPortalController extends Controller
             'success' => true,
             'data' => new UserResource($user->fresh()->load('customer')),
             'message' => 'Profile updated.',
+        ]);
+    }
+
+    public function uploadAvatar(Request $request): JsonResponse
+    {
+        $request->validate([
+            'avatar' => ['required', 'file', 'image', 'max:2048'],
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+        $user = $this->customerAccountService->updateAvatar($user, $request->file('avatar'));
+
+        return response()->json([
+            'success' => true,
+            'data' => new UserResource($user->load('customer')),
+            'message' => 'Profile picture updated.',
+        ]);
+    }
+
+    public function deleteAvatar(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $user = $this->customerAccountService->deleteAvatar($user);
+
+        return response()->json([
+            'success' => true,
+            'data' => new UserResource($user->load('customer')),
+            'message' => 'Profile picture removed.',
         ]);
     }
 

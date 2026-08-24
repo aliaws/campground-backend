@@ -11,6 +11,8 @@ use App\Models\EngageProductRental;
  * default variant and the PRODUCT_RENTALS id for every other variant — this
  * accepts either (ULIDs never collide across tables) and normalizes to the
  * (base product, rental variant) pair everything downstream works with.
+ * Also accepts either one's `slug` in place of its id (tried first, id as
+ * fallback) — same convention as EngageProduct::resolveRouteBinding().
  */
 class RentalResolver
 {
@@ -27,12 +29,16 @@ class RentalResolver
      */
     public function resolve(string $id, ?string $locationId = null): ?array
     {
-        $productQuery = EngageProduct::query();
-        if ($locationId) {
-            $productQuery->byLocation($locationId);
-        }
+        // Rebuilt fresh per attempt (not cloned/reused) so applying one
+        // where() doesn't leak into the other — $id is tried as a slug
+        // first, then as the primary key, same convention as
+        // EngageProduct::resolveRouteBinding() for the one caller here
+        // (PublicServiceController::variant()) that isn't itself a
+        // route-bound model parameter.
+        $productQuery = fn () => $locationId ? EngageProduct::query()->byLocation($locationId) : EngageProduct::query();
 
-        $product = $productQuery->find($id);
+        $product = $productQuery()->whereNotNull('slug')->where('slug', $id)->first()
+            ?? $productQuery()->find($id);
 
         if ($product) {
             $rental = $product->resolveBaseRental();
@@ -43,12 +49,12 @@ class RentalResolver
         // product_rentals has no location column of its own — scoped via
         // its product relationship instead (see GhlServiceSyncService's
         // identical pattern).
-        $rentalQuery = EngageProductRental::query();
-        if ($locationId) {
-            $rentalQuery->whereHas('product', fn ($q) => $q->where('engage_organization_location_id', $locationId));
-        }
+        $rentalQuery = fn () => $locationId
+            ? EngageProductRental::query()->whereHas('product', fn ($q) => $q->where('engage_organization_location_id', $locationId))
+            : EngageProductRental::query();
 
-        $rental = $rentalQuery->find($id);
+        $rental = $rentalQuery()->whereNotNull('slug')->where('slug', $id)->first()
+            ?? $rentalQuery()->find($id);
 
         if ($rental && $rental->product) {
             return [$rental->product, $rental];
