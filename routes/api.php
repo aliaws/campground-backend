@@ -243,6 +243,12 @@ Route::prefix('v1')->group(function () {
             Route::put('/products/{product}', [ProductController::class, 'update']);
             Route::delete('/products/{product}', [ProductController::class, 'destroy']);
             Route::post('/products/{product}/image', [ProductController::class, 'uploadImage']);
+            // Full-gallery management (Manage Service's edit form) —
+            // additive alongside /image above, which only ever replaces
+            // the single cover photo.
+            Route::post('/products/{product}/images', [ProductController::class, 'addImage']);
+            Route::delete('/products/{product}/images/{position}', [ProductController::class, 'removeImage'])->whereNumber('position');
+            Route::post('/products/{product}/images/{position}/cover', [ProductController::class, 'setCoverImage'])->whereNumber('position');
             Route::post('/products/{product}/categories', [ProductController::class, 'attachCategories']);
             Route::post('/products/{product}/sync-ghl', [ProductController::class, 'syncToGhl']);
             Route::post('/products/{product}/pull-ghl', [ProductController::class, 'pullFromGhl']);

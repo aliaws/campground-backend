@@ -31,10 +31,215 @@ class GhlServiceSyncService
 {
     private const RENTAL_INDUSTRY = 'rental';
 
+    /**
+     * `Version` header for the outbound service-update PUT — deliberately
+     * omitted (falls back to the connection's own configured api_version,
+     * same as every other pre-existing `calendars/services` call in this
+     * class), since nothing in the real captured request/response this
+     * method was built from indicated a version different from what those
+     * calls already use.
+     */
     public function __construct(
         private GhlClient $client,
         private GhlRentalGateway $gateway,
+        private GhlImageSyncService $imageSync,
     ) {}
+
+    /**
+     * Pushes a Manage Service edit-form save to Lead Connector via
+     * `PUT calendars/services/{id}` — the real captured request/response
+     * this was built from is quoted in full in the payload shape below.
+     * Called from ProductController::update() BEFORE the local save is
+     * ever persisted (mirrors CustomerService::hardDelete()'s
+     * GHL-first-then-local ordering) — a failed push here means the local
+     * database is never touched at all, so it can never end up out of sync
+     * with what Lead Connector actually has.
+     *
+     * $incoming is the validated request payload (the same array
+     * ProductService::update() will apply locally right after this call
+     * succeeds) — every field is read as "the incoming value if the
+     * request actually included it, else the product/rental's current
+     * stored value," so a caller that only sent a subset of fields (rather
+     * than this app's own Manage Service form, which always sends the
+     * complete state) can never accidentally blank out an untouched field
+     * on Lead Connector's side.
+     *
+     * A no-op (not an error) when the base rental has no `ghl_id` yet — a
+     * rental can only ever come from a Lead Connector pull to begin with,
+     * so this is purely defensive for test/seed data, not a real production
+     * path.
+     */
+    public function pushServiceUpdateToGhl(EngageProduct $product, array $incoming): void
+    {
+        $rental = $product->resolveBaseRental();
+
+        if (! $rental || ! $rental->ghl_id) {
+            return;
+        }
+
+        $product->update(['engage_sync_status' => 'pending']);
+
+        try {
+            $payload = $this->buildServiceUpdatePayload($product, $rental, $incoming);
+            $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
+            $product->update(['engage_sync_status' => 'synced', 'engage_last_synced_at' => now()]);
+        } catch (\Exception $e) {
+            $product->update(['engage_sync_status' => 'error']);
+            Log::error('GHL service update push failed', [
+                'product_id' => $product->id,
+                'ghl_id' => $rental->ghl_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @return array<string, mixed> the exact shape confirmed against a real
+     *                              captured PUT calendars/services/{id}
+     *                              request/response for this tenant
+     */
+    private function buildServiceUpdatePayload(EngageProduct $product, EngageProductRental $rental, array $incoming): array
+    {
+        $name = $incoming['name'] ?? $product->name;
+        $description = $incoming['description'] ?? $product->description;
+        $status = $incoming['status'] ?? $product->status;
+        $isActive = $status === 'active';
+        $listingPrice = (float) (array_key_exists('listing_price', $incoming) ? $incoming['listing_price'] : $rental->listing_price ?? 0);
+        $serviceDurationUnit = $incoming['service_duration_unit'] ?? $rental->service_duration_unit ?? 'day';
+        $serviceCategoryId = array_key_exists('service_category_id', $incoming) ? $incoming['service_category_id'] : $rental->service_category_id;
+        $bookingPeriodType = $incoming['booking_period_type'] ?? $rental->booking_period_type ?? 'date-time-selection';
+        $bookingSettings = array_key_exists('booking_settings', $incoming) ? $incoming['booking_settings'] : ($rental->booking_settings ?? []);
+        $quantity = (int) (array_key_exists('quantity', $incoming) ? ($incoming['quantity'] ?? 1) : ($product->quantity ?? 1));
+        $locationId = $this->client->getLocationId();
+        // Prefers an explicit staff-set value (Manage Service's Inventory &
+        // Pricing tab's real Variants switch) over the previous
+        // rentals-count-based guess — falls back to that guess only when
+        // the caller genuinely didn't send one (e.g. a save from a form
+        // that predates this field, or any other caller of this method).
+        $isVariantsEnabled = array_key_exists('is_variants_enabled', $incoming)
+            ? (bool) $incoming['is_variants_enabled']
+            : ($rental->is_variants_enabled ?? $product->rentals()->count() > 1);
+        // Same explicit-value-first pattern — has_quantity_enabled is the
+        // single source of truth for whether this row tracks stock at all,
+        // replacing the previous `$quantity > 1` guess this push used to
+        // make (a guess against the *listing-wide* Quantity field, not this
+        // specific row's own tracked value).
+        $hasQuantityEnabled = array_key_exists('has_quantity_enabled', $incoming)
+            ? (bool) $incoming['has_quantity_enabled']
+            : ($rental->has_quantity_enabled ?? $quantity > 1);
+
+        return [
+            'industryType' => self::RENTAL_INDUSTRY,
+            'name' => $name,
+            'slug' => $incoming['slug'] ?? $product->slug,
+            'description' => $description,
+            'hideDescription' => false,
+            'coverImage' => $this->imageSync->pushImageToGhl($product),
+            'isActive' => $isActive,
+            'locationId' => $locationId,
+            'isVariantsEnabled' => $isVariantsEnabled,
+            'payment' => [
+                'amount' => $listingPrice,
+                'description' => $description,
+            ],
+            'bookingUnit' => $serviceDurationUnit,
+            'useCustomForm' => false,
+            'formId' => '',
+            'quantity' => $quantity,
+            'hasQuantityEnabled' => $hasQuantityEnabled,
+            'images' => $this->resolveServiceImagesForGhl($product),
+            'preBuffer' => $bookingSettings['preBuffer'] ?? null,
+            'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? 'min',
+            'postBuffer' => $bookingSettings['postBuffer'] ?? null,
+            'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? 'min',
+            'minDuration' => $bookingSettings['minDuration'] ?? null,
+            'minDurationUnit' => $bookingSettings['minDurationUnit'] ?? 'day',
+            'maxDuration' => $bookingSettings['maxDuration'] ?? null,
+            'maxDurationUnit' => $bookingSettings['maxDurationUnit'] ?? 'day',
+            'bookingPeriodType' => $bookingPeriodType,
+            'hasTimeSelection' => $bookingSettings['hasTimeSelection'] ?? true,
+            'bookingStartTime' => $bookingSettings['bookingStartTime'] ?? null,
+            'bookingEndTime' => $bookingSettings['bookingEndTime'] ?? null,
+            'serviceDurations' => collect($bookingSettings['serviceDurations'] ?? [])->map(fn ($d) => [
+                'duration' => $d['duration'] ?? null,
+                'durationUnit' => $d['durationUnit'] ?? null,
+            ])->values()->all(),
+            'allowBookingAfter' => $bookingSettings['allowBookingAfter'] ?? null,
+            'allowBookingAfterUnit' => $bookingSettings['allowBookingAfterUnit'] ?? 'day',
+            'allowBookingFor' => $bookingSettings['allowBookingFor'] ?? null,
+            'allowBookingForUnit' => $bookingSettings['allowBookingForUnit'] ?? 'day',
+            'pricingRule' => [
+                'name' => "{$name} Pricing",
+                'locationId' => $locationId,
+                'targetId' => $rental->ghl_id,
+                'appliesTo' => 'service',
+                'priority' => 1,
+                'basePrice' => [
+                    'value' => $listingPrice,
+                    'strategy' => 'per_day',
+                ],
+                'paymentTerms' => ['type' => 'full'],
+                'rules' => [],
+            ],
+            'serviceCategoryId' => $serviceCategoryId,
+            'serviceDurationUnit' => $serviceDurationUnit,
+            'teamMembers' => [],
+        ];
+    }
+
+    /**
+     * The outbound `images[]` array — every already-GHL-hosted image
+     * (a real http(s) URL, whether Lead Connector's own CDN or an external
+     * one) is sent as-is; a purely local (`/storage/...`) non-cover image
+     * is skipped (logged, not silently dropped without a trace) rather than
+     * attempting a per-image CDN upload this pass doesn't build — the
+     * cover image (position:0) is always covered correctly regardless,
+     * since it's resolved through the same GhlImageSyncService::
+     * pushImageToGhl() already used for `coverImage` above.
+     */
+    private function resolveServiceImagesForGhl(EngageProduct $product): array
+    {
+        // pushImageToGhl() (already called for `coverImage` above) leaves a
+        // real Lead Connector CDN URL in ghl_image_url only when it actually
+        // succeeded — a null/local-path fallback here means there's nothing
+        // usable to substitute for position:0, so it falls through to the
+        // exact same "skip a non-http local image" handling every other
+        // position already gets, rather than ever sending a raw local path.
+        $coverUrl = $product->ghl_image_url && str_starts_with($product->ghl_image_url, 'http')
+            ? $product->ghl_image_url
+            : null;
+        $images = [];
+
+        foreach ($product->images ?? [] as $img) {
+            $url = $img['url'] ?? null;
+            $position = $img['position'] ?? 0;
+
+            if ($position === 0 && $coverUrl) {
+                $url = $coverUrl;
+            }
+
+            if (! $url || ! str_starts_with($url, 'http')) {
+                if ($url) {
+                    Log::warning('GHL service update: skipping local image not yet uploaded to Lead Connector', [
+                        'product_id' => $product->id,
+                        'position' => $position,
+                    ]);
+                }
+
+                continue;
+            }
+
+            $images[] = [
+                'url' => $url,
+                'name' => $img['name'] ?? 'Image '.($position + 1),
+                'position' => $position,
+            ];
+        }
+
+        return $images;
+    }
 
     /**
      * The payments-layer productId of every rental service (base listings AND
@@ -749,6 +954,12 @@ class GhlServiceSyncService
             'description' => $detail->description(),
             'slug' => $detail->slug(),
             'status' => $detail->isActive() ? 'active' : 'draft',
+            // The real, always-in-sync mirror of Lead Connector's own
+            // isActive flag (see the migration's doc comment) — status
+            // above is kept alongside it for every pre-existing status-based
+            // query/filter, but is_active is what Manage Service's edit form
+            // actually reads/writes for a rental now.
+            'is_active' => $detail->isActive(),
             // `images` alone is sufficient — `image` is a computed
             // accessor derived from images[0] (position:0), see
             // EngageProduct::image(). imagesForPersistence() also folds in
@@ -846,6 +1057,37 @@ class GhlServiceSyncService
                 'product_id' => $product->id,
                 'service_category_id' => $detail->serviceCategoryId(),
                 'service_id' => $baseGhlId,
+                // Booking Settings tab (2026-08-21) — written per the exact
+                // GHL service id being upserted (base or variant), same as
+                // every other per-row field above; the edit form itself only
+                // ever surfaces/edits the base rental's copy (see
+                // ProductService::update()), matching how listing_price's
+                // own editable-on-base-only convention already works.
+                'booking_period_type' => $detail->bookingPeriodType(),
+                'booking_settings' => $detail->bookingSettingsForPersistence(),
+                // Inventory & Pricing tab (2026-08-21) — written per the
+                // exact GHL service id being upserted (base or variant), same
+                // convention as booking_period_type/booking_settings above:
+                // each variant is its own full GHL service record with its
+                // own quantity/pricingRule, so this keeps every row's Stock
+                // and Advanced Pricing rules fresh on every pull. quantity
+                // is deliberately NOT wrapped in array_filter's null-check
+                // exemption the way booking_settings/pricing_rules are (both
+                // always arrays, so array_filter's `!== null` check never
+                // drops them) — a real transition from a tracked number back
+                // to "unlimited" (null) won't overwrite an existing value
+                // here, matching this method's pre-existing behavior for
+                // every other nullable scalar field above.
+                'quantity' => $detail->quantity(),
+                'pricing_rules' => $detail->pricingRulesForPersistence(),
+                // The real Lead Connector flag deciding whether this exact
+                // row tracks stock at all — the single source of truth for
+                // the Inventory & Pricing tab's "Inventory" switch. A plain
+                // boolean, not wrapped in the null-check exemption above,
+                // but that's fine here: hasQuantityEnabled() itself never
+                // returns null (defaults false), so it's never dropped by
+                // array_filter's `!== null` check regardless.
+                'has_quantity_enabled' => $detail->hasQuantityEnabled(),
             ], fn ($value) => $value !== null)
         );
     }
@@ -880,8 +1122,17 @@ class GhlServiceSyncService
             $product->update($listingUpdate);
         }
 
-        if ($baseRental && $basePrice !== null) {
-            $baseRental->update(['listing_price' => $basePrice]);
+        if ($baseRental) {
+            // isVariantsEnabled always sourced from the BASE listing's own
+            // detail response (`$baseDetail`) — a variant's own detail
+            // response carries this same field but it is NOT authoritative
+            // there (confirmed false on a real variant's own detail even
+            // when the base correctly says true) — never read it off a
+            // variant's own GhlServiceDetail.
+            $baseRental->update(array_filter([
+                'listing_price' => $basePrice,
+                'is_variants_enabled' => $baseDetail->isVariantsEnabled(),
+            ], fn ($value) => $value !== null));
         }
 
         $pruned = EngageProductRental::where('product_id', $product->id)

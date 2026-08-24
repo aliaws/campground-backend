@@ -16,9 +16,31 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * product list's "From Price" column. They do NOT feed the live GHL quote
  * a guest actually pays for at booking time — that's still entirely
  * GhlRentalGateway/BookingPriceCalculator, unchanged, GHL-sourced, and not
- * persisted anywhere. Everything else about a rental (actual booking
- * windows, availability, real pricing rules) is fetched live from GHL,
- * never stored.
+ * persisted anywhere.
+ *
+ * booking_period_type/booking_settings (2026-08-21, Manage Service's
+ * "Booking Settings" tab) are a deliberate, narrow exception to "booking
+ * windows are never persisted" above — they mirror GHL's own booking-period
+ * *configuration* (min/max duration, buffers, scheduling notice, fixed
+ * intervals), not live availability/booking-time data, which is still
+ * fetched live via GhlRentalGateway/BookingPriceCalculator exactly as
+ * before and never touches this column.
+ *
+ * quantity/pricing_rules (2026-08-21, "Inventory & Pricing" tab) are the
+ * same kind of narrow exception, one level further: each rental row's own
+ * Stock (quantity, null = unlimited) and Advanced Pricing discount-rule set
+ * (pricing_rules — the raw Lead Connector `pricingRule.rules[]` array,
+ * stored verbatim per row), refreshed on every pull. Per-variant only —
+ * quantity is unrelated to `EngageProduct.quantity` (a separate, pre-existing
+ * listing-wide field). pricing_rules is read/displayed only; nothing in this
+ * app currently edits or pushes it back to Lead Connector.
+ *
+ * has_quantity_enabled (2026-08-21) is the real Lead Connector
+ * `hasQuantityEnabled` field — the single source of truth for whether a
+ * service/variant tracks stock at all, replacing an earlier, purely local
+ * (unpersisted) frontend toggle that had no real backing data. Per-row, same
+ * as quantity/pricing_rules above — every service/variant is its own full
+ * Lead Connector record with its own copy of this flag.
  */
 class EngageProductRental extends Model
 {
@@ -40,6 +62,12 @@ class EngageProductRental extends Model
         'product_id',
         'service_category_id',
         'service_id',
+        'booking_period_type',
+        'booking_settings',
+        'quantity',
+        'pricing_rules',
+        'is_variants_enabled',
+        'has_quantity_enabled',
     ];
 
     protected function casts(): array
@@ -50,6 +78,11 @@ class EngageProductRental extends Model
             'map_position' => 'json',
             'listing_price' => 'decimal:2',
             'security_deposit_amount' => 'decimal:2',
+            'booking_settings' => 'array',
+            'quantity' => 'integer',
+            'pricing_rules' => 'array',
+            'is_variants_enabled' => 'boolean',
+            'has_quantity_enabled' => 'boolean',
         ];
     }
 

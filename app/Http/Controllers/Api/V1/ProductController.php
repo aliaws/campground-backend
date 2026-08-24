@@ -9,6 +9,7 @@ use App\Http\Resources\ProductResource;
 use App\Models\EngageProduct;
 use App\Services\GhlProductGateway;
 use App\Services\GhlProductSyncService;
+use App\Services\GhlServiceSyncService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class ProductController extends Controller
         private ProductService $productService,
         private GhlProductSyncService $ghlProductSyncService,
         private GhlProductGateway $ghlProductGateway,
+        private GhlServiceSyncService $ghlServiceSyncService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -95,7 +97,28 @@ class ProductController extends Controller
             return $response;
         }
 
-        $product = $this->productService->update($product, $request->validated());
+        $validated = $request->validated();
+
+        // Rentals push to Lead Connector's real calendars/services update
+        // endpoint BEFORE anything is saved locally (same GHL-first
+        // ordering CustomerService::hardDelete() already established) — a
+        // failed push means the local database is never touched at all, so
+        // it can never end up silently out of sync with what Lead
+        // Connector actually has. Goods products are unaffected: they have
+        // their own, separate, already-existing manual "Sync to Lead
+        // Connector" action instead of an on-every-save push.
+        if ($product->isRental()) {
+            try {
+                $this->ghlServiceSyncService->pushServiceUpdateToGhl($product, $validated);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to sync service update to Lead Connector: '.$e->getMessage(),
+                ], 422);
+            }
+        }
+
+        $product = $this->productService->update($product, $validated);
 
         return response()->json([
             'success' => true,
@@ -128,6 +151,57 @@ class ProductController extends Controller
             'success' => true,
             'data' => new ProductResource($product),
             'message' => 'Product image updated.',
+        ]);
+    }
+
+    /**
+     * Gallery management for a service's full `images` array (Manage
+     * Service's edit form) — additive, appends a new image rather than
+     * replacing the cover the way uploadImage() above does.
+     */
+    public function addImage(Request $request, EngageProduct $product): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $request->validate(['image' => 'required|image|max:2048']);
+        $product = $this->productService->addImage($product, $request->file('image'));
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Image added.',
+        ]);
+    }
+
+    public function removeImage(Request $request, EngageProduct $product, int $position): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $product = $this->productService->removeImage($product, $position);
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Image removed.',
+        ]);
+    }
+
+    public function setCoverImage(Request $request, EngageProduct $product, int $position): JsonResponse
+    {
+        if ($response = $this->denyUnlessOwned($request, $product)) {
+            return $response;
+        }
+
+        $product = $this->productService->setCoverImage($product, $position);
+
+        return response()->json([
+            'success' => true,
+            'data' => new ProductResource($product),
+            'message' => 'Cover image updated.',
         ]);
     }
 

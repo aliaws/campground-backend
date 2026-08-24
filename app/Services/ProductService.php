@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
@@ -99,10 +100,43 @@ class ProductService
         // Base-rental pricing fields (Manage Service's Pricing section) —
         // pulled out the same way as amenity/feature ids above, since they
         // live on EngageProductRental, not EngageProduct itself.
-        $rentalData = array_intersect_key($data, array_flip(['listing_price', 'service_duration_unit', 'security_deposit_amount']));
+        // booking_period_type/booking_settings (Manage Service's Booking
+        // Settings tab) follow the identical base-rental-only convention.
+        // is_variants_enabled (Inventory & Pricing tab's real Variants
+        // switch) and has_quantity_enabled (its Inventory switch) follow
+        // the identical base-rental-only convention too — the latter also
+        // reaches every non-base variant row via the $variants array below,
+        // since it's genuinely a per-row concept, unlike is_variants_enabled.
+        $rentalData = array_intersect_key($data, array_flip([
+            'listing_price', 'service_duration_unit', 'security_deposit_amount',
+            'booking_period_type', 'booking_settings', 'is_variants_enabled',
+            'has_quantity_enabled',
+        ]));
+
+        // Drop any fixed-duration interval missing a duration/durationUnit
+        // before it ever reaches the database — validation allows them
+        // through individually (see UpdateProductRequest's own comment) so
+        // one malformed row never rejects the whole save.
+        if (isset($rentalData['booking_settings']['serviceDurations'])) {
+            $rentalData['booking_settings']['serviceDurations'] = array_values(array_filter(
+                $rentalData['booking_settings']['serviceDurations'],
+                fn ($d) => isset($d['duration'], $d['durationUnit']) && $d['duration'] !== '' && $d['durationUnit'] !== ''
+            ));
+        }
+        // Manage Service's Category field — see UpdateProductRequest's doc
+        // comment: the value is the raw GHL category id already stored
+        // as-is on product_rentals.service_category_id, so no local-id
+        // translation is needed here, only routing it to the right row.
+        $hasServiceCategoryUpdate = array_key_exists('service_category_id', $data);
+        $serviceCategoryGhlId = $data['service_category_id'] ?? null;
+        // Manage Service's Variants tab — never the base/default rental
+        // (that's $rentalData above), only the other variant rows.
+        $variants = $data['variants'] ?? null;
         unset(
             $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
             $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
+            $data['service_category_id'], $data['booking_period_type'], $data['booking_settings'],
+            $data['is_variants_enabled'], $data['has_quantity_enabled'],
         );
 
         $product->update($data);
@@ -129,7 +163,108 @@ class ProductService
             $product->resolveBaseRental()?->update($rentalData);
         }
 
+        if ($hasServiceCategoryUpdate && $product->isRental()) {
+            $product->resolveBaseRental()?->update(['service_category_id' => $serviceCategoryGhlId]);
+        }
+
+        // Keep both the product's own is_active and the base rental's
+        // is_active in lockstep with the product's status whenever a
+        // rental's status is saved — is_active (on both rows) is what
+        // actually mirrors Lead Connector's real isActive flag (see
+        // GhlServiceDetail::isActive()/GhlServiceSyncService::upsertRentalRow()),
+        // so without this they could silently drift apart the moment status
+        // was ever edited independently of a GHL pull. `status` itself is
+        // left completely untouched here for goods, which have no rental
+        // row and keep their own independent active/draft/archived status.
+        if (array_key_exists('status', $data) && $product->isRental()) {
+            $isActive = $data['status'] === 'active';
+            $product->update(['is_active' => $isActive]);
+            $product->resolveBaseRental()?->update(['is_active' => $isActive]);
+        }
+
+        // Scoped to product_id === $product->id — never trusts an id's mere
+        // presence in the validated payload as proof of ownership, since a
+        // client could otherwise pass another product's variant id. The
+        // base/default rental's own Inventory & Pricing edit (Stock +
+        // Advanced Pricing) flows through this exact same array too, as a
+        // synthesized entry carrying only id/quantity/pricing_rules — no
+        // special-casing needed here since the intersect below only ever
+        // touches whichever keys are actually present per entry.
+        if ($variants !== null && $product->isRental()) {
+            foreach ($variants as $variantData) {
+                if (empty($variantData['id'])) {
+                    continue;
+                }
+
+                $variantUpdate = array_intersect_key($variantData, array_flip(['listing_price', 'is_active', 'quantity', 'pricing_rules', 'has_quantity_enabled']));
+                if ($variantUpdate === []) {
+                    continue;
+                }
+
+                EngageProductRental::where('id', $variantData['id'])
+                    ->where('product_id', $product->id)
+                    ->update($variantUpdate);
+            }
+        }
+
         return $product->fresh()->load(self::EAGER);
+    }
+
+    public function addImage(EngageProduct $product, UploadedFile $image): EngageProduct
+    {
+        $path = $image->store('products', 'public');
+        $images = $product->images ?? [];
+        $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
+        $images[] = ['_id' => null, 'url' => Storage::url($path), 'name' => $product->name, 'position' => $nextPosition];
+
+        $product->update(['images' => $images]);
+
+        return $product->fresh();
+    }
+
+    public function removeImage(EngageProduct $product, int $position): EngageProduct
+    {
+        $images = collect($product->images ?? [])
+            ->reject(fn ($img) => ($img['position'] ?? null) === $position)
+            ->values()
+            ->map(fn ($img, $i) => array_merge($img, ['position' => $i]))
+            ->all();
+
+        // Removing whatever was at position:0 changes the cover image
+        // (EngageProduct::image() reads position:0) — clear the GHL-CDN
+        // cache marker the same way uploadImage() already does whenever
+        // the effective cover photo changes, so a later GHL sync re-uploads
+        // the new cover instead of reusing a stale cached URL.
+        $update = ['images' => $images];
+        if ($position === 0) {
+            $update['ghl_image_url'] = null;
+        }
+
+        $product->update($update);
+
+        return $product->fresh();
+    }
+
+    /** Reorders so the given position becomes the new position:0 (cover/default image). */
+    public function setCoverImage(EngageProduct $product, int $position): EngageProduct
+    {
+        $images = collect($product->images ?? []);
+        $target = $images->firstWhere('position', $position);
+
+        if (! $target || $position === 0) {
+            return $product;
+        }
+
+        $rest = $images->reject(fn ($img) => ($img['position'] ?? null) === $position)->values();
+        $reordered = collect([$target])->concat($rest)
+            ->values()
+            ->map(fn ($img, $i) => array_merge($img, ['position' => $i]))
+            ->all();
+
+        // See removeImage()'s comment — the cover image is changing here too.
+        $product->update(['images' => $reordered, 'ghl_image_url' => null]);
+
+        return $product->fresh();
     }
 
     public function delete(EngageProduct $product): bool
