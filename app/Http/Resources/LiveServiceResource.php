@@ -3,8 +3,8 @@
 namespace App\Http\Resources;
 
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
@@ -20,7 +20,7 @@ class LiveServiceResource extends JsonResource
      * @param  array<string, ?array<string, mixed>>  $paymentsByGhlId
      */
     public function __construct(
-        Product $product,
+        EngageProduct $product,
         private array $details,
         private array $paymentsByGhlId = [],
     ) {
@@ -29,7 +29,7 @@ class LiveServiceResource extends JsonResource
 
     public function toArray(Request $request): array
     {
-        /** @var Product $product */
+        /** @var EngageProduct $product */
         $product = $this->resource;
         $defaultRental = $product->resolveBaseRental();
         $baseDetail = $defaultRental ? ($this->details[$defaultRental->ghl_id] ?? null) : null;
@@ -43,7 +43,7 @@ class LiveServiceResource extends JsonResource
             : $product->rentals()->where('is_active', true)->get();
 
         $sortedRentals = $rentals->sortBy(
-            fn (ProductRental $rental) => $rental->isBaseListing() ? 0 : 1
+            fn (EngageProductRental $rental) => $rental->isBaseListing() ? 0 : 1
         )->values();
 
         $variants = $this->buildLiveVariants($product, $sortedRentals, $defaultRental);
@@ -95,9 +95,9 @@ class LiveServiceResource extends JsonResource
     }
 
     /** @param Collection<int, ProductRental> $rentals */
-    private function buildLiveVariants(Product $product, $rentals, ?ProductRental $defaultRental): array
+    private function buildLiveVariants(EngageProduct $product, $rentals, ?EngageProductRental $defaultRental): array
     {
-        return $rentals->map(function (ProductRental $rental) use ($product, $defaultRental) {
+        return $rentals->map(function (EngageProductRental $rental) use ($product, $defaultRental) {
             $detail = $this->details[$rental->ghl_id] ?? null;
             $payments = $this->paymentsByGhlId[$rental->ghl_id] ?? null;
 

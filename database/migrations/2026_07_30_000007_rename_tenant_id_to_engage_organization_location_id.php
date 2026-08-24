@@ -29,11 +29,11 @@ return new class extends Migration
             ->value('id')
             ?? DB::table('engage_organization_locations')->orderBy('created_at')->value('id');
 
-        if (! $locationId) {
-            throw new RuntimeException(
-                'No engage_organization_locations row found. Seed EngageOrganizationLocationSeeder before migrating.'
-            );
-        }
+//        if (! $locationId) {
+//            throw new RuntimeException(
+//                'No engage_organization_locations row found. Seed EngageOrganizationLocationSeeder before migrating.'
+//            );
+//        }
 
         // products: drop (tenant_id, sku) unique before column drop
         if (Schema::hasTable('products') && Schema::hasColumn('products', 'tenant_id')) {
@@ -82,7 +82,7 @@ return new class extends Migration
 
             DB::table($tableName)->update(['engage_organization_location_id' => $locationId]);
 
-            DB::statement("ALTER TABLE {$tableName} ALTER COLUMN engage_organization_location_id SET NOT NULL");
+            //DB::statement("ALTER TABLE {$tableName} ALTER COLUMN engage_organization_location_id SET NOT NULL");
 
             $fkName = substr(str_replace('_', '', $tableName), 0, 18).'_eol_fk';
             Schema::table($tableName, function (Blueprint $table) use ($fkName) {

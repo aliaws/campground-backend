@@ -48,6 +48,6 @@ class CustomerArchive extends Model
     /** The original Customer row (soft-deleted, findable via withTrashed()), if it still exists. */
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class)->withTrashed();
+        return $this->belongsTo(EngageCustomer::class)->withTrashed();
     }
 }

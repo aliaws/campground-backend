@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreServiceCategoryRequest;
 use App\Http\Resources\ServiceCategoryResource;
-use App\Models\ServiceCategory;
+use App\Models\EngageProductRentalCategory;
 use App\Services\GhlServiceSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,7 +35,7 @@ class ServiceCategoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $categories = ServiceCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
+        $categories = EngageProductRentalCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
             ->withCount('rentals')
             ->orderBy('name')
             ->get();
@@ -66,7 +66,7 @@ class ServiceCategoryController extends Controller
         $data = $request->validated();
         $data['engage_organization_location_id'] = $request->user()->resolveOrganizationLocationId();
 
-        $category = ServiceCategory::create($data);
+        $category = EngageProductRentalCategory::create($data);
 
         $syncError = $this->pushToGhl($category);
 
@@ -79,7 +79,7 @@ class ServiceCategoryController extends Controller
         ], 201);
     }
 
-    public function show(Request $request, ServiceCategory $serviceCategory): JsonResponse
+    public function show(Request $request, EngageProductRentalCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
@@ -95,7 +95,7 @@ class ServiceCategoryController extends Controller
     }
 
     /** Same "local always succeeds, GHL push is best-effort" contract as store() above. */
-    public function update(StoreServiceCategoryRequest $request, ServiceCategory $serviceCategory): JsonResponse
+    public function update(StoreServiceCategoryRequest $request, EngageProductRentalCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
@@ -129,7 +129,7 @@ class ServiceCategoryController extends Controller
      * success, so a staff member knows to double check the Lead Connector
      * side rather than assuming it's gone from both.
      */
-    public function destroy(Request $request, ServiceCategory $serviceCategory): JsonResponse
+    public function destroy(Request $request, EngageProductRentalCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
@@ -161,7 +161,7 @@ class ServiceCategoryController extends Controller
      * write scope wasn't authorized yet at creation time) — mirrors
      * CategoryController::syncToGhl()'s single-record retry button.
      */
-    public function syncToGhl(Request $request, ServiceCategory $serviceCategory): JsonResponse
+    public function syncToGhl(Request $request, EngageProductRentalCategory $serviceCategory): JsonResponse
     {
         if ($serviceCategory->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
@@ -184,7 +184,7 @@ class ServiceCategoryController extends Controller
     }
 
     /** @return string|null the sync error message, or null on success */
-    private function pushToGhl(ServiceCategory $serviceCategory): ?string
+    private function pushToGhl(EngageProductRentalCategory $serviceCategory): ?string
     {
         try {
             $this->ghlServiceSyncService->syncServiceCategoryToGhl($serviceCategory);

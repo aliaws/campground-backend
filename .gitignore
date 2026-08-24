@@ -48,6 +48,8 @@ Homestead.json
 Homestead.yaml
 auth.json
 start_local_server.sh
+import_live_db.sh
+campground_live.sql
 
 # Local PR drafts (not for remote)
 /PR_*.md

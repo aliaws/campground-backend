@@ -26,6 +26,7 @@ class DatabaseSeeder extends Seeder
             EngageOrganizationLocationSeeder::class,
             EngageLocationOwnerSeeder::class,
             SuperAdminSeeder::class,
+            CmsPageSeeder::class,
         ]);
     }
 }

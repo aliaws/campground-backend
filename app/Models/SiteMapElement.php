@@ -56,7 +56,7 @@ class SiteMapElement extends Model
 
     public function productRental(): BelongsTo
     {
-        return $this->belongsTo(ProductRental::class);
+        return $this->belongsTo(EngageProductRental::class);
     }
 
     public function iconType(): BelongsTo

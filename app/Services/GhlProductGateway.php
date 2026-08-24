@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -28,7 +28,7 @@ class GhlProductGateway
      *
      * @return ?array{price_id: string, amount: float, currency: string, track_inventory: bool, available_quantity: ?int, allow_out_of_stock_purchases: bool}
      */
-    public function fetchDefaultPriceDetail(Product $product): ?array
+    public function fetchDefaultPriceDetail(EngageProduct $product): ?array
     {
         if (! $product->ghl_product_id) {
             return null;
@@ -48,7 +48,7 @@ class GhlProductGateway
      *
      * @return ?array{price_id: string, amount: float, currency: string, track_inventory: bool, available_quantity: ?int, allow_out_of_stock_purchases: bool}
      */
-    public function fetchFreshDefaultPriceDetail(Product $product): ?array
+    public function fetchFreshDefaultPriceDetail(EngageProduct $product): ?array
     {
         if (! $product->ghl_product_id) {
             return null;

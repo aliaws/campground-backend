@@ -2,8 +2,8 @@
 
 namespace App\Rules;
 
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
@@ -21,8 +21,8 @@ class BookableRentalId implements ValidationRule
             return;
         }
 
-        $exists = Product::whereKey($value)->exists()
-            || ProductRental::whereKey($value)->exists();
+        $exists = EngageProduct::whereKey($value)->exists()
+            || EngageProductRental::whereKey($value)->exists();
 
         if (! $exists) {
             $fail('The selected :attribute is invalid.');

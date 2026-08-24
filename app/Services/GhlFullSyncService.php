@@ -3,14 +3,14 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
-use App\Models\Booking;
-use App\Models\Customer;
+use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
+use App\Models\EngageProductTransaction;
+use App\Models\EngageRentalTransaction;
 use App\Models\EngageToken;
 use App\Models\GhlSyncLog;
-use App\Models\Product;
-use App\Models\ProductRental;
-use App\Models\ProductTransaction;
-use App\Models\RentalTransaction;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -66,9 +66,36 @@ class GhlFullSyncService
         private GhlServiceSyncService $serviceSyncService,
         private RentalTransactionService $rentalTransactionService,
         private ProductTransactionService $productTransactionService,
+        private GhlLocationContext $locationContext,
     ) {}
 
+    /**
+     * Pins GhlClient (a container singleton — see AppServiceProvider/
+     * GhlClient::ensureCredentials()) to $tenantId's own Lead Connector
+     * connection for the whole duration of this call, so every GHL request
+     * this phase makes — including deep inside productSyncService/
+     * serviceSyncService/ghlService, all resolved once at construction and
+     * sharing this same GhlClient instance — uses the right organization's
+     * access token. Critical specifically because GhlDailySync loops this
+     * across *multiple* locations in one process: without pinning the
+     * context per call, every location after the first would silently
+     * keep using whichever location's token GhlClient happened to resolve
+     * first. Always reset in finally so nothing leaks into whatever runs
+     * next in this process (the next location in the same loop, or a
+     * later, unrelated request if this were ever invoked mid-request).
+     */
     public function pullAll(string $tenantId, string $triggeredBy = 'manual'): GhlSyncLog
+    {
+        $this->locationContext->set($tenantId);
+
+        try {
+            return $this->pullAllForLocation($tenantId, $triggeredBy);
+        } finally {
+            $this->locationContext->set(null);
+        }
+    }
+
+    private function pullAllForLocation(string $tenantId, string $triggeredBy): GhlSyncLog
     {
         $log = GhlSyncLog::create([
             'engage_organization_location_id' => $tenantId,
@@ -128,6 +155,7 @@ class GhlFullSyncService
 
             $this->runPhase('services', $phaseErrors, function () use ($tenantId, &$counts) {
                 $result = $this->serviceSyncService->pullServices($tenantId);
+
                 // "Services" = distinct rental listings (base rows); "Rentals" =
                 // every bookable unit under them, base + variants combined
                 // (`pulled`, the pre-existing total) — NOT `variants_pulled`
@@ -345,7 +373,7 @@ class GhlFullSyncService
             // product_rentals has no location column of its own — scoped via
             // its product relationship (see GhlServiceSyncService's
             // identical pattern).
-            $rental = $productId ? ProductRental::whereHas(
+            $rental = $productId ? EngageProductRental::whereHas(
                 'product',
                 fn ($q) => $q->where('engage_organization_location_id', $tenantId)
             )->where('ghl_product_id', $productId)->first() : null;
@@ -353,20 +381,20 @@ class GhlFullSyncService
             $product = null;
             if (! $rental) {
                 $product = $productId
-                    ? Product::where('engage_organization_location_id', $tenantId)->where('ghl_product_id', $productId)->whereNull('product_rental_id')->first()
+                    ? EngageProduct::where('engage_organization_location_id', $tenantId)->where('ghl_product_id', $productId)->whereNull('product_rental_id')->first()
                     : null;
             }
 
             // No productId on the line (seen on some Text2Pay booking invoices)
             // — fall back to an exact, case-insensitive name match.
             if (! $rental && ! $product && ! $productId && $name) {
-                $rental = ProductRental::whereHas(
+                $rental = EngageProductRental::whereHas(
                     'product',
                     fn ($q) => $q->where('engage_organization_location_id', $tenantId)->whereRaw('LOWER(name) = ?', [strtolower($name)])
                 )->first();
 
                 if (! $rental) {
-                    $product = Product::where('engage_organization_location_id', $tenantId)
+                    $product = EngageProduct::where('engage_organization_location_id', $tenantId)
                         ->whereNull('product_rental_id')
                         ->whereRaw('LOWER(name) = ?', [strtolower($name)])
                         ->first();
@@ -405,39 +433,68 @@ class GhlFullSyncService
                     'product_rental_id' => $primary->id,
                 ]);
             } else {
-                RentalTransaction::updateOrCreate(
-                    ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],
-                    array_merge([
-                        'booking_id' => $localBooking->id,
-                        'ghl_booking_id' => $localBooking->ghl_booking_id,
-                        'customer_id' => $customer->id,
-                        'customer_name' => $customerName,
-                        'customer_email' => $customerEmail,
-                        'product_id' => $primary->product_id,
-                        'product_rental_id' => $primary->id,
-                        'rental_name' => $primary->name,
-                        'amount' => $rentalAmount,
-                        'status' => 'paid',
-                        'check_in_date' => $localBooking->check_in_date,
-                        'check_out_date' => $localBooking->check_out_date,
-                        'notes' => null,
-                        'paid_at' => $paidAt,
-                        'raw_payload' => $invoice,
-                    ], $localBooking->wasRecentlyCreated ? [
-                        // Only backfill these when the Booking was just
-                        // created purely from GHL sync data (necessarily an
-                        // online/GHL-processed payment). A pre-existing
-                        // Booking's own RentalTransaction row already carries
-                        // its own correct payment_method/quantity/unit_price
-                        // (set at real booking-creation time via
-                        // RentalTransactionService::createFromBooking()) —
-                        // overwriting them here would silently corrupt e.g. a
-                        // cash payment into 'card'.
-                        'payment_method' => 'card',
-                        'quantity' => 1,
-                        'unit_price' => $rentalAmount,
-                    ] : [])
-                );
+                $rentalValues = array_merge([
+                    'engage_organization_location_id' => $tenantId,
+                    'ghl_invoice_id' => $ghlInvoiceId,
+                    'booking_id' => $localBooking->id,
+                    'ghl_booking_id' => $localBooking->ghl_booking_id,
+                    'customer_id' => $customer->id,
+                    'customer_name' => $customerName,
+                    'customer_email' => $customerEmail,
+                    'product_id' => $primary->product_id,
+                    'product_rental_id' => $primary->id,
+                    'rental_name' => $primary->name,
+                    'amount' => $rentalAmount,
+                    'status' => 'paid',
+                    'check_in_date' => $localBooking->check_in_date,
+                    'check_out_date' => $localBooking->check_out_date,
+                    'notes' => null,
+                    'paid_at' => $paidAt,
+                    'raw_payload' => $invoice,
+                ], $localBooking->wasRecentlyCreated ? [
+                    // Only backfill these when the Booking was just
+                    // created purely from GHL sync data (necessarily an
+                    // online/GHL-processed payment). A pre-existing
+                    // Booking's own RentalTransaction row already carries
+                    // its own correct payment_method/quantity/unit_price
+                    // (set at real booking-creation time via
+                    // RentalTransactionService::createFromBooking()) —
+                    // overwriting them here would silently corrupt e.g. a
+                    // cash payment into 'card'.
+                    'payment_method' => 'card',
+                    'quantity' => 1,
+                    'unit_price' => $rentalAmount,
+                ] : []);
+
+                // Real bug found live 2026-08-19: matching purely by
+                // ghl_invoice_id let this create a genuine *duplicate*
+                // RentalTransaction for a booking that already had one,
+                // whenever GHL reported a different invoice id for the
+                // same booking than what was captured at real
+                // booking-creation time (e.g. a customer's Text2Pay invoice
+                // that got recreated) — the new row then had no
+                // payment_method (the wasRecentlyCreated guard above
+                // correctly refused to guess one), showing as blank on the
+                // POS Rental Transactions page even though the *original*
+                // row already had the real one. A booking only ever has
+                // one RentalTransaction (RentalTransactionService::
+                // createFromBooking()'s "exactly one line per booking"
+                // invariant), so if one already exists for this booking,
+                // update that same row — carrying its already-correct
+                // payment_method forward untouched — instead of matching
+                // by ghl_invoice_id and risking a second row.
+                $existingForBooking = ! $localBooking->wasRecentlyCreated
+                    ? EngageRentalTransaction::where('booking_id', $localBooking->id)->first()
+                    : null;
+
+                if ($existingForBooking) {
+                    $existingForBooking->update($rentalValues);
+                } else {
+                    EngageRentalTransaction::updateOrCreate(
+                        ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],
+                        $rentalValues
+                    );
+                }
                 $wroteRental = true;
             }
         }
@@ -457,7 +514,7 @@ class GhlFullSyncService
             // rental-related.
             $invoiceDate = $this->parseGhlDate($invoice['issueDate'] ?? null);
 
-            $productTransaction = ProductTransaction::updateOrCreate(
+            $productTransaction = EngageProductTransaction::updateOrCreate(
                 ['engage_organization_location_id' => $tenantId, 'ghl_invoice_id' => $ghlInvoiceId],
                 [
                     'customer_id' => $customer->id,
@@ -550,14 +607,14 @@ class GhlFullSyncService
         string $tenantId,
         string $ghlInvoiceId,
         ?array $ghlBookingMatch,
-        Customer $customer,
-        ProductRental $rental,
+        EngageCustomer $customer,
+        EngageProductRental $rental,
         float $amount,
         array $invoice,
-    ): ?Booking {
+    ): ?EngageBooking {
         $ghlBookingId = $ghlBookingMatch['id'] ?? null;
 
-        $existing = Booking::where('engage_organization_location_id', $tenantId)
+        $existing = EngageBooking::where('engage_organization_location_id', $tenantId)
             ->where(function ($q) use ($ghlInvoiceId, $ghlBookingId) {
                 $q->where('ghl_invoice_id', $ghlInvoiceId);
                 if ($ghlBookingId) {
@@ -579,7 +636,7 @@ class GhlFullSyncService
         }
 
         return DB::transaction(function () use ($tenantId, $ghlInvoiceId, $ghlBookingId, $ghlBookingMatch, $customer, $rental, $amount, $invoice) {
-            $booking = Booking::create([
+            $booking = EngageBooking::create([
                 'customer_id' => $customer->id,
                 'product_id' => $rental->product_id,
                 'product_rental_id' => $rental->id,
@@ -615,13 +672,13 @@ class GhlFullSyncService
     }
 
     /** Never creates a Customer — only resolves against what's already local (contacts phase runs first in the same pullAll()). */
-    private function resolveLocalCustomer(string $locationId, array $contact): ?Customer
+    private function resolveLocalCustomer(string $locationId, array $contact): ?EngageCustomer
     {
         $ghlContactId = $contact['id'] ?? null;
         $email = $contact['email'] ?? null;
 
         if ($ghlContactId) {
-            $customer = Customer::whereHas(
+            $customer = EngageCustomer::whereHas(
                 'locationLinks',
                 fn ($q) => $q->where('engage_organization_location_id', $locationId)->where('ghl_contact_id', $ghlContactId)
             )->first();
@@ -631,7 +688,7 @@ class GhlFullSyncService
         }
 
         if ($email) {
-            return Customer::whereHas(
+            return EngageCustomer::whereHas(
                 'locationLinks',
                 fn ($q) => $q->where('engage_organization_location_id', $locationId)
             )->whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
@@ -765,7 +822,7 @@ class GhlFullSyncService
      */
     private function reconcileExistingRecords(string $tenantId): array
     {
-        $pendingBookings = Booking::where('engage_organization_location_id', $tenantId)
+        $pendingBookings = EngageBooking::where('engage_organization_location_id', $tenantId)
             ->whereNotNull('ghl_invoice_id')
             ->where(function ($q) {
                 $q->whereNull('ghl_invoice_status')->orWhere('ghl_invoice_status', '!=', 'paid');
@@ -774,7 +831,7 @@ class GhlFullSyncService
 
         $this->ghlService->reconcileInvoiceStatusBatch($pendingBookings);
 
-        $pendingProductTransactions = ProductTransaction::where('engage_organization_location_id', $tenantId)
+        $pendingProductTransactions = EngageProductTransaction::where('engage_organization_location_id', $tenantId)
             ->whereNotNull('ghl_invoice_id')
             ->where(function ($q) {
                 $q->whereNull('status')->orWhere('status', '!=', 'paid');

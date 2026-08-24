@@ -50,6 +50,7 @@ class JwtGuard implements Guard
         $this->jti = $auth['jti'];
         $this->tokenExp = $auth['exp'];
         $this->user = $auth['user'];
+        $this->user->setActiveLocationId($auth['loc'] ?? null);
 
         return $this->user;
     }

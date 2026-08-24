@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\LiveServiceResource;
 use App\Http\Resources\ServiceResource;
-use App\Models\Product;
+use App\Models\EngageProduct;
 use App\Services\GhlRentalGateway;
 use App\Services\GhlServiceSyncService;
 use App\Services\ProductService;
@@ -36,7 +36,7 @@ class ServiceController extends Controller
         ]);
     }
 
-    public function show(Request $request, Product $product): JsonResponse
+    public function show(Request $request, EngageProduct $product): JsonResponse
     {
         if ($product->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId() || ! $product->isRental()) {
             return response()->json([

@@ -54,7 +54,7 @@ class RefreshExpiredEngageTokens extends Command
             }
 
             try {
-                $fresh = $ghlAuthService->refreshAccessToken($setting);
+                $fresh = $ghlAuthService->refreshAccessToken($setting, $token);
                 $refreshed++;
                 $this->info(sprintf(
                     'Refreshed location_id=%s expiry=%s',

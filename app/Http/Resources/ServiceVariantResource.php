@@ -3,8 +3,8 @@
 namespace App\Http\Resources;
 
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Product;
-use App\Models\ProductRental;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
 
 /**
  * Builds a single ServiceVariant-shaped array from live GHL detail.
@@ -16,10 +16,10 @@ class ServiceVariantResource
      * @param  ?array<string, mixed>  $paymentsProduct  GHL Payments product payload
      */
     public static function fromDetail(
-        Product $product,
-        ProductRental $rental,
+        EngageProduct $product,
+        EngageProductRental $rental,
         GhlServiceDetail $detail,
-        ?ProductRental $defaultRental = null,
+        ?EngageProductRental $defaultRental = null,
         ?array $paymentsProduct = null,
     ): array {
         $defaultRental ??= $product->resolveBaseRental();
@@ -83,19 +83,19 @@ class ServiceVariantResource
     }
 
     /** @param  ?array<string, mixed>  $paymentsProduct */
-    private static function resolveName(GhlServiceDetail $detail, ?array $paymentsProduct, Product $product): string
+    private static function resolveName(GhlServiceDetail $detail, ?array $paymentsProduct, EngageProduct $product): string
     {
         return (string) ($paymentsProduct['name'] ?? $detail->name() ?? $product->name);
     }
 
     /** @param  ?array<string, mixed>  $paymentsProduct */
-    private static function resolveDescription(GhlServiceDetail $detail, ?array $paymentsProduct, Product $product): ?string
+    private static function resolveDescription(GhlServiceDetail $detail, ?array $paymentsProduct, EngageProduct $product): ?string
     {
         return $paymentsProduct['description'] ?? $detail->description() ?? $product->description;
     }
 
     /** @param  ?array<string, mixed>  $paymentsProduct */
-    private static function resolveCoverImage(GhlServiceDetail $detail, ?array $paymentsProduct, Product $product): ?string
+    private static function resolveCoverImage(GhlServiceDetail $detail, ?array $paymentsProduct, EngageProduct $product): ?string
     {
         return $paymentsProduct['image'] ?? $detail->coverImage() ?? $product->image;
     }
@@ -104,7 +104,7 @@ class ServiceVariantResource
      * @param  ?array<string, mixed>  $paymentsProduct
      * @return array<int, array{_id: ?string, url: ?string, name: string, position: int}>
      */
-    private static function resolveImages(GhlServiceDetail $detail, ?array $paymentsProduct, Product $product): array
+    private static function resolveImages(GhlServiceDetail $detail, ?array $paymentsProduct, EngageProduct $product): array
     {
         $images = $detail->images();
         if ($images !== []) {
@@ -128,7 +128,7 @@ class ServiceVariantResource
     private static function resolveVariantPrice(
         GhlServiceDetail $detail,
         ?array $paymentsProduct,
-        Product $product,
+        EngageProduct $product,
         bool $isDefault,
     ): float {
         $fromService = $detail->basePrice() ?? $detail->paymentAmount();

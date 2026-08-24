@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +14,26 @@ class EngageOrganizationLocation extends Model
 {
     use HasUuids;
 
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_BLOCKED = 'blocked';
+
+    /**
+     * Created by the public "Register for Application" flow the moment a
+     * location id is submitted, before the GHL OAuth install/callback has
+     * even happened, let alone business info + owner-email verification.
+     * Deliberately excluded from scopeActive()/User::activeLocationLinks()
+     * (same `where('status', STATUS_ACTIVE)` check blocked already excludes
+     * it) — nobody can select/log into an uninstalled organization.
+     */
+    public const STATUS_UNINSTALLED = 'uninstalled';
+
+    /**
+     * Deliberately NOT fillable — status/blocked_at/blocked_by/block_reason
+     * only ever change through block()/unblock() below, never mass
+     * assignment, so there's exactly one code path that can disable an
+     * organization.
+     */
     protected $fillable = [
         'name',
         'legal_business_name',
@@ -36,7 +58,50 @@ class EngageOrganizationLocation extends Model
         return [
             'business_information' => 'array',
             'is_default' => 'boolean',
+            'blocked_at' => 'datetime',
         ];
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ACTIVE);
+    }
+
+    public function isBlocked(): bool
+    {
+        return $this->status === self::STATUS_BLOCKED;
+    }
+
+    public function isUninstalled(): bool
+    {
+        return $this->status === self::STATUS_UNINSTALLED;
+    }
+
+    public function blockedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'blocked_by');
+    }
+
+    public function block(User $actor, ?string $reason = null): self
+    {
+        $this->status = self::STATUS_BLOCKED;
+        $this->blocked_at = now();
+        $this->blocked_by = $actor->id;
+        $this->block_reason = $reason;
+        $this->save();
+
+        return $this;
+    }
+
+    public function unblock(): self
+    {
+        $this->status = self::STATUS_ACTIVE;
+        $this->blocked_at = null;
+        $this->blocked_by = null;
+        $this->block_reason = null;
+        $this->save();
+
+        return $this;
     }
 
     public function engageTokens(): HasMany
@@ -44,11 +109,17 @@ class EngageOrganizationLocation extends Model
         return $this->hasMany(EngageToken::class, 'engage_organization_location_id');
     }
 
+    /** Inverse of EngageProduct::organizationLocation(). */
+    public function products(): HasMany
+    {
+        return $this->hasMany(EngageProduct::class, 'engage_organization_location_id');
+    }
+
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(
             User::class,
-            'users_locations',
+            'engage_users_locations',
             'engage_organization_location_id',
             'user_id'
         )->withTimestamps();
@@ -57,8 +128,8 @@ class EngageOrganizationLocation extends Model
     public function customers(): BelongsToMany
     {
         return $this->belongsToMany(
-            Customer::class,
-            'customers_locations',
+            EngageCustomer::class,
+            'engage_customers_locations',
             'engage_organization_location_id',
             'customer_id'
         )->withPivot(['id', 'ghl_contact_id'])->withTimestamps();

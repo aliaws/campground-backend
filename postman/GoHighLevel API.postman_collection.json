@@ -1,0 +1,1755 @@
+{
+  "info": {
+    "_postman_id": "8f3a24b0-39c9-44f7-ab60-8e96d29ac1bc",
+    "name": "GoHighLevel API (Campground POS Integration)",
+    "description": "# GoHighLevel API \u2014 Campground POS Integration\n\nEvery real GoHighLevel (Lead Connector) endpoint this app's backend calls, extracted directly from `campground-backend`'s `App\\Integrations\\GHL\\GhlClient` and `App\\Services\\Ghl*` classes \u2014 not inferred from GHL's public docs alone, so every gotcha noted here (required-vs-rejected fields, which Version header, which base URL) reflects what this integration has confirmed live against a real GHL account.\n\nThis is a companion to the **Campground POS API** collection, which covers this app's OWN backend routes. Use *that* collection to drive the app; use *this* one to poke at GoHighLevel directly \u2014 e.g. to debug why a sync failed, or to see exactly what a \"Pull Data Service\" click actually sends.\n\n## Setup\n1. Run **0. OAuth** to get a real `access_token`/`refresh_token` for a location \u2014 or, faster, copy them from an already-connected location: `campground-backend`'s `engage_tokens` table, or ask this app for its `location_id` via `GET /superadmin/engage-identifiers` (in the Campground POS API collection) and the access token from wherever your OAuth app stores it.\n2. Set `access_token` and `location_id` in this collection's variables (or the companion environment file). Collection-level auth is Bearer `{{access_token}}`, applied to every request automatically.\n3. Fill in `contact_id`/`product_id`/`service_id`/etc. as you create real records, or copy real ids from a GET response.\n\n## Base URLs \u2014 two, not one\nAlmost everything is `{{ghl_services_base_url}}` (`https://services.leadconnectorhq.com`). Two endpoints in **9. Calendars \u2014 Bookings** are on `{{ghl_backend_base_url}}` (`https://backend.leadconnectorhq.com`) instead \u2014 GHL's calendar-booking creation flow lives on a different host entirely. Confirmed live in `GhlClient::postToBackend()`.\n\n## Version headers vary by endpoint \u2014 read each request's description\nGHL's API versioning isn't uniform: most endpoints use your connection's default (`2021-07-28`), **calendars/service-categories** requires `v3` specifically (401s under other versions even with a fully-scoped token), **calendars/services/bookings/{id}** requires `2021-04-15` specifically, and **invoices/** (list) requires `v3` while most other invoice endpoints use `2021-07-28`. Every request below carries the exact Version header this app actually sends.\n\n## altId/altType vs locationId \u2014 also endpoint-specific\nGET requests mostly use `locationId` as a query param; POST/PUT bodies mostly use `altId`+`altType` instead (GHL's newer convention). A few endpoints want both, or reject one where you'd expect it (e.g. Update Contact rejects `locationId`; Update Service Category rejects it too, but Create Service Category *requires* it). Each request's description calls out the specific rule, confirmed live rather than guessed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "ghl_services_base_url",
+      "value": "https://services.leadconnectorhq.com",
+      "type": "default"
+    },
+    {
+      "key": "ghl_backend_base_url",
+      "value": "https://backend.leadconnectorhq.com",
+      "type": "default"
+    },
+    {
+      "key": "ghl_marketplace_base_url",
+      "value": "https://marketplace.leadconnectorhq.com",
+      "type": "default"
+    },
+    {
+      "key": "client_id",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "client_secret",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "redirect_uri",
+      "value": "http://localhost:8000/api/v1/settings/engage/callback",
+      "type": "default"
+    },
+    {
+      "key": "scopes",
+      "value": "contacts.readonly contacts.write products.readonly products.write products%2Fprices.readonly products%2Fprices.write products%2Fcollection.readonly products%2Fcollection.write invoices.readonly invoices.write invoices%2Fschedule.readonly invoices%2Fschedule.write calendars.readonly calendars.write calendars%2Fevents.readonly calendars%2Fevents.write calendars%2Fresources.readonly calendars%2Fgroups.readonly",
+      "type": "default"
+    },
+    {
+      "key": "state",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "auth_code",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "location_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "ghl_user_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "contact_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "opportunity_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "product_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "payments_product_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "price_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "collection_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "service_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "service_category_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "booking_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "invoice_id",
+      "value": "",
+      "type": "default"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. OAuth (Authorization Code + Refresh)",
+      "item": [
+        {
+          "name": "1. Authorize URL (open in browser, not a Postman call)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ghl_marketplace_base_url}}/oauth/chooselocation?response_type=code&client_id={{client_id}}&redirect_uri={{redirect_uri}}&scope={{scopes}}&state={{state}}",
+              "host": [
+                "{{ghl_marketplace_base_url}}"
+              ],
+              "path": [
+                "oauth",
+                "chooselocation"
+              ],
+              "query": [
+                {
+                  "key": "response_type",
+                  "value": "code"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{scopes}}"
+                },
+                {
+                  "key": "state",
+                  "value": "{{state}}"
+                }
+              ]
+            },
+            "description": "Not a real Postman request \u2014 GHL's OAuth authorize screen is a browser page, not a JSON API. Open this URL in a real browser, approve the requested scopes for a location, and GHL redirects back to your app's redirect_uri with a `code` query param. Paste that code into the `auth_code` variable and run the next request.\n\nMirrors App\\Services\\GhlAuthService::getAuthorizationUrl() in campground-backend \u2014 `scope` is a space-separated list (GhlAuthService::DEFAULT_SCOPES), `state` carries this app's organization id so the callback knows which org's token row to update."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Exchange Authorization Code for Tokens",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/oauth/token",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Form-encoded, NOT JSON \u2014 GHL's token endpoint rejects a JSON body. Response contains access_token/refresh_token/expires_in/locationId/userId/companyId; save access_token into the `access_token` variable (collection auth uses it) and refresh_token into `refresh_token`.\n\nMirrors GhlAuthService::exchangeCodeForTokens()/exchangeCodeForTokensWithoutOrganization().",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "{{auth_code}}",
+                  "type": "text"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "{{redirect_uri}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3. Refresh Access Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/oauth/token",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "GHL's refresh_token is one-time-use/rotating \u2014 always save the NEW refresh_token from the response back into the `refresh_token` variable, or the next refresh will fail. Same endpoint/shape as token exchange, different grant_type.\n\nMirrors GhlAuthService::refreshAccessToken().",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token",
+                  "type": "text"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{refresh_token}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL's OAuth2 flow. Every other folder below needs `access_token`/`location_id` populated first \u2014 either run this flow for real, or copy an already-authorized location's values from this app's own /admin/engages/tokens page (owner/admin) or /superadmin/engage-identifiers (super-admin)."
+    },
+    {
+      "name": "1. Contacts",
+      "item": [
+        {
+          "name": "List Contacts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/contacts?locationId={{location_id}}&limit=100&page=0",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "contacts"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Paginated (page/limit). Used by GhlService::bulkPullContacts() for the \"Pull Data Service\" contacts phase \u2014 same query shape.\n\nRoles this app maps a GHL contact onto: engage_customers (global, deduped by email/phone) + engage_customers_locations (per-location link carrying ghl_contact_id)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Contact",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/contacts",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "contacts"
+              ]
+            },
+            "description": "locationId is REQUIRED in the body on create (unlike PUT, see below). A 400 with a `contactId` in the error body means a contact with this email/phone already exists \u2014 extract it and treat as the existing contact rather than retrying (this app's GhlService::syncContactToGhl() does exactly that).\n\nMirrors GhlService::syncContactToGhl()'s create branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{location_id}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phone\": \"+15551234567\",\n  \"address1\": \"123 Main St\",\n  \"city\": \"Springfield\",\n  \"state\": \"CA\",\n  \"postalCode\": \"90210\",\n  \"country\": \"US\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Contact",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/contacts/{{contact_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "contacts",
+                "{{contact_id}}"
+              ]
+            },
+            "description": "Do NOT send `locationId` in this body \u2014 GHL's PUT rejects it (a real gotcha this app's GhlService::syncContactToGhl() comment calls out explicitly: \"PUT does not accept locationId\").\n\nMirrors GhlService::syncContactToGhl()'s update branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"name\": \"Jane Doe\",\n  \"email\": \"jane.doe@example.com\",\n  \"phone\": \"+15551234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Contact",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/contacts/{{contact_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "contacts",
+                "{{contact_id}}"
+              ]
+            },
+            "description": "Mirrors GhlService::deleteContactFromGhl() \u2014 this app treats the result as non-blocking (failures logged, local delete proceeds regardless)."
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL's Contacts API \u2014 the CRM record this app syncs its own engage_customers rows to/from."
+    },
+    {
+      "name": "2. Opportunities",
+      "item": [
+        {
+          "name": "Create Opportunity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/opportunities",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "opportunities"
+              ]
+            },
+            "description": "Created alongside every booking (non-blocking \u2014 failure never stops the booking itself). `status` values this app sends: new/booked/lost, per the POS status <-> GHL stage mapping in CLAUDE.md.\n\nMirrors GhlService::createOpportunity().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contactId\": \"{{contact_id}}\",\n  \"name\": \"Booking - Lakeside Cabin (2026-09-01 to 2026-09-05)\",\n  \"status\": \"new\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Opportunity Stage",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/opportunities/{{opportunity_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "opportunities",
+                "{{opportunity_id}}"
+              ]
+            },
+            "description": "Mirrors GhlService::updateOpportunityStage() \u2014 fired when a booking's local status changes (pending->confirmed maps to new->booked, cancelled maps to lost).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"booked\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "One opportunity is created per booking for pipeline visibility in GHL; kept loosely in sync with the booking's local status."
+    },
+    {
+      "name": "3. Products (Payments Products API)",
+      "item": [
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products?locationId={{location_id}}&limit=100&offset=0",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::fetchAllGhlProducts() (used by \"Pull All from GHL\"). Paginate via offset until a page returns fewer than `limit` rows."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Product",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}?locationId={{location_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                }
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::pullFromGhl() \u2014 response's `collectionIds` array is what this app reads back onto its local product_categories pivot (see CLAUDE.md's Category Tab fix)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "productType: PHYSICAL | DIGITAL | SERVICE. isTaxesEnabled MUST be false unless a non-empty `taxes` array of real GHL tax-category ids is also sent (this app never sends true \u2014 see GhlProductSyncService's doc comment: sending true without taxes throws a live 422 \"taxes should not be empty\").\n\nFor a variable product, also send `isVariable: true` plus a `variants` array (each variant needs `id`+`name`; each option needs `id`+`name` as objects, not strings) \u2014 see GHL API quirks in CLAUDE.md.\n\nMirrors GhlProductSyncService::syncProductToGhl()'s create branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"locationId\": \"{{location_id}}\",\n  \"name\": \"Firewood Bundle\",\n  \"description\": \"A bundle of seasoned firewood, ready to burn.\",\n  \"productType\": \"PHYSICAL\",\n  \"status\": \"active\",\n  \"availableInStore\": true,\n  \"isTaxesEnabled\": false,\n  \"taxInclusive\": false,\n  \"trackProductInventory\": true,\n  \"slug\": \"firewood-bundle\",\n  \"collectionIds\": [\n    \"{{collection_id}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "If this product has variants, always re-send the SAME `ghl_variant_id` GHL assigned on a prior create \u2014 sending a placeholder/local id instead makes GHL rebuild the whole variant structure and hides the Variants/Pricing tabs in the GHL UI (a real, previously-hit bug documented in CLAUDE.md).\n\nMirrors GhlProductSyncService::syncProductToGhl()'s update branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"locationId\": \"{{location_id}}\",\n  \"name\": \"Firewood Bundle\",\n  \"description\": \"A bundle of seasoned firewood, ready to burn.\",\n  \"productType\": \"PHYSICAL\",\n  \"status\": \"active\",\n  \"availableInStore\": true,\n  \"isTaxesEnabled\": false,\n  \"taxInclusive\": false,\n  \"trackProductInventory\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Product",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService (used when a synced local product is deleted)."
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL's regular catalog (Payments Products) API \u2014 for standalone POS goods, not rental listings (those live under Calendars/Services, folder 7)."
+    },
+    {
+      "name": "4. Product Prices & Inventory",
+      "item": [
+        {
+          "name": "List Prices for Product",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}/price?locationId={{location_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}",
+                "price"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                }
+              ]
+            },
+            "description": "A GHL Price object carries trackInventory/availableQuantity/allowOutOfStockPurchases alongside the price itself \u2014 one call covers both live price and live stock. The DEFAULT price is the one with an empty/absent `variantOptionIds` array.\n\nMirrors GhlProductGateway::fetchLive() (Product Sales page's live stock check) and GhlProductSyncService::pullDefaultPriceFromGhl()."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}/price",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}",
+                "price"
+              ]
+            },
+            "description": "For a variant price, also send `variantOptionIds: [\"{{ghl_option_id}}\"]` to link the price to a specific variant option.\n\nMirrors GhlProductSyncService::syncDefaultPriceToGhl()'s create branch \u2014 only fires when no default price exists yet (find-or-create prevents duplicates).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"locationId\": \"{{location_id}}\",\n  \"name\": \"Default\",\n  \"type\": \"one_time\",\n  \"currency\": \"USD\",\n  \"amount\": 24.99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Price",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/{{product_id}}/price/{{price_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}",
+                "price",
+                "{{price_id}}"
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::syncDefaultPriceToGhl()'s update branch \u2014 PUT if engage_price_id/an existing default price is already known, to avoid creating a duplicate price.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"locationId\": \"{{location_id}}\",\n  \"name\": \"Default\",\n  \"type\": \"one_time\",\n  \"currency\": \"USD\",\n  \"amount\": 26.99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Inventory (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/inventory",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "inventory"
+              ]
+            },
+            "description": "GHL sets an ABSOLUTE quantity here, not a decrement \u2014 there is no atomic \"reduce stock by N\" endpoint. Callers must read the current quantity first (List Prices above) and compute the new value themselves before calling this.\n\nMirrors GhlProductGateway::updateInventory(), called right after a POS product sale decrements local stock.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"items\": [\n    {\n      \"priceId\": \"{{price_id}}\",\n      \"availableQuantity\": 12,\n      \"allowOutOfStockPurchases\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Pricing and live stock for regular catalog products (folder 3). `items` supports multiple price ids per call even though this app only ever sends one at a time."
+    },
+    {
+      "name": "5. Product Collections (Categories)",
+      "item": [
+        {
+          "name": "List Collections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/collections?altId={{location_id}}&altType=location&limit=100&offset=0",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "collections"
+              ],
+              "query": [
+                {
+                  "key": "altId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "altType",
+                  "value": "location"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::fetchAllGhlCollections() \u2014 used by both the category pull and the outbound name-match-before-create dedup check."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Collection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/collections",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "collections"
+              ]
+            },
+            "description": "Unlike calendars/service-categories (folder 8), GHL derives nothing automatically here either \u2014 always send both `name` and `slug`.\n\nMirrors GhlProductSyncService::syncCategoryToGhl()'s create branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"name\": \"Firewood & Fuel\",\n  \"slug\": \"firewood-fuel\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Collection",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/collections/{{collection_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "collections",
+                "{{collection_id}}"
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::syncCategoryToGhl()'s update branch.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"name\": \"Firewood & Fuel\",\n  \"slug\": \"firewood-fuel\",\n  \"image\": \"https://example.com/image.jpg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Collection",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/products/collections/{{collection_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "products",
+                "collections",
+                "{{collection_id}}"
+              ]
+            },
+            "description": "Mirrors GhlProductSyncService::deleteCategoryFromGhl()."
+          },
+          "response": []
+        }
+      ],
+      "description": "Product Categories in this app's own admin UI map onto GHL \"Collections\" \u2014 a regular-catalog-only concept, distinct from calendars/service-categories (folder 8), which is the rental-only equivalent."
+    },
+    {
+      "name": "6. Media",
+      "item": [
+        {
+          "name": "Upload File",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/medias/upload-file?locationId={{location_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "medias",
+                "upload-file"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                }
+              ]
+            },
+            "description": "multipart/form-data, NOT JSON \u2014 select a real image file for the `file` field in Postman before sending (can't be pre-filled). Response shape: `{\"uploadedFiles\": {\"<filename>\": \"https://cdn...\"}}` \u2014 the returned CDN URL is what gets cached locally (ghl_image_url) and sent as a product/category's `image` field.\n\nMirrors GhlClient::uploadFile(), used by GhlImageSyncService for local-to-GHL image push.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": null
+                },
+                {
+                  "key": "hosted",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL's media library \u2014 used to push a locally-uploaded product/category image to GHL's CDN before referencing it on a product/collection payload."
+    },
+    {
+      "name": "7. Calendars \u2014 Rentals (Services)",
+      "item": [
+        {
+          "name": "List Rental Services",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/services?locationId={{location_id}}&industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "services"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "NOT calendars/services/catalog \u2014 that's classic Services v2 and is often empty for rental accounts (a real gotcha documented throughout this app's CLAUDE.md). Returns BOTH base listings and their variants as flat entries, each carrying its own `productId` (the payments-layer product backing that specific service/variant).\n\nMirrors GhlServiceSyncService::pullServices()/fetchRentalProductIds()."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Rental Service Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/services/{{service_id}}?locationId={{location_id}}&industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "services",
+                "{{service_id}}"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "The single source of truth for a rental's live pricing rules, durations, availability, and quantity \u2014 this app fetches this on demand and caches it 5 minutes, NEVER persists it to its own database (see GhlRentalGateway's doc comment / CLAUDE.md's \"Rental detail is not in the database\" convention).\n\nMirrors GhlRentalGateway::fetchServiceDetail()/fetchListingBundle()."
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL Calendar \"rental\" industry-type services \u2014 this app's entire rental/booking catalog lives here, not in the Payments Products API (folder 3)."
+    },
+    {
+      "name": "8. Calendars \u2014 Rental Service Categories",
+      "item": [
+        {
+          "name": "List Service Categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "v3",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/service-categories?locationId={{location_id}}&industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "service-categories"
+              ],
+              "query": [
+                {
+                  "key": "locationId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "The rental-only equivalent of products/collections (folder 5) \u2014 a completely separate GHL concept from regular-catalog Collections. Version header MUST be v3.\n\nMirrors GhlServiceSyncService::pullServiceCategories()."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Service Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "v3",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/service-categories?industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "service-categories"
+              ],
+              "query": [
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "Three confirmed-live gotchas (see GhlServiceSyncService::syncServiceCategoryToGhl()'s doc comment \u2014 found by testing both verbs for real, not guessed):\n1. `industryType=rental` must be a QUERY param on every write call (POST/PUT/DELETE), not just GET.\n2. POST requires `locationId` in the body (422 \"locationId can't be undefined\" without it).\n3. Both POST and PUT require `slug` in the body \u2014 GHL does NOT derive one from `name` automatically here (unlike products/collections).\n\nResponse nests the created record under a `serviceCategory` key: `{\"serviceCategory\": {\"_id\": ...}}`, not top-level.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lakefront Cabins\",\n  \"slug\": \"lakefront-cabins\",\n  \"locationId\": \"{{location_id}}\",\n  \"industryType\": \"rental\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Service Category",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "v3",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/service-categories/{{service_category_id}}?industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "service-categories",
+                "{{service_category_id}}"
+              ],
+              "query": [
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "PUT REJECTS `locationId` in the body (422 \"property locationId should not exist\") \u2014 the exact opposite of POST's requirement. Easy to miss without testing both verbs for real.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lakefront Cabins\",\n  \"slug\": \"lakefront-cabins\",\n  \"industryType\": \"rental\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Service Category",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "v3",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/service-categories/{{service_category_id}}?industryType=rental",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "service-categories",
+                "{{service_category_id}}"
+              ],
+              "query": [
+                {
+                  "key": "industryType",
+                  "value": "rental"
+                }
+              ]
+            },
+            "description": "Needs `industryType` as a query param too \u2014 not `altId`/`altType`/`locationId` the way products/collections' DELETE does.\n\nMirrors GhlServiceSyncService::deleteServiceCategoryFromGhl()."
+          },
+          "response": []
+        }
+      ],
+      "description": "Version header must be v3 for every request in this folder \u2014 confirmed live, GHL 401s these endpoints under other Version values even with a fully-scoped token."
+    },
+    {
+      "name": "9. Calendars \u2014 Bookings",
+      "item": [
+        {
+          "name": "Processing Fees and Taxes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_backend_base_url}}/calendars/bookings/processing-fees-and-taxes",
+              "host": [
+                "{{ghl_backend_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "bookings",
+                "processing-fees-and-taxes"
+              ]
+            },
+            "description": "Step 1 of creating a real rental booking. Note the base URL is backend.leadconnectorhq.com, NOT services.leadconnectorhq.com like every other request in this collection \u2014 GHL's calendar-booking creation flow lives on a different host entirely.\n\n`id` is the rental's PAYMENTS product id (GhlServiceDetail::paymentsProductId()), not the calendar service id.\n\nMirrors GhlBookingService::createBooking()'s first call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{location_id}}\",\n  \"module\": \"rental\",\n  \"products\": [\n    {\n      \"id\": \"{{payments_product_id}}\",\n      \"qty\": 1,\n      \"overridePrice\": 249.99\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_backend_base_url}}/calendars/bookings/create",
+              "host": [
+                "{{ghl_backend_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "bookings",
+                "create"
+              ]
+            },
+            "description": "Step 2 \u2014 auto-generates a GHL invoice as a side effect (extract its id from the response to drive Send Invoice / Record Payment below). Also on backend.leadconnectorhq.com, same as the fees call above.\n\nThe `selectedSlotInfo.services[0]` shape here is simplified for manual testing \u2014 this app's real payload (GhlBookingService::buildSelectedService()) includes GHL's live pricing-rule breakdown fields too; the minimal shape above is what's actually required to create a booking.\n\nMirrors GhlBookingService::createBooking()'s second call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{location_id}}\",\n  \"contactId\": \"{{contact_id}}\",\n  \"source\": \"rental\",\n  \"formData\": {\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Doe\",\n    \"phone\": \"+15551234567\",\n    \"email\": \"jane.doe@example.com\",\n    \"location_id\": \"{{location_id}}\",\n    \"sessionId\": \"{{$guid}}\",\n    \"Timezone\": \"Eastern Time (US & Canada) (GMT-05:00)\",\n    \"paymentContactId\": {},\n    \"internalSource\": {\n      \"type\": \"calendar\",\n      \"id\": \"{{location_id}}\"\n    },\n    \"source\": \"service_booking\"\n  },\n  \"selectedSlotInfo\": {\n    \"services\": [\n      {\n        \"serviceId\": \"{{service_id}}\",\n        \"startTime\": \"2026-09-01T15:00:00-05:00\",\n        \"endTime\": \"2026-09-05T11:00:00-05:00\"\n      }\n    ],\n    \"subAccountId\": \"{{location_id}}\",\n    \"timezone\": \"America/New_York\"\n  },\n  \"industryType\": \"rental\",\n  \"securityDeposit\": 100,\n  \"securityDepositCharged\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Booking Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "2021-04-15",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/services/bookings/{{booking_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "services",
+                "bookings",
+                "{{booking_id}}"
+              ]
+            },
+            "description": "Version header MUST be 2021-04-15 (GhlClient::BOOKING_API_VERSION) \u2014 this is the one endpoint in the whole integration pinned to that specific version. Status values this app sends: new | confirmed.\n\nMirrors GhlBookingService::updateBookingStatus().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel/Delete Booking",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "2021-04-15",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/calendars/services/bookings/{{booking_id}}",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "calendars",
+                "services",
+                "bookings",
+                "{{booking_id}}"
+              ]
+            },
+            "description": "Same pinned Version as Update Booking Status. Called when a local booking is cancelled; this app also voids the linked invoice separately afterward (see Void Invoice below) so the payment link stops accepting payment.\n\nMirrors GhlBookingService::cancelBooking()."
+          },
+          "response": []
+        }
+      ],
+      "description": "Creating/updating a real GHL Calendar rental booking. The two \"create\" steps run on a DIFFERENT base URL (backend.leadconnectorhq.com) than everything else in this collection."
+    },
+    {
+      "name": "10. Invoices",
+      "item": [
+        {
+          "name": "List Invoices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "v3",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices?altId={{location_id}}&altType=location&status=paid&limit=100&offset=0",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices"
+              ],
+              "query": [
+                {
+                  "key": "altId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "altType",
+                  "value": "location"
+                },
+                {
+                  "key": "status",
+                  "value": "paid"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "`status=paid` is a real, documented server-side filter (confirmed against GHL's own List Invoices reference) \u2014 used by the full-sync \"reconcile paid invoices\" phase to pull only already-paid invoices rather than fetching everything and filtering client-side.\n\nMirrors GhlFullSyncService's paid-invoices phase."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices/{{invoice_id}}?altId={{location_id}}&altType=location",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}"
+              ],
+              "query": [
+                {
+                  "key": "altId",
+                  "value": "{{location_id}}"
+                },
+                {
+                  "key": "altType",
+                  "value": "location"
+                }
+              ]
+            },
+            "description": "Used by this app's self-healing invoice-status reconciliation (GhlService::reconcileInvoiceStatus()) \u2014 never used to render \"the invoice\" itself anymore (that's now rendered from local snapshotted data, see InvoiceService in CLAUDE.md), only to check/sync payment status.\n\nMirrors GhlBookingService::syncInvoiceMetadata()."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Text2Pay Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "2021-07-28",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices/text2pay",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "text2pay"
+              ]
+            },
+            "description": "A standalone payment-link invoice with no calendar slot attached \u2014 used for staff \"Online\"/card bookings and POS product sales, not the auto-generated invoice from Create Booking above. `action`: \"send\" emails the customer a real payment link; \"draft\" creates it silently (used for an already-paid-in-person cash POS sale, which then immediately calls Record Payment below).\n\n`liveMode: false` matches this GHL location's connected payment processor in dev \u2014 flip to true only once a live Stripe/NMI account is connected, or checkout fails with \"No valid payment method available\" (a real gotcha called out in GhlBookingService's own doc comment).\n\nOptionally add `businessDetails: {name, logoUrl, phoneNo}` to brand the hosted invoice page with your own logo instead of GHL's default (logoUrl must be a fully-qualified URL).\n\nMirrors GhlBookingService::createText2PayInvoice()/createProductSaleInvoice().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"name\": \"Booking \\u2014 Lakeside Cabin\",\n  \"currency\": \"USD\",\n  \"items\": [\n    {\n      \"name\": \"Lakeside Cabin\",\n      \"currency\": \"USD\",\n      \"amount\": 249.99,\n      \"qty\": 1\n    }\n  ],\n  \"contactDetails\": {\n    \"id\": \"{{contact_id}}\",\n    \"name\": \"Jane Doe\",\n    \"phoneNo\": \"+15551234567\",\n    \"email\": \"jane.doe@example.com\"\n  },\n  \"issueDate\": \"2026-09-01\",\n  \"sentTo\": {\n    \"email\": [\n      \"jane.doe@example.com\"\n    ]\n  },\n  \"liveMode\": false,\n  \"action\": \"send\",\n  \"userId\": \"{{ghl_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "2021-07-28",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices/{{invoice_id}}/send",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "send"
+              ]
+            },
+            "description": "Emails the customer the invoice's existing payment link \u2014 used after Create Booking (folder 9) auto-generates an invoice, since that endpoint doesn't email it itself.\n\nMirrors GhlBookingService::sendInvoice().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"liveMode\": true,\n  \"action\": \"email\",\n  \"userId\": \"{{ghl_user_id}}\",\n  \"sentTo\": {\n    \"email\": [\n      \"jane.doe@example.com\"\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices/{{invoice_id}}/record-payment",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "record-payment"
+              ]
+            },
+            "description": "`mode`: cash | card | other. Called when staff marks a booking/sale paid in the POS, or when a guest's Text2Pay invoice is confirmed paid via webhook/reconciliation.\n\nMirrors GhlBookingService::recordInvoicePayment()/recordProductSaleInvoicePayment().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\",\n  \"mode\": \"cash\",\n  \"amount\": 249.99,\n  \"notes\": \"Recorded from Campground POS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Void Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Version",
+                "value": "2021-07-28",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ghl_services_base_url}}/invoices/{{invoice_id}}/void",
+              "host": [
+                "{{ghl_services_base_url}}"
+              ],
+              "path": [
+                "invoices",
+                "{{invoice_id}}",
+                "void"
+              ]
+            },
+            "description": "Stops an unpaid invoice's payment link from accepting payment \u2014 called when a booking is cancelled while its invoice is still unpaid.\n\nMirrors GhlBookingService::voidInvoice().",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"altId\": \"{{location_id}}\",\n  \"altType\": \"location\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "GHL's Invoices API \u2014 every payment link, payment recording, and paid-status check in this app goes through here. Note the mixed Version headers: v3 for List Invoices, 2021-07-28 for text2pay/send/void, and no explicit version (falls back to your connection's default) for Get Invoice/Record Payment."
+    }
+  ]
+}

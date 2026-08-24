@@ -14,24 +14,32 @@ final class SessionJwt
 {
     public const TYP = 'access';
 
-    public static function issue(User $user): string
+    /**
+     * @param  string|null  $locationId  The organization/location this token is scoped to
+     *                                   once the user has chosen one (see POST /auth/select-organization).
+     *                                   Omitted entirely for a user who hasn't picked yet — resolveOrganizationLocationId()
+     *                                   falls back to its pre-existing "first linked, else default" behavior in that case,
+     *                                   so a single-organization user's login is completely unaffected either way.
+     */
+    public static function issue(User $user, ?string $locationId = null): string
     {
         $ttlMinutes = (int) config('jwt.ttl_minutes', 60 * 24 * 7);
         $now = time();
         $jti = (string) Str::uuid();
 
-        return Jwt::encode([
+        return Jwt::encode(array_filter([
             'sub' => (string) $user->id,
             'typ' => self::TYP,
             'jti' => $jti,
             'ver' => (int) ($user->jwt_version ?? 0),
             'iat' => $now,
             'exp' => $now + ($ttlMinutes * 60),
-        ]);
+            'loc' => $locationId,
+        ], fn ($value) => $value !== null));
     }
 
     /**
-     * @return array{user: User, jti: string, exp: int}|null
+     * @return array{user: User, jti: string, exp: int, loc: string|null}|null
      */
     public static function authenticate(string $jwt): ?array
     {
@@ -67,10 +75,13 @@ final class SessionJwt
             return null;
         }
 
+        $loc = $claims['loc'] ?? null;
+
         return [
             'user' => $user,
             'jti' => $jti,
             'exp' => (int) ($claims['exp'] ?? 0),
+            'loc' => is_string($loc) && $loc !== '' ? $loc : null,
         ];
     }
 

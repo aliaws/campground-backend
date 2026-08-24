@@ -4,9 +4,10 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlServiceDetail;
-use App\Models\Product;
-use App\Models\ProductRental;
-use App\Models\ServiceCategory;
+use App\Models\EngageCategory;
+use App\Models\EngageProduct;
+use App\Models\EngageProductRental;
+use App\Models\EngageProductRentalCategory;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -254,7 +255,7 @@ class GhlServiceSyncService
             return 0;
         }
 
-        $goneBaseRentals = ProductRental::whereHas(
+        $goneBaseRentals = EngageProductRental::whereHas(
             'product',
             fn ($q) => $q->where('engage_organization_location_id', $tenantId)
         )
@@ -266,7 +267,7 @@ class GhlServiceSyncService
         $archivedCount = 0;
 
         foreach ($goneBaseRentals as $baseRental) {
-            $product = Product::withTrashed()->find($baseRental->product_id);
+            $product = EngageProduct::withTrashed()->find($baseRental->product_id);
 
             if (! $product || $product->trashed()) {
                 continue;
@@ -275,11 +276,11 @@ class GhlServiceSyncService
             $product->delete();
             $archivedCount++;
 
-            ProductRental::where('product_id', $product->id)
+            EngageProductRental::where('product_id', $product->id)
                 ->where('is_active', true)
                 ->update(['is_active' => false]);
 
-            $siblingGhlIds = ProductRental::where('product_id', $product->id)
+            $siblingGhlIds = EngageProductRental::where('product_id', $product->id)
                 ->whereNotNull('ghl_id')
                 ->pluck('ghl_id');
 
@@ -372,7 +373,7 @@ class GhlServiceSyncService
                     'engage_organization_location_id' => $tenantId,
                 ];
 
-                $category = ServiceCategory::where('engage_organization_location_id', $tenantId)
+                $category = EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
                     ->where('ghl_category_id', $ghlId)
                     ->first();
 
@@ -388,7 +389,7 @@ class GhlServiceSyncService
                 // duplicate-avoidance reasoning used on the push side (see
                 // syncServiceCategoryToGhl()'s own name-matching before POSTing).
                 if (! $category) {
-                    $category = ServiceCategory::where('engage_organization_location_id', $tenantId)
+                    $category = EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
                         ->whereNull('ghl_category_id')
                         ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim($data['name']))])
                         ->first();
@@ -397,8 +398,28 @@ class GhlServiceSyncService
                 if ($category) {
                     $category->update($data + ['ghl_category_id' => $ghlId]);
                 } else {
-                    ServiceCategory::create($data + ['ghl_category_id' => $ghlId]);
+                    $category = EngageProductRentalCategory::create($data + ['ghl_category_id' => $ghlId]);
                     $results['created']++;
+                }
+
+                // Each service-category item also carries `industryType`
+                // ('pos'/'rental') and, when GHL considers this category the
+                // rental-side counterpart of a regular Category, an
+                // `associationId` matching that Category's
+                // engage_collection_id. Only ever touches a Category already
+                // known here (never creates one) and only within this same
+                // tenant — engage_collection_id isn't unique across
+                // organizations on its own, so the tenant scope is what
+                // keeps one org's pull from ever touching another org's row.
+                $associationId = $ghlCategory['associationId'] ?? null;
+
+                if ($associationId) {
+                    EngageCategory::where('engage_organization_location_id', $tenantId)
+                        ->where('engage_collection_id', $associationId)
+                        ->update([
+                            'industry_type' => $ghlCategory['industryType'] ?? EngageCategory::INDUSTRY_TYPE_RENTAL,
+                            'rental_category_id' => $category->id,
+                        ]);
                 }
 
                 $results['pulled']++;
@@ -508,7 +529,7 @@ class GhlServiceSyncService
      * list?"), and the user explicitly chose real deletion over hiding
      * inactive rows by default. This is safe specifically for
      * ServiceCategory: a hard DELETE here does **not** leave a dangling
-     * reference anywhere — `ServiceCategory::rentals()` is keyed on the raw
+     * reference anywhere — `EngageProductRentalCategory::rentals()` is keyed on the raw
      * `ghl_category_id` string, not a real FK, so a `ProductRental` still
      * pointing at a since-deleted category simply resolves that relation to
      * `null` (falls back to "no category"), exactly the same as manually
@@ -541,7 +562,7 @@ class GhlServiceSyncService
      */
     private function deleteMissingServiceCategories(string $tenantId, array $seenGhlIds): int
     {
-        return ServiceCategory::where('engage_organization_location_id', $tenantId)
+        return EngageProductRentalCategory::where('engage_organization_location_id', $tenantId)
             ->whereNotNull('ghl_category_id')
             ->whereNotIn('ghl_category_id', $seenGhlIds)
             ->delete();
@@ -585,7 +606,7 @@ class GhlServiceSyncService
      * working, exactly the same reasoning as before, just no longer
      * describing today's actual, working default path.
      */
-    public function syncServiceCategoryToGhl(ServiceCategory $category): ServiceCategory
+    public function syncServiceCategoryToGhl(EngageProductRentalCategory $category): EngageProductRentalCategory
     {
         $category->update(['engage_sync_status' => 'pending']);
 
@@ -643,7 +664,7 @@ class GhlServiceSyncService
      * check (see syncServiceCategoryToGhl()'s own doc comment for the full
      * investigation).
      */
-    public function deleteServiceCategoryFromGhl(ServiceCategory $category): void
+    public function deleteServiceCategoryFromGhl(EngageProductRentalCategory $category): void
     {
         if (! $category->ghl_category_id) {
             return;
@@ -714,7 +735,7 @@ class GhlServiceSyncService
     }
 
     /** Identity lives on product_rentals.ghl_id — resolve the Product through it. */
-    private function upsertBaseListing(GhlServiceDetail $detail, string $tenantId): Product
+    private function upsertBaseListing(GhlServiceDetail $detail, string $tenantId): EngageProduct
     {
         $ghlId = $detail->id();
 
@@ -741,7 +762,7 @@ class GhlServiceSyncService
         // its product relationship instead (including trashed products, so
         // an archived listing's base rental row is still found here and can
         // be restored below).
-        $existing = ProductRental::whereHas(
+        $existing = EngageProductRental::whereHas(
             'product',
             fn ($q) => $q->withTrashed()->where('engage_organization_location_id', $tenantId)
         )->where('ghl_id', $ghlId)->first();
@@ -757,7 +778,7 @@ class GhlServiceSyncService
             // row (and every variant) is written moments later by this same
             // pull's own upsertRentalRow()/finalizeListing() calls, so
             // nothing else needs forcing here.
-            $product = $existing->product ?? Product::withTrashed()->find($existing->product_id);
+            $product = $existing->product ?? EngageProduct::withTrashed()->find($existing->product_id);
 
             if ($product) {
                 if ($product->trashed()) {
@@ -765,10 +786,10 @@ class GhlServiceSyncService
                 }
                 $product->update($productAttributes);
             } else {
-                $product = Product::create($productAttributes);
+                $product = EngageProduct::create($productAttributes);
             }
         } else {
-            $product = Product::create($productAttributes);
+            $product = EngageProduct::create($productAttributes);
         }
 
         $rental = $this->upsertRentalRow($detail, $product, $ghlId, $tenantId);
@@ -776,7 +797,7 @@ class GhlServiceSyncService
         return $product->fresh();
     }
 
-    private function upsertVariant(GhlServiceDetail $detail, Product $baseProduct, string $baseGhlId, string $tenantId): ProductRental
+    private function upsertVariant(GhlServiceDetail $detail, EngageProduct $baseProduct, string $baseGhlId, string $tenantId): EngageProductRental
     {
         $ghlId = $detail->id();
 
@@ -787,7 +808,7 @@ class GhlServiceSyncService
         return $this->upsertRentalRow($detail, $baseProduct, $baseGhlId, $tenantId);
     }
 
-    private function upsertRentalRow(GhlServiceDetail $detail, Product $product, string $baseGhlId, string $tenantId): ProductRental
+    private function upsertRentalRow(GhlServiceDetail $detail, EngageProduct $product, string $baseGhlId, string $tenantId): EngageProductRental
     {
         $isBase = $detail->id() === $baseGhlId;
         // Priced for every variant, not just the base listing (2026-07-27) —
@@ -807,7 +828,7 @@ class GhlServiceSyncService
         // it inherits location via product_id -> products.
         // engage_organization_location_id, and product_rentals_product_id_ghl_id_unique
         // is the real unique constraint that migration re-established.
-        return ProductRental::updateOrCreate(
+        return EngageProductRental::updateOrCreate(
             ['product_id' => $product->id, 'ghl_id' => $detail->id()],
             array_filter([
                 'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
@@ -828,9 +849,9 @@ class GhlServiceSyncService
      * After variants are synced: pin listing snapshot to the GHL base service
      * (variantId = null) — default rental pointer, price, and product fields.
      */
-    private function finalizeListing(Product $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
+    private function finalizeListing(EngageProduct $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
     {
-        $baseRental = ProductRental::where('product_id', $product->id)
+        $baseRental = EngageProductRental::where('product_id', $product->id)
             ->where('ghl_id', $baseGhlId)
             ->where('service_id', $baseGhlId)
             ->first();
@@ -855,7 +876,7 @@ class GhlServiceSyncService
             $baseRental->update(['listing_price' => $basePrice]);
         }
 
-        $pruned = ProductRental::where('product_id', $product->id)
+        $pruned = EngageProductRental::where('product_id', $product->id)
             ->whereNotIn('ghl_id', $seenGhlIds)
             ->get();
 

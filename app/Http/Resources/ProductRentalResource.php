@@ -20,6 +20,7 @@ class ProductRentalResource extends JsonResource
             'ghl_id' => $this->ghl_id,
             'ghl_product_id' => $this->ghl_product_id,
             'listing_price' => $this->listing_price !== null ? (float) $this->listing_price : null,
+            'security_deposit_amount' => $this->security_deposit_amount !== null ? (float) $this->security_deposit_amount : null,
             'quantity' => $this->quantity,
             'max_quantity' => $this->max_quantity,
             'service_category_id' => $this->service_category_id,

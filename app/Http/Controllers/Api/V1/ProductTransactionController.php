@@ -7,7 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductTransactionRequest;
 use App\Http\Requests\UpdateProductTransactionPaymentStatusRequest;
 use App\Http\Resources\ProductTransactionResource;
-use App\Models\ProductTransaction;
+use App\Models\EngageProductTransaction;
 use App\Services\GhlService;
 use App\Services\ProductTransactionService;
 use Illuminate\Http\JsonResponse;
@@ -44,7 +44,7 @@ class ProductTransactionController extends Controller
         // "pending" forever unless someone happens to open that one order's
         // pay page. Cheap no-op for anything already paid or without a
         // ghl_invoice_id.
-        $productTransactions->getCollection()->transform(function (ProductTransaction $productTransaction) {
+        $productTransactions->getCollection()->transform(function (EngageProductTransaction $productTransaction) {
             $reconciled = $this->ghlService->reconcileProductTransactionInvoiceStatus($productTransaction);
 
             return $reconciled->relationLoaded('customer')
@@ -86,7 +86,7 @@ class ProductTransactionController extends Controller
         ], 201);
     }
 
-    public function show(Request $request, ProductTransaction $productTransaction): JsonResponse
+    public function show(Request $request, EngageProductTransaction $productTransaction): JsonResponse
     {
         if ($productTransaction->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Transaction not found.'], 404);
@@ -105,7 +105,7 @@ class ProductTransactionController extends Controller
         ]);
     }
 
-    public function updatePaymentStatus(UpdateProductTransactionPaymentStatusRequest $request, ProductTransaction $productTransaction): JsonResponse
+    public function updatePaymentStatus(UpdateProductTransactionPaymentStatusRequest $request, EngageProductTransaction $productTransaction): JsonResponse
     {
         if ($productTransaction->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Transaction not found.'], 404);
@@ -131,7 +131,7 @@ class ProductTransactionController extends Controller
         ]);
     }
 
-    public function invoice(Request $request, ProductTransaction $productTransaction): JsonResponse
+    public function invoice(Request $request, EngageProductTransaction $productTransaction): JsonResponse
     {
         if ($productTransaction->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
             return response()->json(['success' => false, 'data' => null, 'message' => 'Transaction not found.'], 404);

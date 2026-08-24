@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
-use App\Models\Category;
-use App\Models\Product;
+use App\Models\EngageCategory;
+use App\Models\EngageProduct;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -20,7 +20,7 @@ class GhlProductSyncService
         private ProductService $productService,
     ) {}
 
-    public function syncProductToGhl(Product $product): Product
+    public function syncProductToGhl(EngageProduct $product): EngageProduct
     {
         if ($product->isRental()) {
             throw new \RuntimeException('Rental listings are synced via Services pull, not product sync.');
@@ -103,7 +103,7 @@ class GhlProductSyncService
         }
     }
 
-    public function pullFromGhl(Product $product): Product
+    public function pullFromGhl(EngageProduct $product): EngageProduct
     {
         if ($product->isRental()) {
             throw new \RuntimeException('Rental listings are synced via Services pull, not product pull.');
@@ -150,7 +150,7 @@ class GhlProductSyncService
      * existing associations untouched rather than wiping them; an explicit
      * empty array is treated as "GHL says no categories" and clears the pivot.
      */
-    private function syncCategoriesFromGhl(Product $product, array $ghlProduct): void
+    private function syncCategoriesFromGhl(EngageProduct $product, array $ghlProduct): void
     {
         $collectionIds = $ghlProduct['collectionIds'] ?? null;
 
@@ -163,14 +163,14 @@ class GhlProductSyncService
             ->filter()
             ->values();
 
-        $localCategoryIds = Category::where('engage_organization_location_id', $product->engage_organization_location_id)
+        $localCategoryIds = EngageCategory::where('engage_organization_location_id', $product->engage_organization_location_id)
             ->whereIn('engage_collection_id', $ghlIds)
             ->pluck('id');
 
         $product->categories()->sync($localCategoryIds);
     }
 
-    public function deleteProductFromGhl(Product $product): void
+    public function deleteProductFromGhl(EngageProduct $product): void
     {
         if (! $product->ghl_product_id) {
             return;
@@ -191,7 +191,7 @@ class GhlProductSyncService
         }
     }
 
-    public function syncCategoryToGhl(Category $category): Category
+    public function syncCategoryToGhl(EngageCategory $category): EngageCategory
     {
         $category->update(['engage_sync_status' => 'pending']);
 
@@ -236,7 +236,7 @@ class GhlProductSyncService
         }
     }
 
-    public function deleteCategoryFromGhl(Category $category): void
+    public function deleteCategoryFromGhl(EngageCategory $category): void
     {
         if (! $category->engage_collection_id) {
             return;
@@ -261,7 +261,7 @@ class GhlProductSyncService
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $products = Product::byLocation($locationId)
+        $products = EngageProduct::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->where('status', 'active')
             ->get();
@@ -315,7 +315,7 @@ class GhlProductSyncService
             Log::error('GHL product list fetch failed', ['error' => $e->getMessage()]);
         }
 
-        $products = Product::byLocation($locationId)
+        $products = EngageProduct::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->whereNotNull('ghl_product_id')
             ->get();
@@ -362,7 +362,7 @@ class GhlProductSyncService
             return 0;
         }
 
-        $stale = Product::byLocation($locationId)
+        $stale = EngageProduct::byLocation($locationId)
             ->whereNull('product_rental_id')
             ->whereNotNull('ghl_product_id')
             ->whereNotIn('ghl_product_id', $seenGhlIds)
@@ -379,7 +379,7 @@ class GhlProductSyncService
     {
         $results = ['synced' => 0, 'errors' => 0, 'error_details' => []];
 
-        $categories = Category::where('engage_organization_location_id', $locationId)
+        $categories = EngageCategory::where('engage_organization_location_id', $locationId)
             ->where('is_active', true)
             ->get();
 
@@ -438,14 +438,14 @@ class GhlProductSyncService
                     'engage_organization_location_id' => $locationId,
                 ];
 
-                $category = Category::where('engage_organization_location_id', $locationId)
+                $category = EngageCategory::where('engage_organization_location_id', $locationId)
                     ->where('engage_collection_id', $ghlId)
                     ->first();
 
                 if ($category) {
                     $category->update($data);
                 } else {
-                    Category::create($data + ['sort_order' => 0]);
+                    EngageCategory::create($data + ['sort_order' => 0]);
                     $results['created']++;
                 }
 
@@ -497,7 +497,7 @@ class GhlProductSyncService
             return 0;
         }
 
-        return Category::where('engage_organization_location_id', $locationId)
+        return EngageCategory::where('engage_organization_location_id', $locationId)
             ->whereNotNull('engage_collection_id')
             ->whereNotIn('engage_collection_id', $seenGhlIds)
             ->where('is_active', true)
@@ -527,7 +527,7 @@ class GhlProductSyncService
         return $all;
     }
 
-    private function syncDefaultPriceToGhl(Product $product): void
+    private function syncDefaultPriceToGhl(EngageProduct $product): void
     {
         if (! $product->ghl_product_id || $product->price === null) {
             return;
@@ -566,7 +566,7 @@ class GhlProductSyncService
         }
     }
 
-    private function pullDefaultPriceFromGhl(Product $product, array $query): void
+    private function pullDefaultPriceFromGhl(EngageProduct $product, array $query): void
     {
         try {
             $pricesRaw = $this->client->get("products/{$product->ghl_product_id}/price/", $query);
@@ -625,17 +625,17 @@ class GhlProductSyncService
         // default queries) and create a genuine duplicate row for the same
         // ghl_product_id, since that column has no unique constraint.
         // Restoring here is what lets bulkPullFromGhl()'s second loop
-        // (Product::byLocation()->...->get(), which only sees non-trashed
+        // (EngageProduct::byLocation()->...->get(), which only sees non-trashed
         // rows) pick this product back up and refresh its data moments
         // later in the same pull run.
-        $trashedMatch = Product::onlyTrashed()->byLocation($locationId)->where('ghl_product_id', $ghlId)->first();
+        $trashedMatch = EngageProduct::onlyTrashed()->byLocation($locationId)->where('ghl_product_id', $ghlId)->first();
         if ($trashedMatch) {
             $trashedMatch->restore();
 
             return false;
         }
 
-        $exists = Product::byLocation($locationId)
+        $exists = EngageProduct::byLocation($locationId)
             ->where('ghl_product_id', $ghlId)
             ->exists();
 
@@ -651,7 +651,7 @@ class GhlProductSyncService
         // SKU/barcode is always appropriate here — same auto-generation
         // ProductService::create() applies to a manually-added product,
         // kept in sync so a GHL-pulled product is never left without one.
-        $product = Product::create([
+        $product = EngageProduct::create([
             'name' => $name,
             'product_type' => in_array($type, ['PHYSICAL', 'DIGITAL', 'SERVICE']) ? $type : 'PHYSICAL',
             'description' => $ghlProduct['description'] ?? null,
@@ -669,7 +669,7 @@ class GhlProductSyncService
         return true;
     }
 
-    private function uploadImageToGhl(Product $product): ?string
+    private function uploadImageToGhl(EngageProduct $product): ?string
     {
         if (! $product->image) {
             return null;

@@ -33,26 +33,25 @@ class WipeDataExceptStaff extends Command
 
     /** Child-to-parent order, per the live FK graph. */
     private const TABLES_IN_DELETE_ORDER = [
-        'transaction_items',
+        'engage_product_transaction_items',
         'site_map_elements',
-        'product_categories',
-        'service_amenities',
-        'service_features',
-        'transactions',
-        'rental_transactions',
-        'product_transactions',
-        'bookings',
-        'product_rentals',
-        'products',
+        'engage_product_categories',
+        'engage_product_rental_amenities',
+        'engage_product_rental_features',
+        'engage_rental_transactions',
+        'engage_product_transactions',
+        'engage_bookings',
+        'engage_product_rentals',
+        'engage_products',
         'site_maps',
         'site_map_icon_types',
         'amenities',
-        'categories',
+        'engage_categories',
         'features',
         'webhook_logs',
         'ghl_sync_logs',
         'custom_fields',
-        'customers',
+        'engage_customers',
     ];
 
     public function handle(): int

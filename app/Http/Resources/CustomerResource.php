@@ -26,7 +26,7 @@ class CustomerResource extends JsonResource
             // True when this customer is currently archived (soft-deleted —
             // see "Customer Archive" under Key Business Logic). Lets a UI
             // that resolved this customer via a withTrashed() relation
-            // (e.g. Booking/RentalTransaction::customer()) show an
+            // (e.g. Booking/EngageRentalTransaction::customer()) show an
             // "Archived" badge instead of silently displaying a stale name
             // with no indication the customer no longer has an active
             // account.
