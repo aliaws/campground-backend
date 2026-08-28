@@ -139,11 +139,16 @@ class UpdateProductRequest extends FormRequest
             'booking_period_type' => ['nullable', Rule::in(['date-time-selection', 'date-selection', 'fixed'])],
             'booking_settings' => ['nullable', 'array'],
             'booking_settings.minDuration' => ['nullable', 'numeric', 'min:0'],
-            // Minimum/Maximum Duration support only "day" — the edit form's
-            // own dropdown for these two is disabled and locked to it.
-            'booking_settings.minDurationUnit' => ['nullable', Rule::in(['day'])],
+            // 2026-08-21 fix: was locked to Rule::in(['day']) only, which
+            // would reject (422) saving any real Lead Connector rental
+            // whose Min/Max Duration unit is actually 'hour'/'week'/'month'
+            // — confirmed against a real captured payload for a
+            // month-based rental. Widened to the same set Lead Connector
+            // actually supports for this field (matches
+            // BookingSettingsFields.tsx's now-widened MIN_MAX_DURATION_UNIT_OPTIONS).
+            'booking_settings.minDurationUnit' => ['nullable', Rule::in(['hour', 'day', 'week', 'month'])],
             'booking_settings.maxDuration' => ['nullable', 'numeric', 'min:0'],
-            'booking_settings.maxDurationUnit' => ['nullable', Rule::in(['day'])],
+            'booking_settings.maxDurationUnit' => ['nullable', Rule::in(['hour', 'day', 'week', 'month'])],
             'booking_settings.preBuffer' => ['nullable', 'numeric', 'min:0'],
             'booking_settings.preBufferUnit' => ['nullable', Rule::in(['min', 'hour', 'day'])],
             'booking_settings.postBuffer' => ['nullable', 'numeric', 'min:0'],

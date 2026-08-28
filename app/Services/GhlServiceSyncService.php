@@ -99,6 +99,38 @@ class GhlServiceSyncService
      * @return array<string, mixed> the exact shape confirmed against a real
      *                              captured PUT calendars/services/{id}
      *                              request/response for this tenant
+     *
+     * **2026-08-21 rewrite**: the original version only ever described the
+     * BASE rental's own fields and hardcoded an empty top-level
+     * `pricingRule.rules: []` — every per-variant edit (Stock, Advanced
+     * Pricing, per-variant price/active) made in the Inventory & Pricing
+     * tab was silently never pushed to Lead Connector at all, since the
+     * outbound payload never included a `variants[]` array. Confirmed
+     * against a real, user-captured `PUT calendars/services/{id}` request
+     * (not guessed) that Lead Connector's actual schema for this endpoint
+     * requires a full `variants[]` entry — with its own `id`/`variantId`/
+     * `productId`/`payment`/`pricingRule` (including that variant's own
+     * `rules[]`)/`securityDeposit(Amount)`/`quantity`/`isActive` — for
+     * EVERY variant under the listing, base included, not just the one
+     * being edited.
+     *
+     * **2026-08-21 follow-up correction**: an earlier version of this
+     * rewrite built each row's payload via `array_merge($raw, [...])` —
+     * spreading the ENTIRE live `GET calendars/services/{id}` response
+     * wholesale into the outbound PUT body, on the theory that this would
+     * preserve fields this app doesn't manage. In practice this caused a
+     * real, reproduced failure (`400 Value for argument "seconds" is not a
+     * valid integer`) — a calendar-type GET response can carry
+     * computed/internal fields that aren't valid, or aren't shaped the
+     * same way, on write, and blindly echoing the whole object back
+     * tripped one of them. Fixed by building the payload from an explicit
+     * allowlist matching the real captured request's own field set exactly
+     * (nothing more) — the live detail fetch is kept, but now used only as
+     * a *targeted* fallback source for a handful of specific named fields
+     * this app has no local storage for (`countAvailableDaysOnly`,
+     * `useCustomForm`, `formId`, `teamMembers`, a pricing rule's own
+     * Lead-Connector-assigned `id`, a fixed-interval's own `_id`), never as
+     * a full-object spread.
      */
     private function buildServiceUpdatePayload(EngageProduct $product, EngageProductRental $rental, array $incoming): array
     {
@@ -106,12 +138,11 @@ class GhlServiceSyncService
         $description = $incoming['description'] ?? $product->description;
         $status = $incoming['status'] ?? $product->status;
         $isActive = $status === 'active';
-        $listingPrice = (float) (array_key_exists('listing_price', $incoming) ? $incoming['listing_price'] : $rental->listing_price ?? 0);
+        $slug = $incoming['slug'] ?? $product->slug;
         $serviceDurationUnit = $incoming['service_duration_unit'] ?? $rental->service_duration_unit ?? 'day';
         $serviceCategoryId = array_key_exists('service_category_id', $incoming) ? $incoming['service_category_id'] : $rental->service_category_id;
         $bookingPeriodType = $incoming['booking_period_type'] ?? $rental->booking_period_type ?? 'date-time-selection';
         $bookingSettings = array_key_exists('booking_settings', $incoming) ? $incoming['booking_settings'] : ($rental->booking_settings ?? []);
-        $quantity = (int) (array_key_exists('quantity', $incoming) ? ($incoming['quantity'] ?? 1) : ($product->quantity ?? 1));
         $locationId = $this->client->getLocationId();
         // Prefers an explicit staff-set value (Manage Service's Inventory &
         // Pricing tab's real Variants switch) over the previous
@@ -121,72 +152,276 @@ class GhlServiceSyncService
         $isVariantsEnabled = array_key_exists('is_variants_enabled', $incoming)
             ? (bool) $incoming['is_variants_enabled']
             : ($rental->is_variants_enabled ?? $product->rentals()->count() > 1);
-        // Same explicit-value-first pattern — has_quantity_enabled is the
-        // single source of truth for whether this row tracks stock at all,
-        // replacing the previous `$quantity > 1` guess this push used to
-        // make (a guess against the *listing-wide* Quantity field, not this
-        // specific row's own tracked value).
-        $hasQuantityEnabled = array_key_exists('has_quantity_enabled', $incoming)
+        // The one shared "Inventory" switch value the frontend sends
+        // identically on every row's own variants[] entry — used as the
+        // per-row default below whenever a specific row's own override
+        // isn't present.
+        $hasQuantityEnabledDefault = array_key_exists('has_quantity_enabled', $incoming)
             ? (bool) $incoming['has_quantity_enabled']
-            : ($rental->has_quantity_enabled ?? $quantity > 1);
+            : (bool) ($rental->has_quantity_enabled ?? false);
 
+        $baseGhlId = $rental->ghl_id;
+
+        // Every row this app still considers live for this listing — the
+        // base itself is always included regardless of its own current
+        // is_active flag (it's what's being edited right now, and must
+        // never be silently dropped from its own update), but a non-base
+        // row already marked is_active=false was pruned by a prior "Pull
+        // from Lead Connector" because Lead Connector no longer returns it,
+        // and must never be resurrected there by an outbound PUT.
+        $allRentals = $product->rentals()
+            ->whereNotNull('ghl_id')
+            ->where(fn ($q) => $q->where('is_active', true)->orWhere('id', $rental->id))
+            ->get()
+            ->sortBy(fn (EngageProductRental $r) => $r->id === $rental->id ? 0 : 1)
+            ->values();
+
+        $rawByGhlId = [];
+        try {
+            $requests = $allRentals->mapWithKeys(fn (EngageProductRental $r) => [
+                $r->ghl_id => $this->serviceDetailRequest($r->ghl_id, $locationId),
+            ])->all();
+
+            foreach ($this->client->poolGet($requests) as $ghlId => $result) {
+                if ($result instanceof \Throwable) {
+                    Log::warning('GHL service update: live detail fetch failed for one variant, falling back to local data for it', [
+                        'product_id' => $product->id,
+                        'ghl_id' => $ghlId,
+                        'error' => $result->getMessage(),
+                    ]);
+
+                    continue;
+                }
+
+                $rawByGhlId[$ghlId] = $result['service'] ?? $result;
+            }
+        } catch (\Exception $e) {
+            Log::warning('GHL service update: bulk live detail fetch failed, falling back to local data for every variant', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $baseRaw = $rawByGhlId[$baseGhlId] ?? [];
+        $incomingVariants = collect($incoming['variants'] ?? [])
+            ->filter(fn ($v) => ! empty($v['id']))
+            ->keyBy('id');
+
+        $variantsPayload = $allRentals->map(function (EngageProductRental $row) use (
+            $incomingVariants, $baseGhlId, $rawByGhlId, $bookingSettings, $name, $description,
+            $isActive, $locationId, $rental, $incoming
+        ) {
+            $raw = $rawByGhlId[$row->ghl_id] ?? [];
+            $isBaseRow = $row->id === $rental->id;
+            $override = $incomingVariants->get($row->id, []);
+
+            $listingPrice = $isBaseRow
+                ? (float) (array_key_exists('listing_price', $incoming) ? ($incoming['listing_price'] ?? 0) : ($row->listing_price ?? $raw['payment']['amount'] ?? 0))
+                : (float) (array_key_exists('listing_price', $override) ? ($override['listing_price'] ?? 0) : ($row->listing_price ?? $raw['payment']['amount'] ?? 0));
+
+            $rowIsActive = $isBaseRow
+                ? $isActive
+                : (array_key_exists('is_active', $override) ? (bool) ($override['is_active'] ?? false) : (bool) $row->is_active);
+
+            $quantity = (int) (array_key_exists('quantity', $override) ? ($override['quantity'] ?? 1) : ($row->quantity ?? $raw['quantity'] ?? 1));
+
+            $pricingRules = array_key_exists('pricing_rules', $override)
+                ? ($override['pricing_rules'] ?? [])
+                : ($row->pricing_rules ?? $raw['pricingRule']['rules'] ?? []);
+
+            // Note: `hasQuantityEnabled` has no per-variant slot in Lead
+            // Connector's own real payload shape (confirmed against a real
+            // captured request — every variant object omits it; only the
+            // top-level object carries it), so unlike listing_price/
+            // is_active/quantity/pricing_rules above, a row's own
+            // has_quantity_enabled override is never read here.
+
+            // The base row's own Security Deposit Amount field (Manage
+            // Service's Pricing section) is a top-level $incoming key, not a
+            // variants[] override — this must be checked here too, or an
+            // edit to it on THIS save would never reach Lead Connector,
+            // exactly the class of bug this whole rewrite exists to close.
+            $securityDepositAmount = $isBaseRow && array_key_exists('security_deposit_amount', $incoming)
+                ? (float) ($incoming['security_deposit_amount'] ?? 0)
+                : (float) ($row->security_deposit_amount
+                    ?? ($raw['securityDepositAmount'] ?? ($raw['pricingRule']['securityDeposit']['amount'] ?? 0)));
+
+            $rowLabel = $row->name ?: ($isBaseRow ? 'Regular' : ($raw['variantName'] ?? 'Variant'));
+            $rowDurationUnit = $row->service_duration_unit ?? ($raw['serviceDurationUnit'] ?? 'day');
+            $strategy = $this->basePriceStrategyForUnit($rowDurationUnit);
+
+            // An explicit field-by-field build, matching the real captured
+            // payload's own variant shape exactly — deliberately NOT
+            // array_merge($raw, [...]) (see this method's own doc comment
+            // for the real "seconds is not a valid integer" failure that
+            // caused this to be reverted). `$raw` is only ever read here for
+            // a handful of specific named fallbacks, never spread whole.
+            $variantPayload = [
+                'serviceDuration' => (int) ($row->service_duration ?? ($raw['serviceDuration'] ?? 0)),
+                'serviceDurationUnit' => $rowDurationUnit,
+                'name' => $name,
+                'variantName' => $rowLabel,
+                'payment' => array_filter([
+                    'amount' => $listingPrice,
+                    'description' => $isBaseRow ? $description : ($raw['payment']['description'] ?? null),
+                ], fn ($v) => $v !== null),
+                'id' => $row->ghl_id,
+                'variantId' => $isBaseRow ? null : $baseGhlId,
+                'preBuffer' => $bookingSettings['preBuffer'] ?? ($raw['preBuffer'] ?? null),
+                'postBuffer' => $bookingSettings['postBuffer'] ?? ($raw['postBuffer'] ?? null),
+                'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? ($raw['preBufferUnit'] ?? 'min'),
+                'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? ($raw['postBufferUnit'] ?? 'min'),
+                'productId' => $row->ghl_product_id ?? ($raw['productId'] ?? null),
+                // A real captured payload's own pricingRule object for an
+                // already-existing variant sometimes carries Lead
+                // Connector's own assigned `id` and sometimes doesn't (an
+                // asymmetry confirmed present even in a genuinely working
+                // request) — preserved when known, simply omitted otherwise,
+                // rather than guessed or fabricated.
+                'pricingRule' => array_filter([
+                    'id' => $raw['pricingRule']['id'] ?? null,
+                    'name' => "{$rowLabel} Pricing",
+                    'targetId' => $row->ghl_id,
+                    'appliesTo' => 'rental',
+                    'basePrice' => [
+                        'value' => $listingPrice,
+                        'strategy' => $strategy,
+                    ],
+                    'rules' => $this->normalizePricingRulesForGhl($pricingRules),
+                    'priority' => $raw['pricingRule']['priority'] ?? 1,
+                    'locationId' => $locationId,
+                    'securityDeposit' => ['amount' => $securityDepositAmount],
+                    'paymentTerms' => $raw['pricingRule']['paymentTerms'] ?? ['type' => 'full'],
+                ], fn ($v) => $v !== null),
+                'securityDeposit' => $securityDepositAmount > 0,
+                'securityDepositAmount' => $securityDepositAmount,
+                'quantity' => $quantity,
+                'isActive' => $rowIsActive,
+            ];
+
+            // Lead Connector's own internal ordering marker — real captured
+            // data shows it present on some variants and absent on others;
+            // preserved only when the live fetch actually returned one for
+            // this exact row, never fabricated.
+            if (isset($raw['position'])) {
+                $variantPayload['position'] = $raw['position'];
+            }
+
+            return $variantPayload;
+        })->values()->all();
+
+        $baseVariantPayload = collect($variantsPayload)->firstWhere('id', $baseGhlId) ?? [];
+        $incomingServiceDurations = $bookingSettings['serviceDurations'] ?? ($baseRaw['serviceDurations'] ?? []);
+        $existingServiceDurationsById = collect($baseRaw['serviceDurations'] ?? [])
+            ->filter(fn ($d) => isset($d['duration'], $d['durationUnit']))
+            ->keyBy(fn ($d) => $d['duration'].'|'.$d['durationUnit']);
+
+        // An explicit field-by-field build, matching the real captured
+        // payload's own top-level shape exactly — deliberately NOT
+        // array_merge($baseRaw, [...]) (see this method's own doc comment
+        // for the real "seconds is not a valid integer" failure that caused
+        // this to be reverted). `$baseRaw` is only ever read here for a
+        // handful of specific named fallbacks, never spread whole.
         return [
             'industryType' => self::RENTAL_INDUSTRY,
             'name' => $name,
-            'slug' => $incoming['slug'] ?? $product->slug,
+            'slug' => $slug,
             'description' => $description,
-            'hideDescription' => false,
+            'hideDescription' => $baseRaw['hideDescription'] ?? false,
             'coverImage' => $this->imageSync->pushImageToGhl($product),
             'isActive' => $isActive,
             'locationId' => $locationId,
             'isVariantsEnabled' => $isVariantsEnabled,
-            'payment' => [
-                'amount' => $listingPrice,
-                'description' => $description,
-            ],
+            'variants' => $variantsPayload,
             'bookingUnit' => $serviceDurationUnit,
-            'useCustomForm' => false,
-            'formId' => '',
-            'quantity' => $quantity,
-            'hasQuantityEnabled' => $hasQuantityEnabled,
+            'useCustomForm' => $baseRaw['useCustomForm'] ?? false,
+            'formId' => $baseRaw['formId'] ?? '',
+            // Mirrors the base variant's own resolved quantity — Lead
+            // Connector's top-level `quantity` field on a real captured
+            // payload is identical to its base variant's own `quantity`,
+            // not a genuinely separate concept (unlike this app's own
+            // EngageProduct.quantity, a local-only "listing" field with no
+            // Lead Connector equivalent of its own).
+            'quantity' => $baseVariantPayload['quantity'] ?? 1,
+            'hasQuantityEnabled' => $hasQuantityEnabledDefault,
             'images' => $this->resolveServiceImagesForGhl($product),
-            'preBuffer' => $bookingSettings['preBuffer'] ?? null,
-            'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? 'min',
-            'postBuffer' => $bookingSettings['postBuffer'] ?? null,
-            'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? 'min',
-            'minDuration' => $bookingSettings['minDuration'] ?? null,
-            'minDurationUnit' => $bookingSettings['minDurationUnit'] ?? 'day',
-            'maxDuration' => $bookingSettings['maxDuration'] ?? null,
-            'maxDurationUnit' => $bookingSettings['maxDurationUnit'] ?? 'day',
+            'preBuffer' => $bookingSettings['preBuffer'] ?? ($baseRaw['preBuffer'] ?? null),
+            'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? ($baseRaw['preBufferUnit'] ?? 'min'),
+            'postBuffer' => $bookingSettings['postBuffer'] ?? ($baseRaw['postBuffer'] ?? null),
+            'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? ($baseRaw['postBufferUnit'] ?? 'min'),
+            'minDuration' => $bookingSettings['minDuration'] ?? ($baseRaw['minDuration'] ?? null),
+            'minDurationUnit' => $bookingSettings['minDurationUnit'] ?? ($baseRaw['minDurationUnit'] ?? 'day'),
+            'maxDuration' => $bookingSettings['maxDuration'] ?? ($baseRaw['maxDuration'] ?? null),
+            'maxDurationUnit' => $bookingSettings['maxDurationUnit'] ?? ($baseRaw['maxDurationUnit'] ?? 'day'),
             'bookingPeriodType' => $bookingPeriodType,
-            'hasTimeSelection' => $bookingSettings['hasTimeSelection'] ?? true,
-            'bookingStartTime' => $bookingSettings['bookingStartTime'] ?? null,
-            'bookingEndTime' => $bookingSettings['bookingEndTime'] ?? null,
-            'serviceDurations' => collect($bookingSettings['serviceDurations'] ?? [])->map(fn ($d) => [
-                'duration' => $d['duration'] ?? null,
-                'durationUnit' => $d['durationUnit'] ?? null,
-            ])->values()->all(),
-            'allowBookingAfter' => $bookingSettings['allowBookingAfter'] ?? null,
-            'allowBookingAfterUnit' => $bookingSettings['allowBookingAfterUnit'] ?? 'day',
-            'allowBookingFor' => $bookingSettings['allowBookingFor'] ?? null,
-            'allowBookingForUnit' => $bookingSettings['allowBookingForUnit'] ?? 'day',
-            'pricingRule' => [
-                'name' => "{$name} Pricing",
-                'locationId' => $locationId,
-                'targetId' => $rental->ghl_id,
-                'appliesTo' => 'service',
-                'priority' => 1,
-                'basePrice' => [
-                    'value' => $listingPrice,
-                    'strategy' => 'per_day',
-                ],
-                'paymentTerms' => ['type' => 'full'],
-                'rules' => [],
-            ],
+            'hasTimeSelection' => $bookingSettings['hasTimeSelection'] ?? ($baseRaw['hasTimeSelection'] ?? true),
+            'bookingStartTime' => $bookingSettings['bookingStartTime'] ?? ($baseRaw['bookingStartTime'] ?? null),
+            'bookingEndTime' => $bookingSettings['bookingEndTime'] ?? ($baseRaw['bookingEndTime'] ?? null),
+            // Re-links each interval to its own already-assigned Lead
+            // Connector `_id` (matched by duration+unit against the live
+            // fetch) when one exists — confirmed present in a real captured
+            // payload for an already-existing interval; a genuinely new
+            // interval simply has no `_id` yet, which Lead Connector is
+            // expected to assign on this save.
+            'serviceDurations' => collect($incomingServiceDurations)->map(function ($d) use ($existingServiceDurationsById) {
+                $key = ($d['duration'] ?? null).'|'.($d['durationUnit'] ?? null);
+                $existingId = $existingServiceDurationsById->get($key)['_id'] ?? null;
+
+                return array_filter([
+                    'duration' => $d['duration'] ?? null,
+                    'durationUnit' => $d['durationUnit'] ?? null,
+                    '_id' => $existingId,
+                ], fn ($v) => $v !== null);
+            })->values()->all(),
+            'allowBookingAfter' => $bookingSettings['allowBookingAfter'] ?? ($baseRaw['allowBookingAfter'] ?? null),
+            'allowBookingAfterUnit' => $bookingSettings['allowBookingAfterUnit'] ?? ($baseRaw['allowBookingAfterUnit'] ?? 'day'),
+            'allowBookingFor' => $bookingSettings['allowBookingFor'] ?? ($baseRaw['allowBookingFor'] ?? null),
+            'allowBookingForUnit' => $bookingSettings['allowBookingForUnit'] ?? ($baseRaw['allowBookingForUnit'] ?? 'day'),
+            'countAvailableDaysOnly' => $baseRaw['countAvailableDaysOnly'] ?? false,
+            // The exact same object built for the base row's own variants[]
+            // entry above — confirmed against the real captured payload,
+            // where the top-level pricingRule is literally a copy of the
+            // base/default variant's own pricingRule.
+            'pricingRule' => $baseVariantPayload['pricingRule'] ?? [],
             'serviceCategoryId' => $serviceCategoryId,
             'serviceDurationUnit' => $serviceDurationUnit,
-            'teamMembers' => [],
+            'teamMembers' => $baseRaw['teamMembers'] ?? [],
+            'variantName' => $baseVariantPayload['variantName'] ?? 'Regular',
         ];
+    }
+
+    /** Lead Connector's `pricingRule.basePrice.strategy` — derived from the row's own duration unit, confirmed against a real captured payload (`month` -> `per_month`, matching `bookingUnit`/`serviceDurationUnit`). */
+    private function basePriceStrategyForUnit(?string $unit): string
+    {
+        return match ($unit) {
+            'hour' => 'per_hour',
+            'week' => 'per_week',
+            'month' => 'per_month',
+            default => 'per_day',
+        };
+    }
+
+    /**
+     * Normalizes the Advanced Pricing rules array (already stored/edited in
+     * exactly this shape locally, see UpdateProductRequest's
+     * `variants.*.pricing_rules.*` validation) for the outbound Lead
+     * Connector payload — defaults a missing `sequence`/`valueType` rather
+     * than rejecting the rule, and re-keys the array numerically so a
+     * caller's sparse/associative array never breaks GHL's own array
+     * parsing.
+     *
+     * @param  array<int, array<string, mixed>>  $rules
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizePricingRulesForGhl(array $rules): array
+    {
+        return collect($rules)->values()->map(fn (array $rule, int $index) => array_filter([
+            'type' => $rule['type'] ?? null,
+            'match' => $rule['match'] ?? null,
+            'value' => isset($rule['value']) ? (float) $rule['value'] : null,
+            'valueType' => $rule['valueType'] ?? 'percentage',
+            'sequence' => $rule['sequence'] ?? ($index + 1),
+        ], fn ($v) => $v !== null))->values()->all();
     }
 
     /**
@@ -1088,6 +1323,16 @@ class GhlServiceSyncService
                 // returns null (defaults false), so it's never dropped by
                 // array_filter's `!== null` check regardless.
                 'has_quantity_enabled' => $detail->hasQuantityEnabled(),
+                // 2026-08-21 — refreshed per row on every pull, same
+                // convention as quantity/pricing_rules above (each variant
+                // is its own full Lead Connector record with its own
+                // security deposit). Previously this column was only ever
+                // written by a manual edit on the base row, so a deposit
+                // configured directly in Lead Connector for a variant this
+                // app never locally edited was never reflected here — which
+                // in turn meant the outbound "push local edits back to Lead
+                // Connector" payload had no accurate source for it either.
+                'security_deposit_amount' => $detail->pricingRule()['security_deposit_amount'] ?? null,
             ], fn ($value) => $value !== null)
         );
     }
