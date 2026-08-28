@@ -8,6 +8,7 @@ use App\Models\EngageCategory;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
+use App\Support\PublicStorageUrl;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -68,6 +69,18 @@ class GhlServiceSyncService
      * rental can only ever come from a Lead Connector pull to begin with,
      * so this is purely defensive for test/seed data, not a real production
      * path.
+     *
+     * 2026-08-29: the PUT response is now captured and handed to
+     * GhlImageSyncService::applyServiceUpdateResponseImages() — Lead
+     * Connector's own response echoes back where it actually re-hosted each
+     * image this call sent it (confirmed against a real captured response:
+     * a `storage.googleapis.com` URL, not our own transient local one), and
+     * that returned URL becomes the durable, final value stored locally,
+     * with the now-superseded local file deleted only once that's
+     * persisted. This runs strictly after the PUT itself has already
+     * succeeded — a failure inside it is swallowed internally by that
+     * method and never turns an otherwise-successful sync into a reported
+     * failure.
      */
     public function pushServiceUpdateToGhl(EngageProduct $product, array $incoming): void
     {
@@ -81,7 +94,8 @@ class GhlServiceSyncService
 
         try {
             $payload = $this->buildServiceUpdatePayload($product, $rental, $incoming);
-            $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
+            $response = $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
+            $this->imageSync->applyServiceUpdateResponseImages($product, $response);
             $product->update(['engage_sync_status' => 'synced', 'engage_last_synced_at' => now()]);
         } catch (\Exception $e) {
             $product->update(['engage_sync_status' => 'error']);
@@ -463,6 +477,17 @@ class GhlServiceSyncService
 
             if ($position === 0 && $coverUrl) {
                 $url = $coverUrl;
+            } else {
+                // 2026-08-29 fix: a non-cover image's stored URL was never
+                // normalized here at all — a row created before the storage
+                // fix (see PublicStorageUrl's own doc comment) could still
+                // hold a bare relative `/storage/...` path, which was then
+                // silently skipped by the http-prefix check below instead of
+                // ever reaching Lead Connector. absolute() is a no-op for an
+                // already-correct value (new uploads, or a genuinely
+                // external URL), so this is safe for every row regardless
+                // of when it was created.
+                $url = PublicStorageUrl::absolute($url);
             }
 
             if (! $url || ! str_starts_with($url, 'http')) {

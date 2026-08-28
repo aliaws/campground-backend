@@ -6,6 +6,7 @@ use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
+use App\Support\PublicStorageUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -232,7 +233,12 @@ class ProductService
         $path = $image->store('products', 'public');
         $images = $product->images ?? [];
         $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
-        $images[] = ['_id' => null, 'url' => Storage::url($path), 'name' => $product->name, 'position' => $nextPosition];
+        // PublicStorageUrl::absolute() is defense-in-depth here — the
+        // `public` disk's own `url` config is already APP_URL-prefixed, but
+        // this makes the guarantee explicit and immune to that config ever
+        // changing, per the real bug this closes (a relative-only image URL
+        // has no meaning to an external party like Lead Connector).
+        $images[] = ['_id' => null, 'url' => PublicStorageUrl::absolute(Storage::url($path)), 'name' => $product->name, 'position' => $nextPosition];
 
         $product->update(['images' => $images]);
 
@@ -345,7 +351,7 @@ class ProductService
     public function uploadImage(EngageProduct $product, UploadedFile $image): EngageProduct
     {
         $path = $image->store('products', 'public');
-        $product->update(['image' => Storage::url($path), 'ghl_image_url' => null]);
+        $product->update(['image' => PublicStorageUrl::absolute(Storage::url($path)), 'ghl_image_url' => null]);
 
         return $product->fresh();
     }
