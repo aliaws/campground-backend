@@ -48,9 +48,16 @@ class PublicServiceCategoryController extends Controller
         $categories = EngageProductRentalCategory::where('is_active', true)
             ->whereIn('engage_organization_location_id', $activeIds)
             ->whereHas('rentals', $browsableRentals)
-            ->withCount(['rentals' => $browsableRentals])
             ->orderBy('name')
             ->get();
+
+        // Distinct-service count, not a raw rental-row count — same
+        // real, user-reported bug fix as ServiceCategoryController::index(),
+        // see EngageProductRentalCategory::withDistinctServiceCounts()'s
+        // own doc comment. The exact same $browsableRentals constraint is
+        // reused so the count reflects the identical eligibility rule the
+        // whereHas() above already applied.
+        EngageProductRentalCategory::withDistinctServiceCounts($categories, $browsableRentals);
 
         return response()->json([
             'success' => true,

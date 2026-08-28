@@ -163,8 +163,25 @@ class ProductService
             $product->resolveBaseRental()?->update($rentalData);
         }
 
+        // 2026-08-22 fix: was `resolveBaseRental()?->update(...)` — only the
+        // base rental's own service_category_id was ever updated. Every
+        // variant carries its own copy of this column too (see
+        // GhlServiceSyncService::upsertRentalRow()'s per-row
+        // `service_category_id` write), so a listing switched from one
+        // Service Category to another left every variant still holding the
+        // OLD category id — and since the category filter (`list()`'s
+        // `service_category_id` filter above, `whereHas('rentals', fn ($q)
+        // => $q->where('service_category_id', ...))`) is an EXISTS check
+        // across ALL of a product's rentals, the same listing then matched
+        // BOTH the old and the new category simultaneously: a real,
+        // user-reported bug (a service renamed and re-categorized still
+        // showed up under its previous category too). Service Category is
+        // a whole-listing concept, not a per-variant one — the edit form
+        // itself only ever exposes one shared field for it, matching the
+        // "Booking Unit" precedent — so every rental row for this product
+        // is now kept in sync with the same value in one update.
         if ($hasServiceCategoryUpdate && $product->isRental()) {
-            $product->resolveBaseRental()?->update(['service_category_id' => $serviceCategoryGhlId]);
+            $product->rentals()->update(['service_category_id' => $serviceCategoryGhlId]);
         }
 
         // Keep both the product's own is_active and the base rental's

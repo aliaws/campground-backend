@@ -36,9 +36,14 @@ class ServiceCategoryController extends Controller
     public function index(Request $request): JsonResponse
     {
         $categories = EngageProductRentalCategory::where('engage_organization_location_id', $request->user()->resolveOrganizationLocationId())
-            ->withCount('rentals')
             ->orderBy('name')
             ->get();
+
+        // Distinct-service count, not a raw rental-row count — see
+        // EngageProductRentalCategory::withDistinctServiceCounts()'s own
+        // doc comment for the real bug this fixes (a multi-variant listing
+        // was counted once per variant).
+        EngageProductRentalCategory::withDistinctServiceCounts($categories);
 
         return response()->json([
             'success' => true,
@@ -85,7 +90,7 @@ class ServiceCategoryController extends Controller
             return response()->json(['success' => false, 'data' => null, 'message' => 'Service category not found.'], 404);
         }
 
-        $serviceCategory->loadCount('rentals');
+        EngageProductRentalCategory::withDistinctServiceCounts(collect([$serviceCategory]));
 
         return response()->json([
             'success' => true,
@@ -105,9 +110,12 @@ class ServiceCategoryController extends Controller
 
         $syncError = $this->pushToGhl($serviceCategory);
 
+        $fresh = $serviceCategory->fresh();
+        EngageProductRentalCategory::withDistinctServiceCounts(collect([$fresh]));
+
         return response()->json([
             'success' => true,
-            'data' => new ServiceCategoryResource($serviceCategory->fresh()->loadCount('rentals')),
+            'data' => new ServiceCategoryResource($fresh),
             'message' => $syncError
                 ? "Service category updated locally, but Lead Connector sync failed: {$syncError}"
                 : 'Service category updated and synced to Lead Connector.',
@@ -169,10 +177,11 @@ class ServiceCategoryController extends Controller
 
         try {
             $category = $this->ghlServiceSyncService->syncServiceCategoryToGhl($serviceCategory);
+            EngageProductRentalCategory::withDistinctServiceCounts(collect([$category]));
 
             return response()->json([
                 'success' => true,
-                'data' => new ServiceCategoryResource($category->loadCount('rentals')),
+                'data' => new ServiceCategoryResource($category),
                 'message' => 'Service category synced to Lead Connector.',
             ]);
         } catch (\Exception $e) {

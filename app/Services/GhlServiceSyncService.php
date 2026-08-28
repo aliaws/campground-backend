@@ -247,7 +247,17 @@ class GhlServiceSyncService
                     ?? ($raw['securityDepositAmount'] ?? ($raw['pricingRule']['securityDeposit']['amount'] ?? 0)));
 
             $rowLabel = $row->name ?: ($isBaseRow ? 'Regular' : ($raw['variantName'] ?? 'Variant'));
-            $rowDurationUnit = $row->service_duration_unit ?? ($raw['serviceDurationUnit'] ?? 'day');
+            // 2026-08-22 fix: was `$row->service_duration_unit ?? ($raw['serviceDurationUnit'] ?? 'day')`
+            // — `raw['serviceDurationUnit']` is confirmed unreliable (see
+            // GhlServiceDetail::strongServiceDurationUnit()'s own doc
+            // comment: a real captured response showed it stuck at "day"
+            // on a listing genuinely billed "per month"). This local
+            // column should always be correctly populated by the pull fix
+            // above by the time a save happens, but the fallback itself
+            // must never read that specific raw field again if it's ever
+            // reached — resolvedServiceDurationUnit() reuses the exact same
+            // now-proven-correct resolution instead of duplicating it.
+            $rowDurationUnit = $row->service_duration_unit ?? (new GhlServiceDetail($raw))->resolvedServiceDurationUnit() ?? 'day';
             $strategy = $this->basePriceStrategyForUnit($rowDurationUnit);
 
             // An explicit field-by-field build, matching the real captured
@@ -594,6 +604,7 @@ class GhlServiceSyncService
                 $baseListingsPulled++;
 
                 $seenGhlIds = [$ghlBaseId];
+                $variantDetails = [];
 
                 foreach ($rawDetail['variants'] ?? [] as $embedded) {
                     $variantId = $embedded['id'] ?? null;
@@ -629,11 +640,12 @@ class GhlServiceSyncService
 
                     $this->upsertVariant($variantDetail, $product, $ghlBaseId, $tenantId);
                     $seenGhlIds[] = $variantId;
+                    $variantDetails[] = $variantDetail;
                     $pulled++;
                     $variantsPulled++;
                 }
 
-                $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId);
+                $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId, $variantDetails);
             } catch (\Exception $e) {
                 $errors[] = ['service_id' => $ghlBaseId, 'name' => $rawDetail['name'] ?? null, 'error' => $e->getMessage()];
                 Log::error('GHL rental service pull failed', ['service' => $ghlBaseId, 'error' => $e->getMessage()]);
@@ -1285,7 +1297,29 @@ class GhlServiceSyncService
                 'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
                 'is_active' => $detail->isActive(),
                 'service_duration' => $detail->serviceDuration() ?? $detail->minDuration(),
-                'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
+                // 2026-08-21/22 fix: was `serviceDurationUnit() ?? durationUnit()`
+                // — durationUnit() itself falls back to
+                // `minDurationUnit ?? bookingUnit`, i.e. the *Min Duration
+                // limit's own unit* took priority over the actual billing
+                // unit whenever a service's own `serviceDurationUnit` field
+                // was missing from its GET response — exactly backwards for
+                // "Booking Unit" (this column). An intermediate fix adding a
+                // plain `bookingUnit()` check still didn't resolve a real,
+                // live-tested rental correctly billed "per month" —
+                // confirming at least one real Lead Connector GET response
+                // for this account doesn't reliably echo back a flat
+                // `serviceDurationUnit`/`bookingUnit` field at all. Now uses
+                // `resolvedServiceDurationUnit()`, which additionally derives
+                // the unit from `pricingRule.basePrice.strategy` (the one
+                // field consistently present and correct across every real
+                // captured payload seen) before ever falling through to the
+                // conflated durationUnit() — see that method's own doc
+                // comment on GhlServiceDetail for the full priority order.
+                // The shared durationUnit() method itself is left untouched
+                // since it's also used by the live quote/booking paths
+                // (LiveServiceResource, BookingService), which this fix
+                // deliberately doesn't touch.
+                'service_duration_unit' => $detail->resolvedServiceDurationUnit(),
                 'slug' => $detail->slug(),
                 'ghl_product_id' => $detail->paymentsProductId(),
                 'listing_price' => $variantPrice,
@@ -1340,8 +1374,28 @@ class GhlServiceSyncService
     /**
      * After variants are synced: pin listing snapshot to the GHL base service
      * (variantId = null) — default rental pointer, price, and product fields.
+     *
+     * 2026-08-22 addition: also consolidates `service_duration_unit`
+     * ("Booking Unit") across every row of the listing. A real, user-reported
+     * bug showed the value resolving correctly while a listing's "Variants"
+     * switch was off (a single row = the base) but incorrectly once switched
+     * on (multiple rows) — meaning at least one row's own individual
+     * `GET calendars/services/{id}` response can lack all of
+     * GhlServiceDetail::strongServiceDurationUnit()'s three strong signals,
+     * even when a *sibling* row under the exact same listing has one. Since
+     * every real captured payload for this whole feature shows every variant
+     * of a listing sharing the identical serviceDurationUnit (and this app's
+     * own edit form only ever shows ONE shared Booking Unit field for a
+     * listing's entire Variants table, never a per-row one), the first
+     * strong signal found anywhere in the listing — base checked first, then
+     * each variant in order — is applied to every row, so a weak-fallback
+     * result on one row can no longer disagree with a strong result on
+     * another. Falls through to leaving each row's own already-resolved
+     * value untouched only when NO row anywhere in the listing has a strong
+     * signal (the pre-existing durationUnit()-based fallback already applied
+     * per row in upsertRentalRow()).
      */
-    private function finalizeListing(EngageProduct $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
+    private function finalizeListing(EngageProduct $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId, array $variantDetails = []): void
     {
         $baseRental = EngageProductRental::where('product_id', $product->id)
             ->where('ghl_id', $baseGhlId)
@@ -1389,6 +1443,22 @@ class GhlServiceSyncService
             if ($rental->ghl_id) {
                 $this->gateway->forget($rental->ghl_id);
             }
+        }
+
+        // Consolidate "Booking Unit" listing-wide — see this method's own
+        // doc comment above for the full reasoning.
+        $canonicalDurationUnit = $baseDetail->strongServiceDurationUnit();
+        foreach ($variantDetails as $variantDetail) {
+            if ($canonicalDurationUnit !== null) {
+                break;
+            }
+            $canonicalDurationUnit = $variantDetail->strongServiceDurationUnit();
+        }
+
+        if ($canonicalDurationUnit !== null) {
+            EngageProductRental::where('product_id', $product->id)
+                ->whereIn('ghl_id', $seenGhlIds)
+                ->update(['service_duration_unit' => $canonicalDurationUnit]);
         }
     }
 }

@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Closure;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 /**
  * The Services-module counterpart to Category (Product Categories) —
@@ -43,5 +45,61 @@ class EngageProductRentalCategory extends Model
     public function rentals(): HasMany
     {
         return $this->hasMany(EngageProductRental::class, 'service_category_id', 'ghl_category_id');
+    }
+
+    /**
+     * 2026-08-22 fix: `withCount('rentals')` (previously used by both
+     * ServiceCategoryController::index()/show()/update()/syncToGhl() and
+     * PublicServiceCategoryController::index()) counts every matching
+     * `EngageProductRental` **row** — base listing AND every one of its
+     * variants each carry their own `service_category_id` copy (see
+     * GhlServiceSyncService::upsertRentalRow()) — not distinct services. A
+     * real, user-reported bug: a listing with several variants sharing one
+     * category was counted once per variant instead of once, inflating that
+     * category's displayed count; the same per-row duplication is *also*
+     * what let a just-recategorized service's stale variant rows keep it
+     * showing under its old category's count too (see
+     * ProductService::update()'s own doc comment for that half of the bug).
+     * This overrides `rentals_count` on each category with a DISTINCT count
+     * of `product_id` among its matching rentals instead, so a
+     * multi-variant listing is only ever counted once no matter how many
+     * variants it has.
+     *
+     * Deliberately takes the exact same relation-constraint closure the
+     * caller already passed to `withCount`/`whereHas` (e.g. "the rental's
+     * own product must be active") so the corrected count reflects the
+     * identical eligibility rule, not a looser or stricter one.
+     *
+     * @param  Collection<int, self>  $categories  Already-fetched categories to correct in place (and returned for chaining).
+     * @param  Closure|null  $constrainRentals  Same closure shape passed to `whereHas('rentals', ...)`/`withCount(['rentals' => ...])` elsewhere — receives the `EngageProductRental` query builder directly.
+     * @return Collection<int, self>
+     */
+    public static function withDistinctServiceCounts(Collection $categories, ?Closure $constrainRentals = null): Collection
+    {
+        $ghlIds = $categories->pluck('ghl_category_id')->filter()->values();
+
+        if ($ghlIds->isEmpty()) {
+            foreach ($categories as $category) {
+                $category->setAttribute('rentals_count', 0);
+            }
+
+            return $categories;
+        }
+
+        $query = EngageProductRental::whereIn('service_category_id', $ghlIds);
+
+        if ($constrainRentals) {
+            $constrainRentals($query);
+        }
+
+        $counts = $query->selectRaw('service_category_id, count(distinct product_id) as aggregate')
+            ->groupBy('service_category_id')
+            ->pluck('aggregate', 'service_category_id');
+
+        foreach ($categories as $category) {
+            $category->setAttribute('rentals_count', (int) ($counts[$category->ghl_category_id] ?? 0));
+        }
+
+        return $categories;
     }
 }
