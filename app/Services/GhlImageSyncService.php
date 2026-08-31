@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Integrations\GHL\GhlClient;
 use App\Models\EngageProduct;
 use App\Support\PublicStorageUrl;
 use Illuminate\Support\Facades\Http;
@@ -12,8 +11,6 @@ use Illuminate\Support\Str;
 
 class GhlImageSyncService
 {
-    public function __construct(private GhlClient $client) {}
-
     // ── Pull: GHL → Laravel ───────────────────────────────────────────────────
 
     /**
@@ -91,74 +88,6 @@ class GhlImageSyncService
     }
 
     // ── Push: Laravel → GHL ───────────────────────────────────────────────────
-
-    /**
-     * Resolve the product's local image, upload it to GHL's media library,
-     * persist the returned CDN URL in ghl_image_url, and return the CDN URL
-     * for inclusion in the product push payload.
-     *
-     * Returns null when:
-     *  - no image is set on the product
-     *  - the local file is missing from disk
-     *  - the GHL upload fails
-     * In all null cases the caller should omit the image field from the payload
-     * rather than sending a broken or relative URL.
-     *
-     * Cache hit: if ghl_image_url is already a cdn.filesafe.space URL the image
-     * was already uploaded and the local file has not changed (ProductService::
-     * uploadImage() clears ghl_image_url whenever the user replaces the file),
-     * so the cached URL is returned without re-uploading.
-     *
-     * This is the older, regular-catalog-product-style media-library upload
-     * (`cdn.filesafe.space`) — still used as-is for that flow. The Service
-     * (rental) update flow instead sends this app's own absolute storage URL
-     * directly in the service payload and reconciles the *response* via
-     * applyServiceUpdateResponseImages() below, since a real captured
-     * response showed Lead Connector re-hosts a service's images on its own
-     * infrastructure (a googleapis.com URL) rather than expecting a separate
-     * media-library upload call for this specific resource.
-     */
-    public function pushImageToGhl(EngageProduct $product): ?string
-    {
-        if (! $product->image) {
-            return null;
-        }
-
-        // Cache hit — local image unchanged since last push
-        if ($product->ghl_image_url && str_contains($product->ghl_image_url, 'cdn.filesafe.space')) {
-            return $product->ghl_image_url;
-        }
-
-        // Image is itself already a GHL CDN URL — cache and return
-        if (str_contains($product->image, 'cdn.filesafe.space')) {
-            $product->update(['ghl_image_url' => $product->image]);
-
-            return $product->image;
-        }
-
-        // Local storage path — upload the file. isOwnStoragePath() (not a
-        // literal str_starts_with('/storage/')) is what makes this match
-        // regardless of whether $product->image is a legacy bare relative
-        // path or the now-correct absolute APP_URL-prefixed form — both
-        // point at the same local file, just written differently depending
-        // on when the row was created.
-        if (PublicStorageUrl::isOwnStoragePath($product->image)) {
-            return $this->uploadLocalImage($product);
-        }
-
-        // Full public HTTP URL (e.g. external CDN already) — use as-is
-        if (str_starts_with($product->image, 'http')) {
-            return $product->image;
-        }
-
-        // Anything else (bare filename, unknown scheme) — skip; never send to GHL
-        Log::warning('GHL image push skipped — unrecognised image format', [
-            'product_id' => $product->id,
-            'image' => $product->image,
-        ]);
-
-        return null;
-    }
 
     /**
      * After a successful `PUT calendars/services/{id}` (a Manage Service
@@ -284,78 +213,6 @@ class GhlImageSyncService
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
-
-    private function uploadLocalImage(EngageProduct $product): ?string
-    {
-        $disk = Storage::disk('public');
-        // diskRelativePath() (not a literal substr('/storage')) correctly
-        // strips the scheme+host too when $product->image is now an
-        // absolute APP_URL-prefixed URL rather than a legacy bare relative
-        // path — a plain substr() here would extract garbage from an
-        // absolute URL's front instead of the real relative path.
-        $relativePath = PublicStorageUrl::diskRelativePath($product->image);
-
-        if (! $disk->exists($relativePath)) {
-            Log::warning('GHL image push skipped — local file not found', [
-                'product_id' => $product->id,
-                'path' => $product->image,
-            ]);
-
-            return null;
-        }
-
-        $localPath = $disk->path($relativePath);
-        $filename = basename($localPath);
-        $mimeType = mime_content_type($localPath) ?: 'image/jpeg';
-
-        Log::info('GHL image push started', [
-            'product_id' => $product->id,
-            'direction' => 'push',
-            'local_path' => $product->image,
-        ]);
-
-        try {
-            $uploadResponse = $this->client->uploadFile($localPath, $filename, $mimeType);
-
-            Log::info('GHL image upload raw response', [
-                'product_id' => $product->id,
-                'direction' => 'push',
-                'response' => $uploadResponse,
-            ]);
-
-            // GHL v2: { "uploadedFiles": { "filename.jpg": "https://cdn..." } }
-            $cdnUrl = null;
-            if (! empty($uploadResponse['uploadedFiles']) && is_array($uploadResponse['uploadedFiles'])) {
-                $cdnUrl = array_values($uploadResponse['uploadedFiles'])[0] ?? null;
-            }
-            // Older / fallback response shapes
-            $cdnUrl ??= $uploadResponse['url'] ?? $uploadResponse['fileUrl'] ?? null;
-
-            if (! $cdnUrl) {
-                throw new \RuntimeException(
-                    'No CDN URL in GHL upload response: '.json_encode($uploadResponse)
-                );
-            }
-
-            $product->update(['ghl_image_url' => $cdnUrl]);
-
-            Log::info('GHL image push succeeded', [
-                'product_id' => $product->id,
-                'direction' => 'push',
-                'cdn_url' => $cdnUrl,
-            ]);
-
-            return $cdnUrl;
-        } catch (\Exception $e) {
-            Log::error('GHL image push failed', [
-                'product_id' => $product->id,
-                'direction' => 'push',
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
-        }
-    }
 
     private function extensionFromMime(string $mime): ?string
     {

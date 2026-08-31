@@ -352,7 +352,27 @@ class GhlServiceSyncService
             'slug' => $slug,
             'description' => $description,
             'hideDescription' => $baseRaw['hideDescription'] ?? false,
-            'coverImage' => $this->imageSync->pushImageToGhl($product),
+            // 2026-08-29 fix: was $this->imageSync->pushImageToGhl($product)
+            // — that method pre-uploads the file to Lead Connector's OLDER,
+            // separate media-library endpoint (cdn.filesafe.space) before
+            // this PUT is ever sent, purely to get a URL to put here. That's
+            // a genuinely different (and, per a real captured request/
+            // response for this exact endpoint, unnecessary) contract than
+            // what calendars/services/{id} actually needs: send this app's
+            // own absolute storage URL directly, the same way every other
+            // gallery image already is (see resolveServiceImagesForGhl()
+            // below), and let the response (reconciled by
+            // GhlImageSyncService::applyServiceUpdateResponseImages() after
+            // this call succeeds) say where Lead Connector actually re-hosted
+            // it. The old pre-upload step was also a real reliability gap:
+            // if that separate media-library call failed for any reason, the
+            // cover image was sent as null and never given another chance to
+            // sync, even though the service update itself didn't need that
+            // extra call to succeed at all. pushImageToGhl()/uploadLocalImage()
+            // are left in place, unused by this class now, since regular
+            // catalog products have their own separate, unaffected image
+            // sync path (GhlProductSyncService::uploadImageToGhl()).
+            'coverImage' => PublicStorageUrl::absolute($product->image),
             'isActive' => $isActive,
             'locationId' => $locationId,
             'isVariantsEnabled' => $isVariantsEnabled,
@@ -449,46 +469,38 @@ class GhlServiceSyncService
     }
 
     /**
-     * The outbound `images[]` array — every already-GHL-hosted image
-     * (a real http(s) URL, whether Lead Connector's own CDN or an external
-     * one) is sent as-is; a purely local (`/storage/...`) non-cover image
-     * is skipped (logged, not silently dropped without a trace) rather than
-     * attempting a per-image CDN upload this pass doesn't build — the
-     * cover image (position:0) is always covered correctly regardless,
-     * since it's resolved through the same GhlImageSyncService::
-     * pushImageToGhl() already used for `coverImage` above.
+     * The outbound `images[]` array (cover/position:0 included, see
+     * `coverImage`'s own comment above — there is no separate cover-only
+     * path anymore). Every image's stored URL is normalized to an absolute
+     * `APP_URL`-prefixed URL via PublicStorageUrl::absolute() and sent
+     * as-is — this app's own storage URL is just as fetchable by Lead
+     * Connector as an already-external one, and whichever URL it actually
+     * ends up hosting each image at is reconciled back afterward by
+     * GhlImageSyncService::applyServiceUpdateResponseImages(). An image
+     * with no URL at all (shouldn't normally happen) is skipped and logged
+     * rather than silently dropped without a trace.
      */
     private function resolveServiceImagesForGhl(EngageProduct $product): array
     {
-        // pushImageToGhl() (already called for `coverImage` above) leaves a
-        // real Lead Connector CDN URL in ghl_image_url only when it actually
-        // succeeded — a null/local-path fallback here means there's nothing
-        // usable to substitute for position:0, so it falls through to the
-        // exact same "skip a non-http local image" handling every other
-        // position already gets, rather than ever sending a raw local path.
-        $coverUrl = $product->ghl_image_url && str_starts_with($product->ghl_image_url, 'http')
-            ? $product->ghl_image_url
-            : null;
+        // 2026-08-29: every position — cover (0) included — is normalized
+        // the same way, via PublicStorageUrl::absolute(). There is no
+        // separate cover-specific pre-upload/cache step anymore (see
+        // buildServiceUpdatePayload()'s own coverImage comment) — a
+        // position:0 image's own stored URL is sent directly here too, and
+        // whatever Lead Connector actually returns for it is reconciled
+        // back after the PUT succeeds by
+        // GhlImageSyncService::applyServiceUpdateResponseImages(). absolute()
+        // is a no-op for an already-correct value (a new upload, or a
+        // genuinely external/Lead-Connector-hosted URL from a prior sync),
+        // so this is safe for every row regardless of when it was created —
+        // including a legacy row whose URL was still a bare relative
+        // `/storage/...` path, which this used to silently skip instead of
+        // ever reaching Lead Connector.
         $images = [];
 
         foreach ($product->images ?? [] as $img) {
-            $url = $img['url'] ?? null;
+            $url = PublicStorageUrl::absolute($img['url'] ?? null);
             $position = $img['position'] ?? 0;
-
-            if ($position === 0 && $coverUrl) {
-                $url = $coverUrl;
-            } else {
-                // 2026-08-29 fix: a non-cover image's stored URL was never
-                // normalized here at all — a row created before the storage
-                // fix (see PublicStorageUrl's own doc comment) could still
-                // hold a bare relative `/storage/...` path, which was then
-                // silently skipped by the http-prefix check below instead of
-                // ever reaching Lead Connector. absolute() is a no-op for an
-                // already-correct value (new uploads, or a genuinely
-                // external URL), so this is safe for every row regardless
-                // of when it was created.
-                $url = PublicStorageUrl::absolute($url);
-            }
 
             if (! $url || ! str_starts_with($url, 'http')) {
                 if ($url) {

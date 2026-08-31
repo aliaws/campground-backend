@@ -699,11 +699,15 @@ class GhlProductSyncService
         $rawImage = $product->image;
 
         // isOwnStoragePath()/diskRelativePath() (not a literal
-        // str_starts_with('/storage/')+substr()) — see
-        // GhlImageSyncService::uploadLocalImage()'s identical fix for the
-        // full reasoning: $rawImage may now be a legacy bare relative path
-        // or the now-correct absolute APP_URL-prefixed form, and both must
-        // resolve to the same local file.
+        // str_starts_with('/storage/')+substr()) — see PublicStorageUrl's
+        // own doc comment for the full reasoning: $rawImage may now be a
+        // legacy bare relative path or the now-correct absolute
+        // APP_URL-prefixed form, and both must resolve to the same local
+        // file. This method is the regular-catalog-product image-upload
+        // path (a genuinely separate, unaffected flow from services' own —
+        // see GhlServiceSyncService::buildServiceUpdatePayload()'s
+        // `coverImage` comment for why services no longer pre-upload here
+        // at all).
         if (PublicStorageUrl::isOwnStoragePath($rawImage)) {
             $storageDisk = Storage::disk('public');
             $relativePath = PublicStorageUrl::diskRelativePath($rawImage);
