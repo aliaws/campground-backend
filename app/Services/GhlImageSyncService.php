@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Integrations\GHL\GhlClient;
 use App\Models\EngageProduct;
 use App\Support\PublicStorageUrl;
 use Illuminate\Support\Facades\Http;
@@ -11,6 +12,8 @@ use Illuminate\Support\Str;
 
 class GhlImageSyncService
 {
+    public function __construct(private GhlClient $client) {}
+
     // ── Pull: GHL → Laravel ───────────────────────────────────────────────────
 
     /**
@@ -210,6 +213,115 @@ class GhlImageSyncService
         }
 
         return $byPosition;
+    }
+
+    /**
+     * 2026-08-31: the real, deterministic fix — confirmed against Lead
+     * Connector's own published API reference
+     * (marketplace.gohighlevel.com/docs/ghl/medias/upload-media-content/)
+     * that `PUT calendars/services/{id}` does NOT itself fetch-and-rehost
+     * an arbitrary image URL sent in `coverImage`/`images[]` — it can just
+     * echo back the exact same local URL unchanged (confirmed live from a
+     * real production screenshot). The only documented way to get a real
+     * Lead-Connector-hosted URL is to explicitly upload the image first via
+     * `POST medias/upload-file` (see `GhlClient::uploadMediaFromUrl()`),
+     * then send *that* returned URL in the service-update payload.
+     *
+     * Called BEFORE the outbound payload is built in
+     * `GhlServiceSyncService::pushServiceUpdateToGhl()`/
+     * `buildServiceUpdatePayload()`, so the very same save already carries
+     * a real hosted URL — this supersedes relying on the PUT's own response
+     * or a follow-up GET to happen to reflect one.
+     *
+     * Every image whose current URL is genuinely one of this app's own
+     * local files (`PublicStorageUrl::isOwnStoragePath()`) is uploaded via
+     * the hosted-URL mode (Lead Connector fetches `$url` itself — no local
+     * file bytes are read or attached here); an already-external URL
+     * (already hosted by Lead Connector from a prior save, or pulled in
+     * from Lead Connector directly) is left completely untouched and never
+     * re-uploaded, so a save with nothing new to host is a cheap no-op.
+     *
+     * Each image is handled independently and defensively: a failure
+     * uploading one image (network blip, Lead Connector briefly
+     * unreachable) is logged and that one image's local URL is left
+     * exactly as-is, to retry on the next save — it never aborts the
+     * other images, and never aborts the caller's own save, since the
+     * real `PUT calendars/services/{id}` call doesn't actually depend on
+     * this step succeeding at all.
+     */
+    public function ensureImagesHostedOnGhl(EngageProduct $product): void
+    {
+        $images = $product->images ?? [];
+
+        if ($images === []) {
+            return;
+        }
+
+        $changed = false;
+        $filesToDelete = [];
+
+        foreach ($images as &$img) {
+            $url = $img['url'] ?? null;
+
+            if (! $url || ! PublicStorageUrl::isOwnStoragePath($url)) {
+                continue;
+            }
+
+            try {
+                $result = $this->client->uploadMediaFromUrl($url, $img['name'] ?? $product->name);
+                $filesToDelete[] = PublicStorageUrl::diskRelativePath($url);
+                $img['url'] = $result['url'];
+                $changed = true;
+
+                Log::info('GHL media upload (hosted URL) succeeded for a service image', [
+                    'product_id' => $product->id,
+                    'position' => $img['position'] ?? null,
+                    'ghl_url' => $result['url'],
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('GHL media upload (hosted URL) failed for one service image — left local, will retry on next save', [
+                    'product_id' => $product->id,
+                    'position' => $img['position'] ?? null,
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        unset($img);
+
+        if (! $changed) {
+            return;
+        }
+
+        try {
+            $product->update(['images' => $images]);
+        } catch (\Exception $e) {
+            // The DB write itself failed — none of the uploaded-but-not-
+            // yet-persisted URLs are used, and no local file is deleted,
+            // so nothing is lost; the images simply stay local and this
+            // whole step retries on the next save.
+            Log::error('GHL media upload: uploaded to Lead Connector but failed to persist the new URL(s) locally — local image/DB value left untouched', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        // Only delete local files after the Lead-Connector-hosted URL has
+        // been successfully persisted above — never before.
+        $disk = Storage::disk('public');
+        foreach ($filesToDelete as $relativePath) {
+            try {
+                $disk->delete($relativePath);
+            } catch (\Exception $e) {
+                Log::warning('GHL media upload: failed to delete now-hosted local file', [
+                    'product_id' => $product->id,
+                    'path' => $relativePath,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

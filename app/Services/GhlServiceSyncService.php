@@ -93,6 +93,17 @@ class GhlServiceSyncService
         $product->update(['engage_sync_status' => 'pending']);
 
         try {
+            // Proactively host any still-local image on Lead Connector's
+            // own media library first (see GhlImageSyncService::
+            // ensureImagesHostedOnGhl()'s own doc comment for why — a real
+            // captured PUT response confirmed this endpoint does not
+            // itself fetch-and-rehost an image URL sent in coverImage/
+            // images[]) — so buildServiceUpdatePayload() below already
+            // reads a real hosted URL from $product->images, not a local
+            // one. Never throws; a per-image upload failure just leaves
+            // that one image local, retried on the next save.
+            $this->imageSync->ensureImagesHostedOnGhl($product);
+
             $payload = $this->buildServiceUpdatePayload($product, $rental, $incoming);
             $response = $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
             $this->imageSync->applyServiceUpdateResponseImages($product, $response);
