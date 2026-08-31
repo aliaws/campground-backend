@@ -96,6 +96,7 @@ class GhlServiceSyncService
             $payload = $this->buildServiceUpdatePayload($product, $rental, $incoming);
             $response = $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
             $this->imageSync->applyServiceUpdateResponseImages($product, $response);
+            $this->refreshImagesFromLiveGhlDetail($product, $rental->ghl_id);
             $product->update(['engage_sync_status' => 'synced', 'engage_last_synced_at' => now()]);
         } catch (\Exception $e) {
             $product->update(['engage_sync_status' => 'error']);
@@ -106,6 +107,59 @@ class GhlServiceSyncService
             ]);
 
             throw $e;
+        }
+    }
+
+    /**
+     * 2026-08-31: a real captured `PUT calendars/services/{id}` response
+     * confirmed live to NOT reliably echo back a Lead-Connector-re-hosted
+     * image URL — sending our own local storage URL in `coverImage`/
+     * `images[]` and reading the PUT's own response back showed the
+     * identical local URL, not a re-hosted one (contradicts this class's
+     * earlier assumption that the PUT response itself always reflects
+     * re-hosting; `applyServiceUpdateResponseImages()` above is kept as a
+     * harmless no-op for whatever response shape genuinely does carry a
+     * new URL, but is not relied on alone anymore).
+     *
+     * Whatever hosting Lead Connector does for an image apparently isn't
+     * always reflected in the immediate PUT response, so — only after that
+     * PUT has already succeeded — this makes one additional, narrowly
+     * targeted `GET calendars/services/{ghl_id}` for the exact SAME
+     * listing just saved (never a full bulk pullServices() re-fetch of
+     * every service on the tenant) and reconciles images from THAT fresh
+     * response via the identical `applyServiceUpdateResponseImages()`
+     * method used above — whichever of the two responses actually carries
+     * Lead Connector's real hosted URL is picked up, and nothing happens if
+     * neither does.
+     *
+     * Deliberately swallows its own exceptions and never rethrows: the
+     * actual save already succeeded by the time this runs, so a failure
+     * here (network blip, Lead Connector briefly unreachable) must never
+     * turn an otherwise-successful save into a reported failure — the
+     * local image simply stays as-is until the next successful save or a
+     * "Pull from Lead Connector."
+     */
+    private function refreshImagesFromLiveGhlDetail(EngageProduct $product, string $ghlId): void
+    {
+        try {
+            $locationId = $this->client->getLocationId();
+
+            if (! $locationId) {
+                return;
+            }
+
+            $detail = $this->client->get("calendars/services/{$ghlId}", [
+                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
+            ]);
+
+            $this->imageSync->applyServiceUpdateResponseImages($product, $detail);
+        } catch (\Exception $e) {
+            Log::warning('GHL service image refresh (post-save GET) failed — local image left as-is', [
+                'product_id' => $product->id,
+                'ghl_id' => $ghlId,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
