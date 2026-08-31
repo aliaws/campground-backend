@@ -10,6 +10,7 @@ use App\Support\PublicStorageUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -247,6 +248,8 @@ class ProductService
 
     public function removeImage(EngageProduct $product, int $position): EngageProduct
     {
+        $removed = collect($product->images ?? [])->firstWhere('position', $position);
+
         $images = collect($product->images ?? [])
             ->reject(fn ($img) => ($img['position'] ?? null) === $position)
             ->values()
@@ -264,6 +267,26 @@ class ProductService
         }
 
         $product->update($update);
+
+        // 2026-08-31 fix: the underlying physical file was never deleted
+        // when a gallery image was removed — only the array entry was, so
+        // every removed image left an orphaned file in storage/app/public/
+        // products forever. Delete it now, only after the DB update above
+        // has already succeeded, and only if it's genuinely one of our own
+        // local files (never an already-external/Lead-Connector-hosted
+        // URL). Failure to delete never breaks the remove operation itself.
+        $removedUrl = $removed['url'] ?? null;
+        if ($removedUrl && PublicStorageUrl::isOwnStoragePath($removedUrl)) {
+            try {
+                Storage::disk('public')->delete(PublicStorageUrl::diskRelativePath($removedUrl));
+            } catch (\Exception $e) {
+                Log::warning('Product image remove: failed to delete now-orphaned local file', [
+                    'product_id' => $product->id,
+                    'path' => $removedUrl,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $product->fresh();
     }
@@ -350,8 +373,30 @@ class ProductService
 
     public function uploadImage(EngageProduct $product, UploadedFile $image): EngageProduct
     {
+        $previousUrl = $product->image;
+
         $path = $image->store('products', 'public');
         $product->update(['image' => PublicStorageUrl::absolute(Storage::url($path)), 'ghl_image_url' => null]);
+
+        // 2026-08-31 fix: replacing a product's single cover image (the
+        // goods-product upload flow) never deleted the file it superseded —
+        // only the DB reference moved on, so every re-upload left the
+        // previous file behind in storage/app/public/products forever.
+        // Deleted only after the new value is safely persisted above, and
+        // only when the previous value was genuinely one of our own local
+        // files (never an already-external URL, e.g. one already synced
+        // from Lead Connector).
+        if ($previousUrl && PublicStorageUrl::isOwnStoragePath($previousUrl)) {
+            try {
+                Storage::disk('public')->delete(PublicStorageUrl::diskRelativePath($previousUrl));
+            } catch (\Exception $e) {
+                Log::warning('Product image upload: failed to delete now-superseded local file', [
+                    'product_id' => $product->id,
+                    'path' => $previousUrl,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $product->fresh();
     }
