@@ -7,6 +7,7 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\EngageProduct;
+use App\Services\GhlImageSyncService;
 use App\Services\GhlProductGateway;
 use App\Services\GhlProductSyncService;
 use App\Services\GhlServiceSyncService;
@@ -21,6 +22,7 @@ class ProductController extends Controller
         private GhlProductSyncService $ghlProductSyncService,
         private GhlProductGateway $ghlProductGateway,
         private GhlServiceSyncService $ghlServiceSyncService,
+        private GhlImageSyncService $ghlImageSyncService,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -158,6 +160,17 @@ class ProductController extends Controller
      * Gallery management for a service's full `images` array (Manage
      * Service's edit form) — additive, appends a new image rather than
      * replacing the cover the way uploadImage() above does.
+     *
+     * 2026-08-31, explicit user direction: a rental/service's gallery
+     * image must never be written to this app's own local storage at all
+     * — uploaded directly to Lead Connector's media library instead, via
+     * GhlImageSyncService::addServiceImageDirectlyToGhl(), which throws
+     * (surfaced below as a normal error response, nothing persisted) if
+     * that upload fails, rather than silently falling back to a local
+     * copy. A non-rental product hitting this endpoint (never happens from
+     * the current frontend — only ServiceImageGallery.tsx calls it, and
+     * that's services-only — but defensively guarded here regardless)
+     * keeps the pre-existing local-storage behavior completely unchanged.
      */
     public function addImage(Request $request, EngageProduct $product): JsonResponse
     {
@@ -166,7 +179,19 @@ class ProductController extends Controller
         }
 
         $request->validate(['image' => 'required|image|max:2048']);
-        $product = $this->productService->addImage($product, $request->file('image'));
+
+        if ($product->isRental()) {
+            try {
+                $product = $this->ghlImageSyncService->addServiceImageDirectlyToGhl($product, $request->file('image'));
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to upload image to Lead Connector: '.$e->getMessage(),
+                ], 422);
+            }
+        } else {
+            $product = $this->productService->addImage($product, $request->file('image'));
+        }
 
         return response()->json([
             'success' => true,

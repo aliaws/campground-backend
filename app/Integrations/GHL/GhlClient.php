@@ -453,6 +453,68 @@ class GhlClient
         return ['fileId' => $data['fileId'] ?? null, 'url' => $data['url']];
     }
 
+    /**
+     * `POST medias/upload-file`, real multipart file mode (`file`
+     * attached, `hosted` omitted) — the sibling of `uploadMediaFromUrl()`
+     * above for when this app already holds the raw file bytes in memory
+     * (a fresh upload from an incoming request) and wants to send them
+     * straight to Lead Connector's media library without ever writing them
+     * to local disk first. Per the endpoint's own documented constraint
+     * ("If hosted is set to true then fileUrl is required. Else file is
+     * required") this deliberately never sends `hosted` at all, unlike
+     * `uploadFile()`'s older path (untouched, used elsewhere).
+     *
+     * @return array{fileId: ?string, url: string}
+     */
+    public function uploadRawFileToMediaLibrary(string $contents, string $filename, string $mimeType = 'application/octet-stream'): array
+    {
+        $this->ensureCredentials();
+
+        if (! $this->accessToken) {
+            throw new \RuntimeException('GHL access token not configured. Please authorize via OAuth.');
+        }
+
+        if ($this->token?->isTokenExpired() && $this->token->refresh_token) {
+            $this->refreshToken();
+        }
+
+        $locationId = $this->getLocationId();
+
+        $headers = [
+            'Authorization' => "Bearer {$this->accessToken}",
+            'Version' => 'v3',
+            'Accept' => 'application/json',
+        ];
+
+        $sendRequest = fn () => Http::withHeaders($headers)
+            ->connectTimeout(self::CONNECT_TIMEOUT)
+            ->timeout(self::REQUEST_TIMEOUT)
+            ->attach('file', $contents, $filename, ['Content-Type' => $mimeType])
+            ->post("{$this->baseUrl}medias/upload-file?locationId={$locationId}");
+
+        $response = $sendRequest();
+
+        if ($response->status() === 401 && $this->token?->refresh_token) {
+            $this->refreshToken();
+            $headers['Authorization'] = "Bearer {$this->accessToken}";
+            $response = $sendRequest();
+        }
+
+        if ($response->failed()) {
+            throw new \RuntimeException(
+                "GHL media upload (file) error: {$response->status()} - {$response->body()}"
+            );
+        }
+
+        $data = $response->json() ?? [];
+
+        if (empty($data['url'])) {
+            throw new \RuntimeException('GHL media upload (file) response missing url: '.json_encode($data));
+        }
+
+        return ['fileId' => $data['fileId'] ?? null, 'url' => $data['url']];
+    }
+
     private function refreshToken(): void
     {
         if (! $this->setting || ! $this->token) {

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Integrations\GHL\GhlClient;
 use App\Models\EngageProduct;
 use App\Support\PublicStorageUrl;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -322,6 +323,54 @@ class GhlImageSyncService
                 ]);
             }
         }
+    }
+
+    /**
+     * 2026-08-31, explicit user direction: a Manage Service gallery image
+     * upload must never touch this app's own local storage at all —
+     * uploaded DIRECTLY to Lead Connector's media library the moment it's
+     * added, so `images[]` only ever gains a real `storage.googleapis.com`
+     * -style URL, never a `{APP_URL}/storage/products/...` one.
+     *
+     * Deliberately has NO local-storage fallback: if the Lead Connector
+     * upload fails, this throws and the add-image action itself fails —
+     * per the explicit "don't use my local stored files" requirement,
+     * silently falling back to a local copy would be exactly the behavior
+     * being asked to remove. The caller (ProductController::addImage())
+     * surfaces the failure as a normal error response; nothing is written
+     * to the database and no local file is ever created.
+     *
+     * `ensureImagesHostedOnGhl()` above remains in place unchanged — it's
+     * the self-heal fallback for images that already exist locally (either
+     * from before this change, or from a goods product's own separate
+     * upload path), not a replacement for it.
+     */
+    public function addServiceImageDirectlyToGhl(EngageProduct $product, UploadedFile $image): EngageProduct
+    {
+        $contents = $image->get();
+        $filename = $image->getClientOriginalName() ?: (Str::random(20).'.'.($image->extension() ?: 'jpg'));
+        $mimeType = $image->getMimeType() ?: 'application/octet-stream';
+
+        $result = $this->client->uploadRawFileToMediaLibrary($contents, $filename, $mimeType);
+
+        $images = $product->images ?? [];
+        $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
+        $images[] = [
+            '_id' => $result['fileId'] ?? null,
+            'url' => $result['url'],
+            'name' => $product->name,
+            'position' => $nextPosition,
+        ];
+
+        $product->update(['images' => $images]);
+
+        Log::info('GHL media upload: service gallery image uploaded directly, never touched local storage', [
+            'product_id' => $product->id,
+            'position' => $nextPosition,
+            'ghl_url' => $result['url'],
+        ]);
+
+        return $product->fresh();
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
