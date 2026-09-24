@@ -6,9 +6,11 @@ use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
+use App\Support\PublicStorageUrl;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -163,8 +165,25 @@ class ProductService
             $product->resolveBaseRental()?->update($rentalData);
         }
 
+        // 2026-08-22 fix: was `resolveBaseRental()?->update(...)` — only the
+        // base rental's own service_category_id was ever updated. Every
+        // variant carries its own copy of this column too (see
+        // GhlServiceSyncService::upsertRentalRow()'s per-row
+        // `service_category_id` write), so a listing switched from one
+        // Service Category to another left every variant still holding the
+        // OLD category id — and since the category filter (`list()`'s
+        // `service_category_id` filter above, `whereHas('rentals', fn ($q)
+        // => $q->where('service_category_id', ...))`) is an EXISTS check
+        // across ALL of a product's rentals, the same listing then matched
+        // BOTH the old and the new category simultaneously: a real,
+        // user-reported bug (a service renamed and re-categorized still
+        // showed up under its previous category too). Service Category is
+        // a whole-listing concept, not a per-variant one — the edit form
+        // itself only ever exposes one shared field for it, matching the
+        // "Booking Unit" precedent — so every rental row for this product
+        // is now kept in sync with the same value in one update.
         if ($hasServiceCategoryUpdate && $product->isRental()) {
-            $product->resolveBaseRental()?->update(['service_category_id' => $serviceCategoryGhlId]);
+            $product->rentals()->update(['service_category_id' => $serviceCategoryGhlId]);
         }
 
         // Keep both the product's own is_active and the base rental's
@@ -215,7 +234,12 @@ class ProductService
         $path = $image->store('products', 'public');
         $images = $product->images ?? [];
         $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
-        $images[] = ['_id' => null, 'url' => Storage::url($path), 'name' => $product->name, 'position' => $nextPosition];
+        // PublicStorageUrl::absolute() is defense-in-depth here — the
+        // `public` disk's own `url` config is already APP_URL-prefixed, but
+        // this makes the guarantee explicit and immune to that config ever
+        // changing, per the real bug this closes (a relative-only image URL
+        // has no meaning to an external party like Lead Connector).
+        $images[] = ['_id' => null, 'url' => PublicStorageUrl::absolute(Storage::url($path)), 'name' => $product->name, 'position' => $nextPosition];
 
         $product->update(['images' => $images]);
 
@@ -224,6 +248,8 @@ class ProductService
 
     public function removeImage(EngageProduct $product, int $position): EngageProduct
     {
+        $removed = collect($product->images ?? [])->firstWhere('position', $position);
+
         $images = collect($product->images ?? [])
             ->reject(fn ($img) => ($img['position'] ?? null) === $position)
             ->values()
@@ -241,6 +267,26 @@ class ProductService
         }
 
         $product->update($update);
+
+        // 2026-08-31 fix: the underlying physical file was never deleted
+        // when a gallery image was removed — only the array entry was, so
+        // every removed image left an orphaned file in storage/app/public/
+        // products forever. Delete it now, only after the DB update above
+        // has already succeeded, and only if it's genuinely one of our own
+        // local files (never an already-external/Lead-Connector-hosted
+        // URL). Failure to delete never breaks the remove operation itself.
+        $removedUrl = $removed['url'] ?? null;
+        if ($removedUrl && PublicStorageUrl::isOwnStoragePath($removedUrl)) {
+            try {
+                Storage::disk('public')->delete(PublicStorageUrl::diskRelativePath($removedUrl));
+            } catch (\Exception $e) {
+                Log::warning('Product image remove: failed to delete now-orphaned local file', [
+                    'product_id' => $product->id,
+                    'path' => $removedUrl,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $product->fresh();
     }
@@ -327,8 +373,30 @@ class ProductService
 
     public function uploadImage(EngageProduct $product, UploadedFile $image): EngageProduct
     {
+        $previousUrl = $product->image;
+
         $path = $image->store('products', 'public');
-        $product->update(['image' => Storage::url($path), 'ghl_image_url' => null]);
+        $product->update(['image' => PublicStorageUrl::absolute(Storage::url($path)), 'ghl_image_url' => null]);
+
+        // 2026-08-31 fix: replacing a product's single cover image (the
+        // goods-product upload flow) never deleted the file it superseded —
+        // only the DB reference moved on, so every re-upload left the
+        // previous file behind in storage/app/public/products forever.
+        // Deleted only after the new value is safely persisted above, and
+        // only when the previous value was genuinely one of our own local
+        // files (never an already-external URL, e.g. one already synced
+        // from Lead Connector).
+        if ($previousUrl && PublicStorageUrl::isOwnStoragePath($previousUrl)) {
+            try {
+                Storage::disk('public')->delete(PublicStorageUrl::diskRelativePath($previousUrl));
+            } catch (\Exception $e) {
+                Log::warning('Product image upload: failed to delete now-superseded local file', [
+                    'product_id' => $product->id,
+                    'path' => $previousUrl,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $product->fresh();
     }

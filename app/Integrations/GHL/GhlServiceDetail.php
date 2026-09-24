@@ -333,6 +333,74 @@ final readonly class GhlServiceDetail
     }
 
     /**
+     * The service/variant's real billing unit ("per hour/day/week/month") —
+     * tried in priority order: `bookingUnit`, then derived from
+     * `pricingRule.basePrice.strategy` (e.g. `"per_month"` -> `"month"`),
+     * only falling through to durationUnit()'s own (deliberately different,
+     * Min-Duration-limit-first) fallback as a last resort.
+     *
+     * **2026-08-22 correction, confirmed against a real captured
+     * `GET calendars/services/{id}` response for this exact tenant** — two
+     * earlier fix attempts both put `serviceDurationUnit` first in this
+     * priority chain, on the (reasonable-looking, but wrong) assumption
+     * that a field with that exact name would be the reliable source. The
+     * real response settled it: `serviceDurationUnit: "day"` was present
+     * and non-null on every row of a listing genuinely billed "per month"
+     * (`bookingUnit: "month"`, `minDurationUnit: "month"`,
+     * `pricingRule.basePrice.strategy: "per_month"` all agreeing) — i.e.
+     * `serviceDurationUnit` is a real field Lead Connector returns, but its
+     * value has no reliable relationship to the actual billing cadence for
+     * a rental (it appears to always read "day" regardless), so checking
+     * it first always won before the fix's own more specific fallbacks
+     * ever ran. It is now **never read** as a duration-unit signal here —
+     * confirmed unreliable, not merely low-priority. `bookingUnit` is the
+     * field that actually agreed with the real billing cadence in that same
+     * response and is now checked first.
+     */
+    public function resolvedServiceDurationUnit(): ?string
+    {
+        return $this->strongServiceDurationUnit() ?? $this->durationUnit();
+    }
+
+    /**
+     * Same checks as resolvedServiceDurationUnit(), but WITHOUT ever falling
+     * through to the weak, conflated durationUnit() fallback — returns null
+     * when neither strong signal is present on this specific detail.
+     *
+     * 2026-08-22 addition: a real, live-tested listing showed the bug
+     * correctly fixed while its "Variants" switch was off (a single row =
+     * the base, whose own individual GET response carries a strong signal)
+     * but still wrong once switched on (multiple rows) — indicating that at
+     * least one row in a multi-variant listing's own individual GET
+     * response can lack a strong signal, even when a *sibling* row under
+     * the same listing has one. Since "Booking Unit" is a whole-listing
+     * concept in practice (every real captured payload for this feature
+     * shows every variant of the same listing sharing the identical
+     * billing cadence — this app's own edit form also only ever shows ONE
+     * shared Booking Unit field for the whole Variants table, never a
+     * per-row one), `pullServices()` uses this method to find the first row
+     * under a listing with a strong signal and applies that value to every
+     * row in the listing — see GhlServiceSyncService::finalizeListing()'s
+     * own doc comment.
+     */
+    public function strongServiceDurationUnit(): ?string
+    {
+        return $this->raw['bookingUnit']
+            ?? $this->strategyToUnit($this->raw['pricingRule']['basePrice']['strategy'] ?? null);
+    }
+
+    private function strategyToUnit(?string $strategy): ?string
+    {
+        return match ($strategy) {
+            'per_hour' => 'hour',
+            'per_day' => 'day',
+            'per_week' => 'week',
+            'per_month' => 'month',
+            default => null,
+        };
+    }
+
+    /**
      * The raw discount-rule array to persist onto
      * engage_product_rentals.pricing_rules — Lead Connector's "Advanced
      * Pricing" categories (Seasonal/date_range, Day of week, Duration

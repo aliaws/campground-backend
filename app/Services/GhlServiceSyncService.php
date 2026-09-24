@@ -8,6 +8,7 @@ use App\Models\EngageCategory;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductRentalCategory;
+use App\Support\PublicStorageUrl;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -68,6 +69,18 @@ class GhlServiceSyncService
      * rental can only ever come from a Lead Connector pull to begin with,
      * so this is purely defensive for test/seed data, not a real production
      * path.
+     *
+     * 2026-08-29: the PUT response is now captured and handed to
+     * GhlImageSyncService::applyServiceUpdateResponseImages() — Lead
+     * Connector's own response echoes back where it actually re-hosted each
+     * image this call sent it (confirmed against a real captured response:
+     * a `storage.googleapis.com` URL, not our own transient local one), and
+     * that returned URL becomes the durable, final value stored locally,
+     * with the now-superseded local file deleted only once that's
+     * persisted. This runs strictly after the PUT itself has already
+     * succeeded — a failure inside it is swallowed internally by that
+     * method and never turns an otherwise-successful sync into a reported
+     * failure.
      */
     public function pushServiceUpdateToGhl(EngageProduct $product, array $incoming): void
     {
@@ -80,8 +93,21 @@ class GhlServiceSyncService
         $product->update(['engage_sync_status' => 'pending']);
 
         try {
+            // Proactively host any still-local image on Lead Connector's
+            // own media library first (see GhlImageSyncService::
+            // ensureImagesHostedOnGhl()'s own doc comment for why — a real
+            // captured PUT response confirmed this endpoint does not
+            // itself fetch-and-rehost an image URL sent in coverImage/
+            // images[]) — so buildServiceUpdatePayload() below already
+            // reads a real hosted URL from $product->images, not a local
+            // one. Never throws; a per-image upload failure just leaves
+            // that one image local, retried on the next save.
+            $this->imageSync->ensureImagesHostedOnGhl($product);
+
             $payload = $this->buildServiceUpdatePayload($product, $rental, $incoming);
-            $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
+            $response = $this->client->put("calendars/services/{$rental->ghl_id}", $payload);
+            $this->imageSync->applyServiceUpdateResponseImages($product, $response);
+            $this->refreshImagesFromLiveGhlDetail($product, $rental->ghl_id);
             $product->update(['engage_sync_status' => 'synced', 'engage_last_synced_at' => now()]);
         } catch (\Exception $e) {
             $product->update(['engage_sync_status' => 'error']);
@@ -96,9 +122,94 @@ class GhlServiceSyncService
     }
 
     /**
+     * 2026-08-31: a real captured `PUT calendars/services/{id}` response
+     * confirmed live to NOT reliably echo back a Lead-Connector-re-hosted
+     * image URL — sending our own local storage URL in `coverImage`/
+     * `images[]` and reading the PUT's own response back showed the
+     * identical local URL, not a re-hosted one (contradicts this class's
+     * earlier assumption that the PUT response itself always reflects
+     * re-hosting; `applyServiceUpdateResponseImages()` above is kept as a
+     * harmless no-op for whatever response shape genuinely does carry a
+     * new URL, but is not relied on alone anymore).
+     *
+     * Whatever hosting Lead Connector does for an image apparently isn't
+     * always reflected in the immediate PUT response, so — only after that
+     * PUT has already succeeded — this makes one additional, narrowly
+     * targeted `GET calendars/services/{ghl_id}` for the exact SAME
+     * listing just saved (never a full bulk pullServices() re-fetch of
+     * every service on the tenant) and reconciles images from THAT fresh
+     * response via the identical `applyServiceUpdateResponseImages()`
+     * method used above — whichever of the two responses actually carries
+     * Lead Connector's real hosted URL is picked up, and nothing happens if
+     * neither does.
+     *
+     * Deliberately swallows its own exceptions and never rethrows: the
+     * actual save already succeeded by the time this runs, so a failure
+     * here (network blip, Lead Connector briefly unreachable) must never
+     * turn an otherwise-successful save into a reported failure — the
+     * local image simply stays as-is until the next successful save or a
+     * "Pull from Lead Connector."
+     */
+    private function refreshImagesFromLiveGhlDetail(EngageProduct $product, string $ghlId): void
+    {
+        try {
+            $locationId = $this->client->getLocationId();
+
+            if (! $locationId) {
+                return;
+            }
+
+            $detail = $this->client->get("calendars/services/{$ghlId}", [
+                'locationId' => $locationId,
+                'industryType' => self::RENTAL_INDUSTRY,
+            ]);
+
+            $this->imageSync->applyServiceUpdateResponseImages($product, $detail);
+        } catch (\Exception $e) {
+            Log::warning('GHL service image refresh (post-save GET) failed — local image left as-is', [
+                'product_id' => $product->id,
+                'ghl_id' => $ghlId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * @return array<string, mixed> the exact shape confirmed against a real
      *                              captured PUT calendars/services/{id}
      *                              request/response for this tenant
+     *
+     * **2026-08-21 rewrite**: the original version only ever described the
+     * BASE rental's own fields and hardcoded an empty top-level
+     * `pricingRule.rules: []` — every per-variant edit (Stock, Advanced
+     * Pricing, per-variant price/active) made in the Inventory & Pricing
+     * tab was silently never pushed to Lead Connector at all, since the
+     * outbound payload never included a `variants[]` array. Confirmed
+     * against a real, user-captured `PUT calendars/services/{id}` request
+     * (not guessed) that Lead Connector's actual schema for this endpoint
+     * requires a full `variants[]` entry — with its own `id`/`variantId`/
+     * `productId`/`payment`/`pricingRule` (including that variant's own
+     * `rules[]`)/`securityDeposit(Amount)`/`quantity`/`isActive` — for
+     * EVERY variant under the listing, base included, not just the one
+     * being edited.
+     *
+     * **2026-08-21 follow-up correction**: an earlier version of this
+     * rewrite built each row's payload via `array_merge($raw, [...])` —
+     * spreading the ENTIRE live `GET calendars/services/{id}` response
+     * wholesale into the outbound PUT body, on the theory that this would
+     * preserve fields this app doesn't manage. In practice this caused a
+     * real, reproduced failure (`400 Value for argument "seconds" is not a
+     * valid integer`) — a calendar-type GET response can carry
+     * computed/internal fields that aren't valid, or aren't shaped the
+     * same way, on write, and blindly echoing the whole object back
+     * tripped one of them. Fixed by building the payload from an explicit
+     * allowlist matching the real captured request's own field set exactly
+     * (nothing more) — the live detail fetch is kept, but now used only as
+     * a *targeted* fallback source for a handful of specific named fields
+     * this app has no local storage for (`countAvailableDaysOnly`,
+     * `useCustomForm`, `formId`, `teamMembers`, a pricing rule's own
+     * Lead-Connector-assigned `id`, a fixed-interval's own `_id`), never as
+     * a full-object spread.
      */
     private function buildServiceUpdatePayload(EngageProduct $product, EngageProductRental $rental, array $incoming): array
     {
@@ -106,12 +217,11 @@ class GhlServiceSyncService
         $description = $incoming['description'] ?? $product->description;
         $status = $incoming['status'] ?? $product->status;
         $isActive = $status === 'active';
-        $listingPrice = (float) (array_key_exists('listing_price', $incoming) ? $incoming['listing_price'] : $rental->listing_price ?? 0);
+        $slug = $incoming['slug'] ?? $product->slug;
         $serviceDurationUnit = $incoming['service_duration_unit'] ?? $rental->service_duration_unit ?? 'day';
         $serviceCategoryId = array_key_exists('service_category_id', $incoming) ? $incoming['service_category_id'] : $rental->service_category_id;
         $bookingPeriodType = $incoming['booking_period_type'] ?? $rental->booking_period_type ?? 'date-time-selection';
         $bookingSettings = array_key_exists('booking_settings', $incoming) ? $incoming['booking_settings'] : ($rental->booking_settings ?? []);
-        $quantity = (int) (array_key_exists('quantity', $incoming) ? ($incoming['quantity'] ?? 1) : ($product->quantity ?? 1));
         $locationId = $this->client->getLocationId();
         // Prefers an explicit staff-set value (Manage Service's Inventory &
         // Pricing tab's real Variants switch) over the previous
@@ -121,104 +231,341 @@ class GhlServiceSyncService
         $isVariantsEnabled = array_key_exists('is_variants_enabled', $incoming)
             ? (bool) $incoming['is_variants_enabled']
             : ($rental->is_variants_enabled ?? $product->rentals()->count() > 1);
-        // Same explicit-value-first pattern — has_quantity_enabled is the
-        // single source of truth for whether this row tracks stock at all,
-        // replacing the previous `$quantity > 1` guess this push used to
-        // make (a guess against the *listing-wide* Quantity field, not this
-        // specific row's own tracked value).
-        $hasQuantityEnabled = array_key_exists('has_quantity_enabled', $incoming)
+        // The one shared "Inventory" switch value the frontend sends
+        // identically on every row's own variants[] entry — used as the
+        // per-row default below whenever a specific row's own override
+        // isn't present.
+        $hasQuantityEnabledDefault = array_key_exists('has_quantity_enabled', $incoming)
             ? (bool) $incoming['has_quantity_enabled']
-            : ($rental->has_quantity_enabled ?? $quantity > 1);
+            : (bool) ($rental->has_quantity_enabled ?? false);
 
+        $baseGhlId = $rental->ghl_id;
+
+        // Every row this app still considers live for this listing — the
+        // base itself is always included regardless of its own current
+        // is_active flag (it's what's being edited right now, and must
+        // never be silently dropped from its own update), but a non-base
+        // row already marked is_active=false was pruned by a prior "Pull
+        // from Lead Connector" because Lead Connector no longer returns it,
+        // and must never be resurrected there by an outbound PUT.
+        $allRentals = $product->rentals()
+            ->whereNotNull('ghl_id')
+            ->where(fn ($q) => $q->where('is_active', true)->orWhere('id', $rental->id))
+            ->get()
+            ->sortBy(fn (EngageProductRental $r) => $r->id === $rental->id ? 0 : 1)
+            ->values();
+
+        $rawByGhlId = [];
+        try {
+            $requests = $allRentals->mapWithKeys(fn (EngageProductRental $r) => [
+                $r->ghl_id => $this->serviceDetailRequest($r->ghl_id, $locationId),
+            ])->all();
+
+            foreach ($this->client->poolGet($requests) as $ghlId => $result) {
+                if ($result instanceof \Throwable) {
+                    Log::warning('GHL service update: live detail fetch failed for one variant, falling back to local data for it', [
+                        'product_id' => $product->id,
+                        'ghl_id' => $ghlId,
+                        'error' => $result->getMessage(),
+                    ]);
+
+                    continue;
+                }
+
+                $rawByGhlId[$ghlId] = $result['service'] ?? $result;
+            }
+        } catch (\Exception $e) {
+            Log::warning('GHL service update: bulk live detail fetch failed, falling back to local data for every variant', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $baseRaw = $rawByGhlId[$baseGhlId] ?? [];
+        $incomingVariants = collect($incoming['variants'] ?? [])
+            ->filter(fn ($v) => ! empty($v['id']))
+            ->keyBy('id');
+
+        $variantsPayload = $allRentals->map(function (EngageProductRental $row) use (
+            $incomingVariants, $baseGhlId, $rawByGhlId, $bookingSettings, $name, $description,
+            $isActive, $locationId, $rental, $incoming
+        ) {
+            $raw = $rawByGhlId[$row->ghl_id] ?? [];
+            $isBaseRow = $row->id === $rental->id;
+            $override = $incomingVariants->get($row->id, []);
+
+            $listingPrice = $isBaseRow
+                ? (float) (array_key_exists('listing_price', $incoming) ? ($incoming['listing_price'] ?? 0) : ($row->listing_price ?? $raw['payment']['amount'] ?? 0))
+                : (float) (array_key_exists('listing_price', $override) ? ($override['listing_price'] ?? 0) : ($row->listing_price ?? $raw['payment']['amount'] ?? 0));
+
+            $rowIsActive = $isBaseRow
+                ? $isActive
+                : (array_key_exists('is_active', $override) ? (bool) ($override['is_active'] ?? false) : (bool) $row->is_active);
+
+            $quantity = (int) (array_key_exists('quantity', $override) ? ($override['quantity'] ?? 1) : ($row->quantity ?? $raw['quantity'] ?? 1));
+
+            $pricingRules = array_key_exists('pricing_rules', $override)
+                ? ($override['pricing_rules'] ?? [])
+                : ($row->pricing_rules ?? $raw['pricingRule']['rules'] ?? []);
+
+            // Note: `hasQuantityEnabled` has no per-variant slot in Lead
+            // Connector's own real payload shape (confirmed against a real
+            // captured request — every variant object omits it; only the
+            // top-level object carries it), so unlike listing_price/
+            // is_active/quantity/pricing_rules above, a row's own
+            // has_quantity_enabled override is never read here.
+
+            // The base row's own Security Deposit Amount field (Manage
+            // Service's Pricing section) is a top-level $incoming key, not a
+            // variants[] override — this must be checked here too, or an
+            // edit to it on THIS save would never reach Lead Connector,
+            // exactly the class of bug this whole rewrite exists to close.
+            $securityDepositAmount = $isBaseRow && array_key_exists('security_deposit_amount', $incoming)
+                ? (float) ($incoming['security_deposit_amount'] ?? 0)
+                : (float) ($row->security_deposit_amount
+                    ?? ($raw['securityDepositAmount'] ?? ($raw['pricingRule']['securityDeposit']['amount'] ?? 0)));
+
+            $rowLabel = $row->name ?: ($isBaseRow ? 'Regular' : ($raw['variantName'] ?? 'Variant'));
+            // 2026-08-22 fix: was `$row->service_duration_unit ?? ($raw['serviceDurationUnit'] ?? 'day')`
+            // — `raw['serviceDurationUnit']` is confirmed unreliable (see
+            // GhlServiceDetail::strongServiceDurationUnit()'s own doc
+            // comment: a real captured response showed it stuck at "day"
+            // on a listing genuinely billed "per month"). This local
+            // column should always be correctly populated by the pull fix
+            // above by the time a save happens, but the fallback itself
+            // must never read that specific raw field again if it's ever
+            // reached — resolvedServiceDurationUnit() reuses the exact same
+            // now-proven-correct resolution instead of duplicating it.
+            $rowDurationUnit = $row->service_duration_unit ?? (new GhlServiceDetail($raw))->resolvedServiceDurationUnit() ?? 'day';
+            $strategy = $this->basePriceStrategyForUnit($rowDurationUnit);
+
+            // An explicit field-by-field build, matching the real captured
+            // payload's own variant shape exactly — deliberately NOT
+            // array_merge($raw, [...]) (see this method's own doc comment
+            // for the real "seconds is not a valid integer" failure that
+            // caused this to be reverted). `$raw` is only ever read here for
+            // a handful of specific named fallbacks, never spread whole.
+            $variantPayload = [
+                'serviceDuration' => (int) ($row->service_duration ?? ($raw['serviceDuration'] ?? 0)),
+                'serviceDurationUnit' => $rowDurationUnit,
+                'name' => $name,
+                'variantName' => $rowLabel,
+                'payment' => array_filter([
+                    'amount' => $listingPrice,
+                    'description' => $isBaseRow ? $description : ($raw['payment']['description'] ?? null),
+                ], fn ($v) => $v !== null),
+                'id' => $row->ghl_id,
+                'variantId' => $isBaseRow ? null : $baseGhlId,
+                'preBuffer' => $bookingSettings['preBuffer'] ?? ($raw['preBuffer'] ?? null),
+                'postBuffer' => $bookingSettings['postBuffer'] ?? ($raw['postBuffer'] ?? null),
+                'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? ($raw['preBufferUnit'] ?? 'min'),
+                'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? ($raw['postBufferUnit'] ?? 'min'),
+                'productId' => $row->ghl_product_id ?? ($raw['productId'] ?? null),
+                // A real captured payload's own pricingRule object for an
+                // already-existing variant sometimes carries Lead
+                // Connector's own assigned `id` and sometimes doesn't (an
+                // asymmetry confirmed present even in a genuinely working
+                // request) — preserved when known, simply omitted otherwise,
+                // rather than guessed or fabricated.
+                'pricingRule' => array_filter([
+                    'id' => $raw['pricingRule']['id'] ?? null,
+                    'name' => "{$rowLabel} Pricing",
+                    'targetId' => $row->ghl_id,
+                    'appliesTo' => 'rental',
+                    'basePrice' => [
+                        'value' => $listingPrice,
+                        'strategy' => $strategy,
+                    ],
+                    'rules' => $this->normalizePricingRulesForGhl($pricingRules),
+                    'priority' => $raw['pricingRule']['priority'] ?? 1,
+                    'locationId' => $locationId,
+                    'securityDeposit' => ['amount' => $securityDepositAmount],
+                    'paymentTerms' => $raw['pricingRule']['paymentTerms'] ?? ['type' => 'full'],
+                ], fn ($v) => $v !== null),
+                'securityDeposit' => $securityDepositAmount > 0,
+                'securityDepositAmount' => $securityDepositAmount,
+                'quantity' => $quantity,
+                'isActive' => $rowIsActive,
+            ];
+
+            // Lead Connector's own internal ordering marker — real captured
+            // data shows it present on some variants and absent on others;
+            // preserved only when the live fetch actually returned one for
+            // this exact row, never fabricated.
+            if (isset($raw['position'])) {
+                $variantPayload['position'] = $raw['position'];
+            }
+
+            return $variantPayload;
+        })->values()->all();
+
+        $baseVariantPayload = collect($variantsPayload)->firstWhere('id', $baseGhlId) ?? [];
+        $incomingServiceDurations = $bookingSettings['serviceDurations'] ?? ($baseRaw['serviceDurations'] ?? []);
+        $existingServiceDurationsById = collect($baseRaw['serviceDurations'] ?? [])
+            ->filter(fn ($d) => isset($d['duration'], $d['durationUnit']))
+            ->keyBy(fn ($d) => $d['duration'].'|'.$d['durationUnit']);
+
+        // An explicit field-by-field build, matching the real captured
+        // payload's own top-level shape exactly — deliberately NOT
+        // array_merge($baseRaw, [...]) (see this method's own doc comment
+        // for the real "seconds is not a valid integer" failure that caused
+        // this to be reverted). `$baseRaw` is only ever read here for a
+        // handful of specific named fallbacks, never spread whole.
         return [
             'industryType' => self::RENTAL_INDUSTRY,
             'name' => $name,
-            'slug' => $incoming['slug'] ?? $product->slug,
+            'slug' => $slug,
             'description' => $description,
-            'hideDescription' => false,
-            'coverImage' => $this->imageSync->pushImageToGhl($product),
+            'hideDescription' => $baseRaw['hideDescription'] ?? false,
+            // 2026-08-29 fix: was $this->imageSync->pushImageToGhl($product)
+            // — that method pre-uploads the file to Lead Connector's OLDER,
+            // separate media-library endpoint (cdn.filesafe.space) before
+            // this PUT is ever sent, purely to get a URL to put here. That's
+            // a genuinely different (and, per a real captured request/
+            // response for this exact endpoint, unnecessary) contract than
+            // what calendars/services/{id} actually needs: send this app's
+            // own absolute storage URL directly, the same way every other
+            // gallery image already is (see resolveServiceImagesForGhl()
+            // below), and let the response (reconciled by
+            // GhlImageSyncService::applyServiceUpdateResponseImages() after
+            // this call succeeds) say where Lead Connector actually re-hosted
+            // it. The old pre-upload step was also a real reliability gap:
+            // if that separate media-library call failed for any reason, the
+            // cover image was sent as null and never given another chance to
+            // sync, even though the service update itself didn't need that
+            // extra call to succeed at all. pushImageToGhl()/uploadLocalImage()
+            // are left in place, unused by this class now, since regular
+            // catalog products have their own separate, unaffected image
+            // sync path (GhlProductSyncService::uploadImageToGhl()).
+            'coverImage' => PublicStorageUrl::absolute($product->image),
             'isActive' => $isActive,
             'locationId' => $locationId,
             'isVariantsEnabled' => $isVariantsEnabled,
-            'payment' => [
-                'amount' => $listingPrice,
-                'description' => $description,
-            ],
+            'variants' => $variantsPayload,
             'bookingUnit' => $serviceDurationUnit,
-            'useCustomForm' => false,
-            'formId' => '',
-            'quantity' => $quantity,
-            'hasQuantityEnabled' => $hasQuantityEnabled,
+            'useCustomForm' => $baseRaw['useCustomForm'] ?? false,
+            'formId' => $baseRaw['formId'] ?? '',
+            // Mirrors the base variant's own resolved quantity — Lead
+            // Connector's top-level `quantity` field on a real captured
+            // payload is identical to its base variant's own `quantity`,
+            // not a genuinely separate concept (unlike this app's own
+            // EngageProduct.quantity, a local-only "listing" field with no
+            // Lead Connector equivalent of its own).
+            'quantity' => $baseVariantPayload['quantity'] ?? 1,
+            'hasQuantityEnabled' => $hasQuantityEnabledDefault,
             'images' => $this->resolveServiceImagesForGhl($product),
-            'preBuffer' => $bookingSettings['preBuffer'] ?? null,
-            'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? 'min',
-            'postBuffer' => $bookingSettings['postBuffer'] ?? null,
-            'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? 'min',
-            'minDuration' => $bookingSettings['minDuration'] ?? null,
-            'minDurationUnit' => $bookingSettings['minDurationUnit'] ?? 'day',
-            'maxDuration' => $bookingSettings['maxDuration'] ?? null,
-            'maxDurationUnit' => $bookingSettings['maxDurationUnit'] ?? 'day',
+            'preBuffer' => $bookingSettings['preBuffer'] ?? ($baseRaw['preBuffer'] ?? null),
+            'preBufferUnit' => $bookingSettings['preBufferUnit'] ?? ($baseRaw['preBufferUnit'] ?? 'min'),
+            'postBuffer' => $bookingSettings['postBuffer'] ?? ($baseRaw['postBuffer'] ?? null),
+            'postBufferUnit' => $bookingSettings['postBufferUnit'] ?? ($baseRaw['postBufferUnit'] ?? 'min'),
+            'minDuration' => $bookingSettings['minDuration'] ?? ($baseRaw['minDuration'] ?? null),
+            'minDurationUnit' => $bookingSettings['minDurationUnit'] ?? ($baseRaw['minDurationUnit'] ?? 'day'),
+            'maxDuration' => $bookingSettings['maxDuration'] ?? ($baseRaw['maxDuration'] ?? null),
+            'maxDurationUnit' => $bookingSettings['maxDurationUnit'] ?? ($baseRaw['maxDurationUnit'] ?? 'day'),
             'bookingPeriodType' => $bookingPeriodType,
-            'hasTimeSelection' => $bookingSettings['hasTimeSelection'] ?? true,
-            'bookingStartTime' => $bookingSettings['bookingStartTime'] ?? null,
-            'bookingEndTime' => $bookingSettings['bookingEndTime'] ?? null,
-            'serviceDurations' => collect($bookingSettings['serviceDurations'] ?? [])->map(fn ($d) => [
-                'duration' => $d['duration'] ?? null,
-                'durationUnit' => $d['durationUnit'] ?? null,
-            ])->values()->all(),
-            'allowBookingAfter' => $bookingSettings['allowBookingAfter'] ?? null,
-            'allowBookingAfterUnit' => $bookingSettings['allowBookingAfterUnit'] ?? 'day',
-            'allowBookingFor' => $bookingSettings['allowBookingFor'] ?? null,
-            'allowBookingForUnit' => $bookingSettings['allowBookingForUnit'] ?? 'day',
-            'pricingRule' => [
-                'name' => "{$name} Pricing",
-                'locationId' => $locationId,
-                'targetId' => $rental->ghl_id,
-                'appliesTo' => 'service',
-                'priority' => 1,
-                'basePrice' => [
-                    'value' => $listingPrice,
-                    'strategy' => 'per_day',
-                ],
-                'paymentTerms' => ['type' => 'full'],
-                'rules' => [],
-            ],
+            'hasTimeSelection' => $bookingSettings['hasTimeSelection'] ?? ($baseRaw['hasTimeSelection'] ?? true),
+            'bookingStartTime' => $bookingSettings['bookingStartTime'] ?? ($baseRaw['bookingStartTime'] ?? null),
+            'bookingEndTime' => $bookingSettings['bookingEndTime'] ?? ($baseRaw['bookingEndTime'] ?? null),
+            // Re-links each interval to its own already-assigned Lead
+            // Connector `_id` (matched by duration+unit against the live
+            // fetch) when one exists — confirmed present in a real captured
+            // payload for an already-existing interval; a genuinely new
+            // interval simply has no `_id` yet, which Lead Connector is
+            // expected to assign on this save.
+            'serviceDurations' => collect($incomingServiceDurations)->map(function ($d) use ($existingServiceDurationsById) {
+                $key = ($d['duration'] ?? null).'|'.($d['durationUnit'] ?? null);
+                $existingId = $existingServiceDurationsById->get($key)['_id'] ?? null;
+
+                return array_filter([
+                    'duration' => $d['duration'] ?? null,
+                    'durationUnit' => $d['durationUnit'] ?? null,
+                    '_id' => $existingId,
+                ], fn ($v) => $v !== null);
+            })->values()->all(),
+            'allowBookingAfter' => $bookingSettings['allowBookingAfter'] ?? ($baseRaw['allowBookingAfter'] ?? null),
+            'allowBookingAfterUnit' => $bookingSettings['allowBookingAfterUnit'] ?? ($baseRaw['allowBookingAfterUnit'] ?? 'day'),
+            'allowBookingFor' => $bookingSettings['allowBookingFor'] ?? ($baseRaw['allowBookingFor'] ?? null),
+            'allowBookingForUnit' => $bookingSettings['allowBookingForUnit'] ?? ($baseRaw['allowBookingForUnit'] ?? 'day'),
+            'countAvailableDaysOnly' => $baseRaw['countAvailableDaysOnly'] ?? false,
+            // The exact same object built for the base row's own variants[]
+            // entry above — confirmed against the real captured payload,
+            // where the top-level pricingRule is literally a copy of the
+            // base/default variant's own pricingRule.
+            'pricingRule' => $baseVariantPayload['pricingRule'] ?? [],
             'serviceCategoryId' => $serviceCategoryId,
             'serviceDurationUnit' => $serviceDurationUnit,
-            'teamMembers' => [],
+            'teamMembers' => $baseRaw['teamMembers'] ?? [],
+            'variantName' => $baseVariantPayload['variantName'] ?? 'Regular',
         ];
     }
 
+    /** Lead Connector's `pricingRule.basePrice.strategy` — derived from the row's own duration unit, confirmed against a real captured payload (`month` -> `per_month`, matching `bookingUnit`/`serviceDurationUnit`). */
+    private function basePriceStrategyForUnit(?string $unit): string
+    {
+        return match ($unit) {
+            'hour' => 'per_hour',
+            'week' => 'per_week',
+            'month' => 'per_month',
+            default => 'per_day',
+        };
+    }
+
     /**
-     * The outbound `images[]` array — every already-GHL-hosted image
-     * (a real http(s) URL, whether Lead Connector's own CDN or an external
-     * one) is sent as-is; a purely local (`/storage/...`) non-cover image
-     * is skipped (logged, not silently dropped without a trace) rather than
-     * attempting a per-image CDN upload this pass doesn't build — the
-     * cover image (position:0) is always covered correctly regardless,
-     * since it's resolved through the same GhlImageSyncService::
-     * pushImageToGhl() already used for `coverImage` above.
+     * Normalizes the Advanced Pricing rules array (already stored/edited in
+     * exactly this shape locally, see UpdateProductRequest's
+     * `variants.*.pricing_rules.*` validation) for the outbound Lead
+     * Connector payload — defaults a missing `sequence`/`valueType` rather
+     * than rejecting the rule, and re-keys the array numerically so a
+     * caller's sparse/associative array never breaks GHL's own array
+     * parsing.
+     *
+     * @param  array<int, array<string, mixed>>  $rules
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizePricingRulesForGhl(array $rules): array
+    {
+        return collect($rules)->values()->map(fn (array $rule, int $index) => array_filter([
+            'type' => $rule['type'] ?? null,
+            'match' => $rule['match'] ?? null,
+            'value' => isset($rule['value']) ? (float) $rule['value'] : null,
+            'valueType' => $rule['valueType'] ?? 'percentage',
+            'sequence' => $rule['sequence'] ?? ($index + 1),
+        ], fn ($v) => $v !== null))->values()->all();
+    }
+
+    /**
+     * The outbound `images[]` array (cover/position:0 included, see
+     * `coverImage`'s own comment above — there is no separate cover-only
+     * path anymore). Every image's stored URL is normalized to an absolute
+     * `APP_URL`-prefixed URL via PublicStorageUrl::absolute() and sent
+     * as-is — this app's own storage URL is just as fetchable by Lead
+     * Connector as an already-external one, and whichever URL it actually
+     * ends up hosting each image at is reconciled back afterward by
+     * GhlImageSyncService::applyServiceUpdateResponseImages(). An image
+     * with no URL at all (shouldn't normally happen) is skipped and logged
+     * rather than silently dropped without a trace.
      */
     private function resolveServiceImagesForGhl(EngageProduct $product): array
     {
-        // pushImageToGhl() (already called for `coverImage` above) leaves a
-        // real Lead Connector CDN URL in ghl_image_url only when it actually
-        // succeeded — a null/local-path fallback here means there's nothing
-        // usable to substitute for position:0, so it falls through to the
-        // exact same "skip a non-http local image" handling every other
-        // position already gets, rather than ever sending a raw local path.
-        $coverUrl = $product->ghl_image_url && str_starts_with($product->ghl_image_url, 'http')
-            ? $product->ghl_image_url
-            : null;
+        // 2026-08-29: every position — cover (0) included — is normalized
+        // the same way, via PublicStorageUrl::absolute(). There is no
+        // separate cover-specific pre-upload/cache step anymore (see
+        // buildServiceUpdatePayload()'s own coverImage comment) — a
+        // position:0 image's own stored URL is sent directly here too, and
+        // whatever Lead Connector actually returns for it is reconciled
+        // back after the PUT succeeds by
+        // GhlImageSyncService::applyServiceUpdateResponseImages(). absolute()
+        // is a no-op for an already-correct value (a new upload, or a
+        // genuinely external/Lead-Connector-hosted URL from a prior sync),
+        // so this is safe for every row regardless of when it was created —
+        // including a legacy row whose URL was still a bare relative
+        // `/storage/...` path, which this used to silently skip instead of
+        // ever reaching Lead Connector.
         $images = [];
 
         foreach ($product->images ?? [] as $img) {
-            $url = $img['url'] ?? null;
+            $url = PublicStorageUrl::absolute($img['url'] ?? null);
             $position = $img['position'] ?? 0;
-
-            if ($position === 0 && $coverUrl) {
-                $url = $coverUrl;
-            }
 
             if (! $url || ! str_starts_with($url, 'http')) {
                 if ($url) {
@@ -359,6 +706,7 @@ class GhlServiceSyncService
                 $baseListingsPulled++;
 
                 $seenGhlIds = [$ghlBaseId];
+                $variantDetails = [];
 
                 foreach ($rawDetail['variants'] ?? [] as $embedded) {
                     $variantId = $embedded['id'] ?? null;
@@ -394,11 +742,12 @@ class GhlServiceSyncService
 
                     $this->upsertVariant($variantDetail, $product, $ghlBaseId, $tenantId);
                     $seenGhlIds[] = $variantId;
+                    $variantDetails[] = $variantDetail;
                     $pulled++;
                     $variantsPulled++;
                 }
 
-                $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId);
+                $this->finalizeListing($product, $seenGhlIds, $baseDetail, $ghlBaseId, $variantDetails);
             } catch (\Exception $e) {
                 $errors[] = ['service_id' => $ghlBaseId, 'name' => $rawDetail['name'] ?? null, 'error' => $e->getMessage()];
                 Log::error('GHL rental service pull failed', ['service' => $ghlBaseId, 'error' => $e->getMessage()]);
@@ -1050,7 +1399,29 @@ class GhlServiceSyncService
                 'name' => $detail->variantName() ?? ($isBase ? 'Regular' : 'Variant'),
                 'is_active' => $detail->isActive(),
                 'service_duration' => $detail->serviceDuration() ?? $detail->minDuration(),
-                'service_duration_unit' => $detail->serviceDurationUnit() ?? $detail->durationUnit(),
+                // 2026-08-21/22 fix: was `serviceDurationUnit() ?? durationUnit()`
+                // — durationUnit() itself falls back to
+                // `minDurationUnit ?? bookingUnit`, i.e. the *Min Duration
+                // limit's own unit* took priority over the actual billing
+                // unit whenever a service's own `serviceDurationUnit` field
+                // was missing from its GET response — exactly backwards for
+                // "Booking Unit" (this column). An intermediate fix adding a
+                // plain `bookingUnit()` check still didn't resolve a real,
+                // live-tested rental correctly billed "per month" —
+                // confirming at least one real Lead Connector GET response
+                // for this account doesn't reliably echo back a flat
+                // `serviceDurationUnit`/`bookingUnit` field at all. Now uses
+                // `resolvedServiceDurationUnit()`, which additionally derives
+                // the unit from `pricingRule.basePrice.strategy` (the one
+                // field consistently present and correct across every real
+                // captured payload seen) before ever falling through to the
+                // conflated durationUnit() — see that method's own doc
+                // comment on GhlServiceDetail for the full priority order.
+                // The shared durationUnit() method itself is left untouched
+                // since it's also used by the live quote/booking paths
+                // (LiveServiceResource, BookingService), which this fix
+                // deliberately doesn't touch.
+                'service_duration_unit' => $detail->resolvedServiceDurationUnit(),
                 'slug' => $detail->slug(),
                 'ghl_product_id' => $detail->paymentsProductId(),
                 'listing_price' => $variantPrice,
@@ -1088,6 +1459,16 @@ class GhlServiceSyncService
                 // returns null (defaults false), so it's never dropped by
                 // array_filter's `!== null` check regardless.
                 'has_quantity_enabled' => $detail->hasQuantityEnabled(),
+                // 2026-08-21 — refreshed per row on every pull, same
+                // convention as quantity/pricing_rules above (each variant
+                // is its own full Lead Connector record with its own
+                // security deposit). Previously this column was only ever
+                // written by a manual edit on the base row, so a deposit
+                // configured directly in Lead Connector for a variant this
+                // app never locally edited was never reflected here — which
+                // in turn meant the outbound "push local edits back to Lead
+                // Connector" payload had no accurate source for it either.
+                'security_deposit_amount' => $detail->pricingRule()['security_deposit_amount'] ?? null,
             ], fn ($value) => $value !== null)
         );
     }
@@ -1095,8 +1476,28 @@ class GhlServiceSyncService
     /**
      * After variants are synced: pin listing snapshot to the GHL base service
      * (variantId = null) — default rental pointer, price, and product fields.
+     *
+     * 2026-08-22 addition: also consolidates `service_duration_unit`
+     * ("Booking Unit") across every row of the listing. A real, user-reported
+     * bug showed the value resolving correctly while a listing's "Variants"
+     * switch was off (a single row = the base) but incorrectly once switched
+     * on (multiple rows) — meaning at least one row's own individual
+     * `GET calendars/services/{id}` response can lack all of
+     * GhlServiceDetail::strongServiceDurationUnit()'s three strong signals,
+     * even when a *sibling* row under the exact same listing has one. Since
+     * every real captured payload for this whole feature shows every variant
+     * of a listing sharing the identical serviceDurationUnit (and this app's
+     * own edit form only ever shows ONE shared Booking Unit field for a
+     * listing's entire Variants table, never a per-row one), the first
+     * strong signal found anywhere in the listing — base checked first, then
+     * each variant in order — is applied to every row, so a weak-fallback
+     * result on one row can no longer disagree with a strong result on
+     * another. Falls through to leaving each row's own already-resolved
+     * value untouched only when NO row anywhere in the listing has a strong
+     * signal (the pre-existing durationUnit()-based fallback already applied
+     * per row in upsertRentalRow()).
      */
-    private function finalizeListing(EngageProduct $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId): void
+    private function finalizeListing(EngageProduct $product, array $seenGhlIds, GhlServiceDetail $baseDetail, string $baseGhlId, array $variantDetails = []): void
     {
         $baseRental = EngageProductRental::where('product_id', $product->id)
             ->where('ghl_id', $baseGhlId)
@@ -1144,6 +1545,22 @@ class GhlServiceSyncService
             if ($rental->ghl_id) {
                 $this->gateway->forget($rental->ghl_id);
             }
+        }
+
+        // Consolidate "Booking Unit" listing-wide — see this method's own
+        // doc comment above for the full reasoning.
+        $canonicalDurationUnit = $baseDetail->strongServiceDurationUnit();
+        foreach ($variantDetails as $variantDetail) {
+            if ($canonicalDurationUnit !== null) {
+                break;
+            }
+            $canonicalDurationUnit = $variantDetail->strongServiceDurationUnit();
+        }
+
+        if ($canonicalDurationUnit !== null) {
+            EngageProductRental::where('product_id', $product->id)
+                ->whereIn('ghl_id', $seenGhlIds)
+                ->update(['service_duration_unit' => $canonicalDurationUnit]);
         }
     }
 }

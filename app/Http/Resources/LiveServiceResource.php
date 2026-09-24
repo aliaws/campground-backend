@@ -81,7 +81,12 @@ class LiveServiceResource extends JsonResource
             'bookingEndTime' => $baseDetail?->bookingEndTime(),
             'hasQuantityEnabled' => ($baseDetail?->maxQuantity() ?? 1) > 1,
             'serviceDuration' => $baseDetail?->serviceDuration() ?? $defaultRental?->service_duration ?? 0,
-            'serviceDurationUnit' => $baseDetail?->serviceDurationUnit() ?? $defaultRental?->service_duration_unit ?? 'day',
+            // resolvedServiceDurationUnit() (2026-08-21/22) additionally
+            // derives the unit from pricingRule.basePrice.strategy before
+            // falling through — a strict superset of what serviceDurationUnit()
+            // alone resolves, so this can only ever match a real Lead
+            // Connector billing unit more often, never less correctly.
+            'serviceDurationUnit' => $baseDetail?->resolvedServiceDurationUnit() ?? $defaultRental?->service_duration_unit ?? 'day',
             'teamMembers' => [],
             'isServiceAvailable' => $baseDetail?->isActive() ?? ($product->status === 'active'),
             'displayPriority' => 0,

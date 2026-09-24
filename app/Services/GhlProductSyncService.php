@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Integrations\GHL\GhlClient;
 use App\Models\EngageCategory;
 use App\Models\EngageProduct;
+use App\Support\PublicStorageUrl;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -697,9 +698,19 @@ class GhlProductSyncService
 
         $rawImage = $product->image;
 
-        if (str_starts_with($rawImage, '/storage/')) {
+        // isOwnStoragePath()/diskRelativePath() (not a literal
+        // str_starts_with('/storage/')+substr()) — see PublicStorageUrl's
+        // own doc comment for the full reasoning: $rawImage may now be a
+        // legacy bare relative path or the now-correct absolute
+        // APP_URL-prefixed form, and both must resolve to the same local
+        // file. This method is the regular-catalog-product image-upload
+        // path (a genuinely separate, unaffected flow from services' own —
+        // see GhlServiceSyncService::buildServiceUpdatePayload()'s
+        // `coverImage` comment for why services no longer pre-upload here
+        // at all).
+        if (PublicStorageUrl::isOwnStoragePath($rawImage)) {
             $storageDisk = Storage::disk('public');
-            $relativePath = ltrim(substr($rawImage, strlen('/storage')), '/');
+            $relativePath = PublicStorageUrl::diskRelativePath($rawImage);
             $localPath = $storageDisk->path($relativePath);
 
             if (file_exists($localPath)) {

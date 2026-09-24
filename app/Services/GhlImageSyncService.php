@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlClient;
 use App\Models\EngageProduct;
+use App\Support\PublicStorageUrl;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -62,17 +64,21 @@ class GhlImageSyncService
             $filename = Str::random(40).'.'.ltrim($ext, '.');
             Storage::disk('public')->put("products/{$filename}", $response->body());
 
-            $relativePath = '/storage/products/'.$filename;
+            // 2026-08-29 fix: was a hand-built `/storage/products/{filename}`
+            // relative path, bypassing the disk's own APP_URL-prefixed `url`
+            // config entirely — a relative reference has no meaning to Lead
+            // Connector (or any other external party) that needs to fetch it.
+            $absoluteUrl = PublicStorageUrl::absolute(Storage::disk('public')->url("products/{$filename}"));
 
             $product->update([
-                'image' => $relativePath,
+                'image' => $absoluteUrl,
                 'ghl_image_url' => $ghlImageUrl,
             ]);
 
             Log::info('GHL image pull succeeded', [
                 'product_id' => $product->id,
                 'direction' => 'pull',
-                'local_path' => $relativePath,
+                'local_path' => $absoluteUrl,
             ]);
         } catch (\Exception $e) {
             Log::error('GHL image pull failed', [
@@ -88,127 +94,286 @@ class GhlImageSyncService
     // ── Push: Laravel → GHL ───────────────────────────────────────────────────
 
     /**
-     * Resolve the product's local image, upload it to GHL's media library,
-     * persist the returned CDN URL in ghl_image_url, and return the CDN URL
-     * for inclusion in the product push payload.
+     * After a successful `PUT calendars/services/{id}` (a Manage Service
+     * create/update), Lead Connector's own response echoes back where it
+     * has actually re-hosted each image it was sent — confirmed against a
+     * real captured response for this exact endpoint, a
+     * `storage.googleapis.com` URL, NOT the transient local URL this app
+     * sent it. That Lead-Connector-returned URL is the durable, final
+     * source of truth for a service image; the local copy this app stored
+     * only ever existed to give Lead Connector something to fetch during
+     * this one sync call.
      *
-     * Returns null when:
-     *  - no image is set on the product
-     *  - the local file is missing from disk
-     *  - the GHL upload fails
-     * In all null cases the caller should omit the image field from the payload
-     * rather than sending a broken or relative URL.
+     * For every image position Lead Connector's response actually returns
+     * a URL for that differs from what's currently stored:
+     *  - the DB row is updated to the Lead-Connector-returned URL;
+     *  - if the value it's replacing was one of this app's own local
+     *    ("own storage") files, that now-superseded file is deleted from
+     *    disk — but ONLY after the new URL has already been persisted
+     *    successfully, never before;
+     *  - a position Lead Connector's response says nothing about (or
+     *    returns the exact same URL for) is left completely untouched —
+     *    no fabricated deletion or replacement, satisfying "if the request
+     *    fails or doesn't return a valid image URL, never touch the
+     *    existing local image or DB value" at the level of each individual
+     *    image, not just for an outright request failure.
      *
-     * Cache hit: if ghl_image_url is already a cdn.filesafe.space URL the image
-     * was already uploaded and the local file has not changed (ProductService::
-     * uploadImage() clears ghl_image_url whenever the user replaces the file),
-     * so the cached URL is returned without re-uploading.
+     * Deliberately swallows its own exceptions (logged, never re-thrown) —
+     * by the time this runs, the actual GHL PUT already succeeded, and a
+     * bug in this reconciliation step must never turn an otherwise-successful
+     * sync into a reported failure that aborts the local save.
      */
-    public function pushImageToGhl(EngageProduct $product): ?string
+    public function applyServiceUpdateResponseImages(EngageProduct $product, array $ghlResponse): void
     {
-        if (! $product->image) {
-            return null;
+        try {
+            $service = $ghlResponse['service'] ?? $ghlResponse;
+            $images = $product->images ?? [];
+
+            if ($images === []) {
+                return;
+            }
+
+            $returnedByPosition = $this->extractReturnedImageUrls($service);
+
+            if ($returnedByPosition === []) {
+                return;
+            }
+
+            $filesToDelete = [];
+            $changed = false;
+
+            foreach ($images as &$img) {
+                $position = $img['position'] ?? 0;
+                $ghlUrl = $returnedByPosition[$position] ?? null;
+                $currentUrl = $img['url'] ?? null;
+
+                if (! $ghlUrl || $ghlUrl === $currentUrl) {
+                    continue;
+                }
+
+                if ($currentUrl && PublicStorageUrl::isOwnStoragePath($currentUrl)) {
+                    $filesToDelete[] = PublicStorageUrl::diskRelativePath($currentUrl);
+                }
+
+                $img['url'] = $ghlUrl;
+                $changed = true;
+            }
+            unset($img);
+
+            if (! $changed) {
+                return;
+            }
+
+            $product->update(['images' => $images]);
+
+            Log::info('GHL service image sync: replaced local image(s) with Lead Connector-returned URL(s)', [
+                'product_id' => $product->id,
+                'positions' => array_keys($returnedByPosition),
+            ]);
+
+            // Only delete local files after the Lead-Connector-returned URL
+            // has been successfully persisted above — never before.
+            $disk = Storage::disk('public');
+            foreach ($filesToDelete as $relativePath) {
+                try {
+                    $disk->delete($relativePath);
+                } catch (\Exception $e) {
+                    Log::warning('GHL service image sync: failed to delete now-superseded local file', [
+                        'product_id' => $product->id,
+                        'path' => $relativePath,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('GHL service image sync: failed to reconcile response images — local image/DB value left untouched', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
         }
-
-        // Cache hit — local image unchanged since last push
-        if ($product->ghl_image_url && str_contains($product->ghl_image_url, 'cdn.filesafe.space')) {
-            return $product->ghl_image_url;
-        }
-
-        // Image is itself already a GHL CDN URL — cache and return
-        if (str_contains($product->image, 'cdn.filesafe.space')) {
-            $product->update(['ghl_image_url' => $product->image]);
-
-            return $product->image;
-        }
-
-        // Local storage path — upload the file
-        if (str_starts_with($product->image, '/storage/')) {
-            return $this->uploadLocalImage($product);
-        }
-
-        // Full public HTTP URL (e.g. external CDN already) — use as-is
-        if (str_starts_with($product->image, 'http')) {
-            return $product->image;
-        }
-
-        // Anything else (bare filename, unknown scheme) — skip; never send to GHL
-        Log::warning('GHL image push skipped — unrecognised image format', [
-            'product_id' => $product->id,
-            'image' => $product->image,
-        ]);
-
-        return null;
     }
 
-    // ── Private ───────────────────────────────────────────────────────────────
-
-    private function uploadLocalImage(EngageProduct $product): ?string
+    /** @return array<int, string> Lead Connector-returned image URL keyed by position. */
+    private function extractReturnedImageUrls(array $service): array
     {
-        $disk = Storage::disk('public');
-        $relativePath = ltrim(substr($product->image, strlen('/storage')), '/');
+        $byPosition = [];
 
-        if (! $disk->exists($relativePath)) {
-            Log::warning('GHL image push skipped — local file not found', [
-                'product_id' => $product->id,
-                'path' => $product->image,
-            ]);
-
-            return null;
+        if (! empty($service['coverImage']) && is_string($service['coverImage'])) {
+            $byPosition[0] = $service['coverImage'];
         }
 
-        $localPath = $disk->path($relativePath);
-        $filename = basename($localPath);
-        $mimeType = mime_content_type($localPath) ?: 'image/jpeg';
+        if (! empty($service['images']) && is_array($service['images'])) {
+            foreach ($service['images'] as $i => $returnedImg) {
+                if (! is_array($returnedImg) || empty($returnedImg['url']) || ! is_string($returnedImg['url'])) {
+                    continue;
+                }
 
-        Log::info('GHL image push started', [
-            'product_id' => $product->id,
-            'direction' => 'push',
-            'local_path' => $product->image,
-        ]);
+                $position = $returnedImg['position'] ?? $i;
+                $byPosition[$position] = $returnedImg['url'];
+            }
+        }
+
+        return $byPosition;
+    }
+
+    /**
+     * 2026-08-31: the real, deterministic fix — confirmed against Lead
+     * Connector's own published API reference
+     * (marketplace.gohighlevel.com/docs/ghl/medias/upload-media-content/)
+     * that `PUT calendars/services/{id}` does NOT itself fetch-and-rehost
+     * an arbitrary image URL sent in `coverImage`/`images[]` — it can just
+     * echo back the exact same local URL unchanged (confirmed live from a
+     * real production screenshot). The only documented way to get a real
+     * Lead-Connector-hosted URL is to explicitly upload the image first via
+     * `POST medias/upload-file` (see `GhlClient::uploadMediaFromUrl()`),
+     * then send *that* returned URL in the service-update payload.
+     *
+     * Called BEFORE the outbound payload is built in
+     * `GhlServiceSyncService::pushServiceUpdateToGhl()`/
+     * `buildServiceUpdatePayload()`, so the very same save already carries
+     * a real hosted URL — this supersedes relying on the PUT's own response
+     * or a follow-up GET to happen to reflect one.
+     *
+     * Every image whose current URL is genuinely one of this app's own
+     * local files (`PublicStorageUrl::isOwnStoragePath()`) is uploaded via
+     * the hosted-URL mode (Lead Connector fetches `$url` itself — no local
+     * file bytes are read or attached here); an already-external URL
+     * (already hosted by Lead Connector from a prior save, or pulled in
+     * from Lead Connector directly) is left completely untouched and never
+     * re-uploaded, so a save with nothing new to host is a cheap no-op.
+     *
+     * Each image is handled independently and defensively: a failure
+     * uploading one image (network blip, Lead Connector briefly
+     * unreachable) is logged and that one image's local URL is left
+     * exactly as-is, to retry on the next save — it never aborts the
+     * other images, and never aborts the caller's own save, since the
+     * real `PUT calendars/services/{id}` call doesn't actually depend on
+     * this step succeeding at all.
+     */
+    public function ensureImagesHostedOnGhl(EngageProduct $product): void
+    {
+        $images = $product->images ?? [];
+
+        if ($images === []) {
+            return;
+        }
+
+        $changed = false;
+        $filesToDelete = [];
+
+        foreach ($images as &$img) {
+            $url = $img['url'] ?? null;
+
+            if (! $url || ! PublicStorageUrl::isOwnStoragePath($url)) {
+                continue;
+            }
+
+            try {
+                $result = $this->client->uploadMediaFromUrl($url, $img['name'] ?? $product->name);
+                $filesToDelete[] = PublicStorageUrl::diskRelativePath($url);
+                $img['url'] = $result['url'];
+                $changed = true;
+
+                Log::info('GHL media upload (hosted URL) succeeded for a service image', [
+                    'product_id' => $product->id,
+                    'position' => $img['position'] ?? null,
+                    'ghl_url' => $result['url'],
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('GHL media upload (hosted URL) failed for one service image — left local, will retry on next save', [
+                    'product_id' => $product->id,
+                    'position' => $img['position'] ?? null,
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        unset($img);
+
+        if (! $changed) {
+            return;
+        }
 
         try {
-            $uploadResponse = $this->client->uploadFile($localPath, $filename, $mimeType);
-
-            Log::info('GHL image upload raw response', [
-                'product_id' => $product->id,
-                'direction' => 'push',
-                'response' => $uploadResponse,
-            ]);
-
-            // GHL v2: { "uploadedFiles": { "filename.jpg": "https://cdn..." } }
-            $cdnUrl = null;
-            if (! empty($uploadResponse['uploadedFiles']) && is_array($uploadResponse['uploadedFiles'])) {
-                $cdnUrl = array_values($uploadResponse['uploadedFiles'])[0] ?? null;
-            }
-            // Older / fallback response shapes
-            $cdnUrl ??= $uploadResponse['url'] ?? $uploadResponse['fileUrl'] ?? null;
-
-            if (! $cdnUrl) {
-                throw new \RuntimeException(
-                    'No CDN URL in GHL upload response: '.json_encode($uploadResponse)
-                );
-            }
-
-            $product->update(['ghl_image_url' => $cdnUrl]);
-
-            Log::info('GHL image push succeeded', [
-                'product_id' => $product->id,
-                'direction' => 'push',
-                'cdn_url' => $cdnUrl,
-            ]);
-
-            return $cdnUrl;
+            $product->update(['images' => $images]);
         } catch (\Exception $e) {
-            Log::error('GHL image push failed', [
+            // The DB write itself failed — none of the uploaded-but-not-
+            // yet-persisted URLs are used, and no local file is deleted,
+            // so nothing is lost; the images simply stay local and this
+            // whole step retries on the next save.
+            Log::error('GHL media upload: uploaded to Lead Connector but failed to persist the new URL(s) locally — local image/DB value left untouched', [
                 'product_id' => $product->id,
-                'direction' => 'push',
                 'error' => $e->getMessage(),
             ]);
 
-            return null;
+            return;
+        }
+
+        // Only delete local files after the Lead-Connector-hosted URL has
+        // been successfully persisted above — never before.
+        $disk = Storage::disk('public');
+        foreach ($filesToDelete as $relativePath) {
+            try {
+                $disk->delete($relativePath);
+            } catch (\Exception $e) {
+                Log::warning('GHL media upload: failed to delete now-hosted local file', [
+                    'product_id' => $product->id,
+                    'path' => $relativePath,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
+
+    /**
+     * 2026-08-31, explicit user direction: a Manage Service gallery image
+     * upload must never touch this app's own local storage at all —
+     * uploaded DIRECTLY to Lead Connector's media library the moment it's
+     * added, so `images[]` only ever gains a real `storage.googleapis.com`
+     * -style URL, never a `{APP_URL}/storage/products/...` one.
+     *
+     * Deliberately has NO local-storage fallback: if the Lead Connector
+     * upload fails, this throws and the add-image action itself fails —
+     * per the explicit "don't use my local stored files" requirement,
+     * silently falling back to a local copy would be exactly the behavior
+     * being asked to remove. The caller (ProductController::addImage())
+     * surfaces the failure as a normal error response; nothing is written
+     * to the database and no local file is ever created.
+     *
+     * `ensureImagesHostedOnGhl()` above remains in place unchanged — it's
+     * the self-heal fallback for images that already exist locally (either
+     * from before this change, or from a goods product's own separate
+     * upload path), not a replacement for it.
+     */
+    public function addServiceImageDirectlyToGhl(EngageProduct $product, UploadedFile $image): EngageProduct
+    {
+        $contents = $image->get();
+        $filename = $image->getClientOriginalName() ?: (Str::random(20).'.'.($image->extension() ?: 'jpg'));
+        $mimeType = $image->getMimeType() ?: 'application/octet-stream';
+
+        $result = $this->client->uploadRawFileToMediaLibrary($contents, $filename, $mimeType);
+
+        $images = $product->images ?? [];
+        $nextPosition = empty($images) ? 0 : (max(array_column($images, 'position')) + 1);
+        $images[] = [
+            '_id' => $result['fileId'] ?? null,
+            'url' => $result['url'],
+            'name' => $product->name,
+            'position' => $nextPosition,
+        ];
+
+        $product->update(['images' => $images]);
+
+        Log::info('GHL media upload: service gallery image uploaded directly, never touched local storage', [
+            'product_id' => $product->id,
+            'position' => $nextPosition,
+            'ghl_url' => $result['url'],
+        ]);
+
+        return $product->fresh();
+    }
+
+    // ── Private ───────────────────────────────────────────────────────────────
 
     private function extensionFromMime(string $mime): ?string
     {
