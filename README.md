@@ -1,6 +1,6 @@
 # Campground POS — Backend API
 
-Laravel 13 REST API for a campground point-of-sale system with multi-campground (SaaS) support and GoHighLevel CRM integration.
+Laravel 13 REST API for a campground point-of-sale system with multi-campground (SaaS) support and Lead Connector CRM integration.
 
 ## Requirements
 
@@ -74,7 +74,7 @@ All endpoints are prefixed with `/api/v1`.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/webhooks/ghl` | No | GoHighLevel webhook receiver |
+| POST | `/webhooks/ghl` | No | Lead Connector webhook receiver |
 
 ### Products (unified campsites + inventory)
 
@@ -135,15 +135,15 @@ All endpoints are prefixed with `/api/v1`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/settings/engage` | Get GoHighLevel (Engage) integration settings |
+| GET | `/settings/engage` | Get Lead Connector integration settings |
 | POST | `/settings/engage` | Save Engage settings |
 | GET | `/settings/countries` | List countries |
 | GET | `/settings/custom-fields` | List custom fields (filter: `?entity_type=...`) |
 | POST | `/settings/custom-fields` | Create custom field |
 
-## GoHighLevel Integration
+## Lead Connector Integration
 
-Two-way sync with GoHighLevel CRM:
+Two-way sync with Lead Connector CRM:
 
 - **Inbound webhooks** (`POST /api/v1/webhooks/ghl`) receive contact/opportunity updates from GHL
 - **Outbound sync** (`GhlService` + `GhlClient`) pushes customer and booking data to GHL

@@ -9,7 +9,7 @@
 
 ## Overview
 
-A campground vacation booking POS with GoHighLevel (GHL) CRM integration. Everything sellable/bookable lives in one `products` table, split conceptually into:
+A campground vacation booking POS with Lead Connector CRM integration. Everything sellable/bookable lives in one `products` table, split conceptually into:
 - **Physical/Digital Products** (`product_type: PHYSICAL` / `DIGITAL`) — sellable merchandise, no booking.
 - **Rental Services** (`product_type: SERVICE`, one-to-one `Rental` row) — bookable campsites, cabins, glamping, RV sites.
 

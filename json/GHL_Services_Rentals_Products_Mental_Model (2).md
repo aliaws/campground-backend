@@ -1,4 +1,4 @@
-# GoHighLevel Services, Rentals, Products & Variants — Mental Model & POS Integration Research
+# Lead Connector Services, Rentals, Products & Variants — Mental Model & POS Integration Research
 
 **Purpose:** Nail down exactly how GHL's Services, Rentals, Products, Categories, and Variants relate to each other under the hood, so you can build a custom POS/booking app on top of the API without getting bitten by ID mismatches.
 

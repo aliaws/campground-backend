@@ -4,7 +4,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Engage / GoHighLevel Settings (seeded into engage_settings)
+    | Lead Connector Settings (seeded into engage_settings)
     |--------------------------------------------------------------------------
     |
     | `tenant_id` remains as the config key used by EngageSettingSeeder (database/
