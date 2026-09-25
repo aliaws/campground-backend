@@ -337,6 +337,12 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        // Staff sidebar menu manager (label/visibility/order, platform-global).
+        'menu.manage' => [
+            'group' => 'config', 'label' => 'Manage the staff sidebar menu',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         // Org-level config (owner/admin)
         'custom_field.view' => [
             'group' => 'config', 'label' => 'View custom fields',

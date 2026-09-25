@@ -147,6 +147,9 @@ Route::prefix('v1')->group(function () {
     // own row.
     Route::middleware('auth:api')->group(function () {
         Route::get('/permissions', [PermissionController::class, 'index']);
+        // Staff sidebar menu config (label/visibility/order) — read by every
+        // staff Sidebar; edited only via PUT /superadmin/menu-items.
+        Route::get('/menu-items', [\App\Http\Controllers\Api\V1\MenuItemController::class, 'index']);
     });
 
     // Tier 1 — org-scoped day-to-day operations: owner, admin, staff.
@@ -373,6 +376,9 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:cms.pages.update');
         Route::delete('/pages/{slug}/image', [CmsPageController::class, 'deleteImage'])
             ->middleware('permission:cms.pages.update');
+
+        Route::put('/menu-items', [\App\Http\Controllers\Api\V1\MenuItemController::class, 'update'])
+            ->middleware('permission:menu.manage');
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.
