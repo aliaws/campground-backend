@@ -48,6 +48,7 @@ class ProductResource extends JsonResource
             // resolveBaseRental() convenience-field pattern as
             // service_category_id/service_category_name above.
             'booking_period_type' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_period_type),
+            'max_guests' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->max_guests),
             'booking_settings' => $this->when($this->isRental(), fn () => $this->resolveBaseRental()?->booking_settings),
             // Inventory & Pricing tab — real Lead Connector `isVariantsEnabled`
             // flag (from the base listing's own detail response, never a

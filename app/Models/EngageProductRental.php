@@ -68,6 +68,7 @@ class EngageProductRental extends Model
         'pricing_rules',
         'is_variants_enabled',
         'has_quantity_enabled',
+        'max_guests',
     ];
 
     protected function casts(): array
@@ -83,6 +84,7 @@ class EngageProductRental extends Model
             'pricing_rules' => 'array',
             'is_variants_enabled' => 'boolean',
             'has_quantity_enabled' => 'boolean',
+            'max_guests' => 'integer',
         ];
     }
 

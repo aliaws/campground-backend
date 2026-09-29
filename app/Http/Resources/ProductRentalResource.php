@@ -26,6 +26,7 @@ class ProductRentalResource extends JsonResource
             'service_category_id' => $this->service_category_id,
             'service_id' => $this->service_id,
             'booking_period_type' => $this->booking_period_type,
+            'max_guests' => $this->max_guests,
             'booking_settings' => $this->booking_settings,
             // Inventory & Pricing tab — the raw Advanced Pricing discount
             // rules pulled from Lead Connector for this specific rental row

@@ -136,6 +136,9 @@ class UpdateProductRequest extends FormRequest
             // through this validation at all, so a real Lead Connector
             // value outside these lists can still be pulled/stored — this
             // only ever blocks a *manual* save from submitting one.
+            // Local-only guest capacity for the whole listing — null = any
+            // number of guests (see ProductService::update()).
+            'max_guests' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'booking_period_type' => ['nullable', Rule::in(['date-time-selection', 'date-selection', 'fixed'])],
             'booking_settings' => ['nullable', 'array'],
             'booking_settings.minDuration' => ['nullable', 'numeric', 'min:0'],

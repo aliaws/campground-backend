@@ -32,7 +32,7 @@ class PublicServiceController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $filters = $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'sort', 'page', 'per_page']);
+        $filters = $request->only(['search', 'category_id', 'service_category_id', 'min_price', 'max_price', 'guests', 'sort', 'page', 'per_page']);
         $filters['service_category_ids'] = $request->input('service_category_ids', []);
         $filters['organization_ids'] = $request->input('organization_ids', []);
 

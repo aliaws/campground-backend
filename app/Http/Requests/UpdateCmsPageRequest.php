@@ -133,11 +133,43 @@ class UpdateCmsPageRequest extends FormRequest
                 // fallback convention as the dark-mode color pairs above.
                 'content.hero.text_color' => ['nullable', 'string', 'max:20'],
                 'content.hero.text_color_dark' => ['nullable', 'string', 'max:20'],
+                'content.hero.badge.text_color' => ['nullable', 'string', 'max:30'],
+                'content.hero.badge.text_color_dark' => ['nullable', 'string', 'max:30'],
+                // Raw CSS `background` value layered over the hero (e.g. a
+                // darkening linear-gradient) — same super-admin-only trust
+                // level as background_image_css.
+                'content.hero.overlay_css' => ['nullable', 'string', 'max:2000'],
+                // Homepage-wide palette — overrides the theme's own color
+                // tokens on the homepage routes only. All nullable: null
+                // keeps the site's normal token for that mode.
+                'content.theme' => ['required', 'array'],
+                'content.theme.background_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.background_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.surface_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.surface_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.border_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.border_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.accent_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.accent_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.accent_hover_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.accent_hover_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.text_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.text_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.muted_text_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.muted_text_color_dark' => ['nullable', 'string', 'max:30'],
+                'content.theme.highlight_color' => ['nullable', 'string', 'max:30'],
+                'content.theme.highlight_color_dark' => ['nullable', 'string', 'max:30'],
                 'content.rentals_section' => ['required', 'array'],
                 'content.rentals_section.eyebrow_text' => ['required', 'string', 'max:100'],
                 'content.rentals_section.heading' => ['required', 'string', 'max:200'],
-                'content.rentals_section.show_site_map_link' => ['required', 'boolean'],
-                'content.rentals_section.site_map_link_text' => ['required', 'string', 'max:100'],
+                // Listing/Map view tabs (each its own URL: / and
+                // /rentals/map) — replaced the old "View site map" modal
+                // link and its show_site_map_link/site_map_link_text keys.
+                'content.rentals_section.show_view_tabs' => ['required', 'boolean'],
+                'content.rentals_section.listing_tab_label' => ['required', 'string', 'max:50'],
+                'content.rentals_section.map_tab_label' => ['required', 'string', 'max:50'],
+                'content.rentals_section.show_category_badge' => ['required', 'boolean'],
+                'content.rentals_section.book_button_text' => ['required', 'string', 'max:50'],
                 // The search/filter card that sits between the hero and
                 // "Our Rentals" on the live homepage — was entirely
                 // hardcoded on the frontend before this, no CMS field for
@@ -156,8 +188,8 @@ class UpdateCmsPageRequest extends FormRequest
                 // null on either means "use the card's default look",
                 // same fallback convention as every other optional color
                 // pair in this CMS.
-                'content.search_filters.background_color' => ['nullable', 'string', 'max:20'],
-                'content.search_filters.background_color_dark' => ['nullable', 'string', 'max:20'],
+                'content.search_filters.background_color' => ['nullable', 'string', 'max:30'],
+                'content.search_filters.background_color_dark' => ['nullable', 'string', 'max:30'],
                 'content.search_filters.text_color' => ['nullable', 'string', 'max:20'],
                 'content.search_filters.text_color_dark' => ['nullable', 'string', 'max:20'],
                 // Independent show/hide per filter field — no coupling
@@ -168,6 +200,11 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.search_filters.show_checkout' => ['required', 'boolean'],
                 'content.search_filters.show_min_price' => ['required', 'boolean'],
                 'content.search_filters.show_max_price' => ['required', 'boolean'],
+                'content.search_filters.guests_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.show_guests' => ['required', 'boolean'],
+                'content.search_filters.max_guests' => ['required', 'integer', 'min:1', 'max:50'],
+                'content.search_filters.search_button_text' => ['required', 'string', 'max:100'],
+                'content.search_filters.show_search_button' => ['required', 'boolean'],
                 // The filter row inside the "View site map" modal
                 // (components/map/SiteMapExplorer.tsx) — same labels +
                 // per-field visibility shape as search_filters above, for

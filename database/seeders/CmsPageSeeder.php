@@ -3,7 +3,9 @@
 namespace Database\Seeders;
 
 use App\Models\CmsPage;
+use App\Support\PublicStorageUrl;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -76,6 +78,20 @@ class CmsPageSeeder extends Seeder
         foreach ($pages as $page) {
             CmsPage::query()->updateOrCreate(['slug' => $page['slug']], $page);
         }
+    }
+
+    /**
+     * Copies a bundled design image (database/seeders/assets/cms/) onto the
+     * public disk and returns its absolute URL — so a fresh environment
+     * (staging included) gets the real hero photo/logo files alongside the
+     * content that points at them. Overwrites on re-run, keyed by filename.
+     */
+    private function seedImage(string $file): string
+    {
+        $path = 'cms-images/seed/'.$file;
+        Storage::disk('public')->put($path, file_get_contents(database_path('seeders/assets/cms/'.$file)));
+
+        return PublicStorageUrl::absolute(Storage::url($path));
     }
 
     /**
@@ -261,22 +277,23 @@ TEXT;
     private function headerContent(): array
     {
         return [
-            'logo_url' => null,
+            // Whispering Pines brand mark — dark pine tree with an orange
+            // middle tier, on a pale sage tile (see seedImage()).
+            'logo_url' => $this->seedImage('logo-dark-tree.svg'),
             'site_title' => [
-                'primary_text' => 'Campground',
-                'secondary_text' => 'Rentals',
-                'primary_color' => '#1b1d21',
-                'secondary_color' => '#135846',
-                'primary_color_dark' => '#f8f8f8',
-                'secondary_color_dark' => '#4ade80',
+                'primary_text' => 'Whispering Pines',
+                'secondary_text' => 'Campground',
+                'primary_color' => '#1c2b23',
+                'secondary_color' => '#c8704a',
+                'primary_color_dark' => '#f6f7f6',
+                'secondary_color_dark' => '#d98a5f',
             ],
-            // Null background means "keep the box's default bg-primary
-            // token color" — today's exact look; 12 matches the box's
-            // previous hardcoded rounded-xl corner radius.
+            // Same pale sage tile in both modes (it reads well on the dark
+            // header too, and the mark itself is dark).
             'logo_style' => [
-                'background_color' => null,
+                'background_color' => '#e9eee9',
                 'background_color_dark' => null,
-                'border_radius' => 12,
+                'border_radius' => 10,
             ],
             'menu_items' => [
                 ['id' => 'site-map', 'label' => 'Site Map', 'href' => '/rentals/map', 'sort_order' => 1],
@@ -294,10 +311,12 @@ TEXT;
                 'store_switcher_position' => 'right',
                 'login_order' => ['customer', 'staff'],
             ],
+            // Light mode keeps the default white navbar; dark mode uses
+            // the design's deep-forest header bar (#002716).
             'style' => [
-                'background_type' => 'default',
-                'background_color' => null,
-                'background_color_dark' => null,
+                'background_type' => 'solid',
+                'background_color' => '#ffffff',
+                'background_color_dark' => '#002716',
                 'gradient_from' => null,
                 'gradient_from_dark' => null,
                 'gradient_to' => null,
@@ -305,17 +324,13 @@ TEXT;
                 'gradient_direction' => 'to right',
                 'background_image_url' => null,
                 'background_image_css' => null,
-                // Matches navLinkStyle()'s previous hardcoded light/dark
-                // split exactly (app/(customer)/layout.tsx) — the same
-                // forest green in light mode, a brighter emerald in dark
-                // mode so it stays readable against the dark navbar.
                 'hover_color' => '#135846',
-                'hover_color_dark' => '#4ade80',
+                'hover_color_dark' => '#ffffff',
             ],
-            // The nav menu items' own idle text color — null means "use
-            // the theme's own default", i.e. today's exact look.
+            // Idle nav link color — the design's muted sage in dark mode;
+            // null in light mode keeps the theme's default text color.
             'menu_text_color' => null,
-            'menu_text_color_dark' => null,
+            'menu_text_color_dark' => '#b0b5b2',
         ];
     }
 
@@ -323,21 +338,20 @@ TEXT;
     private function footerContent(): array
     {
         return [
-            'logo_url' => null,
+            // Light pine tree variant on a dark tile, for the dark footer.
+            'logo_url' => $this->seedImage('logo-light-tree.svg'),
             'site_title' => [
-                'primary_text' => 'Campground',
-                'secondary_text' => 'Rentals',
+                'primary_text' => 'Whispering Pines',
+                'secondary_text' => 'Campground',
                 'primary_color' => '#ffffff',
-                'secondary_color' => '#ffffff',
+                'secondary_color' => '#c8704a',
                 'primary_color_dark' => null,
                 'secondary_color_dark' => null,
             ],
-            // Same default as the header's logo_style — null background =
-            // the box's default bg-white/10 token color, 12px radius.
             'logo_style' => [
-                'background_color' => null,
+                'background_color' => '#1c2b23',
                 'background_color_dark' => null,
-                'border_radius' => 12,
+                'border_radius' => 10,
             ],
             'description' => 'Cabins, campsites and glamping stays — book your next escape in minutes and pay securely online.',
             'sections' => [
@@ -369,10 +383,12 @@ TEXT;
             'email' => 'stay@campgroundrentals.com',
             'contact_fields_order' => ['address', 'phone', 'email'],
             'column_order' => ['brand', 'explore', 'legal', 'contact'],
-            'copyright_text' => '© {year} Campground Rentals. All bookings are subject to our cancellation policy.',
+            'copyright_text' => '© {year} Whispering Pines Campground. All bookings are subject to our cancellation policy.',
+            // The design's dark evergreen footer, same in both themes (its
+            // text is always light).
             'style' => [
-                'background_type' => 'default',
-                'background_color' => null,
+                'background_type' => 'solid',
+                'background_color' => '#0c2f24',
                 'background_color_dark' => null,
                 'gradient_from' => null,
                 'gradient_from_dark' => null,
@@ -388,37 +404,56 @@ TEXT;
     }
 
     /**
-     * Matches the homepage's actual current hardcoded hero AND "Our
-     * Rentals" section exactly — the "apply what we have right now"
-     * starting point super-admin then edits from, same convention as
-     * headerContent()/footerContent() above. See app/(customer)/page.tsx's
-     * previous hardcoded JSX for what these values mirror; `{store}` in
-     * `hero.subtext` is a token (same convention as
-     * footer.copyright_text's `{year}`) the frontend expands to
-     * " at {selected store name}" when a store is selected, or removes
-     * entirely otherwise.
+     * The homepage, matching the campground design export (hero photo with
+     * a dark gradient overlay, a glass search card, Listing/Map view tabs,
+     * and the deep-forest dark palette). `{store}` in `hero.subtext` is a
+     * token the frontend expands to " at {selected store name}". `theme`
+     * only overrides dark mode (light values null = normal light theme);
+     * the hero itself sits on a photo, so it looks the same in both.
+     * Frontend fallback copy: lib/cms/homePageDefaults.ts — keep in sync.
      */
     private function homePageContent(): array
     {
         return [
+            'theme' => [
+                'background_color' => null,
+                'background_color_dark' => '#002716',
+                'surface_color' => null,
+                'surface_color_dark' => '#01331f',
+                'border_color' => null,
+                'border_color_dark' => '#004e31',
+                'accent_color' => null,
+                'accent_color_dark' => '#004128',
+                'accent_hover_color' => null,
+                'accent_hover_color_dark' => '#005c3b',
+                'text_color' => null,
+                'text_color_dark' => '#f6f7f6',
+                'muted_text_color' => null,
+                'muted_text_color_dark' => '#b0b5b2',
+                'highlight_color' => null,
+                'highlight_color_dark' => '#22a06b',
+            ],
             'hero' => [
                 'badge' => [
-                    'icon' => 'pin',
-                    'text' => 'Explore the outdoors',
+                    'icon' => 'compass',
+                    'text' => 'Explore the Outdoors',
+                    'text_color' => '#ffdfab',
+                    'text_color_dark' => null,
                 ],
                 'heading' => [
                     'primary_text' => 'Find your perfect',
                     'secondary_text' => 'campsite getaway',
                     'primary_color' => '#ffffff',
-                    'secondary_color' => '#fcd34d',
+                    'secondary_color' => '#edb54c',
                     'primary_color_dark' => null,
                     'secondary_color_dark' => null,
                 ],
                 'subtext' => 'Browse and book campsites, cabins and glamping stays{store} — no account needed.',
-                'text_color' => null,
+                'text_color' => '#dee1df',
                 'text_color_dark' => null,
+                'overlay_css' => 'linear-gradient(180deg, rgba(6, 30, 21, 0.85) 0%, rgba(10, 44, 31, 0.75) 50%, rgba(6, 26, 18, 0.95) 100%)',
                 'style' => [
-                    'background_type' => 'default',
+                    'background_type' => 'image',
                     'background_color' => null,
                     'background_color_dark' => null,
                     'gradient_from' => null,
@@ -426,30 +461,27 @@ TEXT;
                     'gradient_to' => null,
                     'gradient_to_dark' => null,
                     'gradient_direction' => 'to right',
-                    'background_image_url' => null,
-                    // A hero background photo is rendered as a real <img>
-                    // (see app/(customer)/page.tsx), not a CSS
-                    // background-image — 'cover' matches the exact sizing
-                    // the CSS approach already used before this field
-                    // existed, so a fresh upload looks identical either way.
-                    'background_image_css' => null,
+                    'background_image_url' => $this->seedImage('home-hero.webp'),
+                    'background_image_css' => 'object-fit: cover;',
                     'hover_color' => null,
                     'hover_color_dark' => null,
                 ],
             ],
             'rentals_section' => [
-                'eyebrow_text' => 'Our rentals',
+                'eyebrow_text' => 'Our Rentals',
                 'heading' => 'Popular stays to book now',
-                'show_site_map_link' => true,
-                'site_map_link_text' => 'View site map',
+                'show_view_tabs' => true,
+                'listing_tab_label' => 'Listing',
+                'map_tab_label' => 'Map',
+                'show_category_badge' => true,
+                'book_button_text' => 'Book Site',
             ],
-            // The search/filter card between the hero and "Our Rentals" —
-            // matches its previous hardcoded labels/placeholders exactly,
-            // same "seed the current live output as the default" precedent
-            // as shopContent() below.
+            // The glass search card over the hero photo. The design shows
+            // Location/Check-in/Check-out/Guests + a "Find Campsites" CTA;
+            // the min/max price fields still exist, just hidden by default.
             'search_filters' => [
-                'search_label' => 'Search',
-                'search_placeholder' => 'Search rentals...',
+                'search_label' => 'Location or Site',
+                'search_placeholder' => 'Search rentals, tent or RV...',
                 'checkin_label' => 'Check-in',
                 'checkout_label' => 'Check-out',
                 'min_price_label' => 'Min Price',
@@ -457,24 +489,22 @@ TEXT;
                 'max_price_label' => 'Max Price',
                 'max_price_placeholder' => 'Any',
                 'reset_filters_label' => 'Reset filters',
-                // Null on all four means "use the card's own default
-                // theme look" — today's exact bg-card/text-card-foreground
-                // appearance, unchanged until a super-admin sets one.
-                'background_color' => null,
+                'background_color' => 'rgba(0, 39, 22, 0.6)',
                 'background_color_dark' => null,
-                'text_color' => null,
+                'text_color' => '#b0b5b2',
                 'text_color_dark' => null,
-                // Every field visible by default — today's exact look,
-                // unchanged until a super-admin hides one.
                 'show_search' => true,
                 'show_checkin' => true,
                 'show_checkout' => true,
-                'show_min_price' => true,
-                'show_max_price' => true,
+                'show_min_price' => false,
+                'show_max_price' => false,
+                'guests_label' => 'Guests',
+                'show_guests' => true,
+                'max_guests' => 12,
+                'search_button_text' => 'Find Campsites',
+                'show_search_button' => true,
             ],
-            // The filter row inside the "View site map" modal — same
-            // "seed today's exact hardcoded look" precedent as
-            // search_filters above.
+            // The filter row inside the Map view tab.
             'site_map_filters' => [
                 'checkin_label' => 'Check-in',
                 'checkout_label' => 'Check-out',

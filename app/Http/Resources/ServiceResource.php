@@ -45,6 +45,7 @@ class ServiceResource extends JsonResource
             'maxQuantity' => $product->quantity ?? 1,
             'images' => $product->localImagesFallback(),
             'serviceCategoryId' => $defaultRental?->service_category_id,
+            'maxGuests' => $defaultRental?->max_guests,
             'serviceCategoryName' => $defaultRental?->serviceCategory?->name,
             'categoryName' => $product->categories?->first()?->name,
             'variantName' => $defaultRental?->name ?? 'Regular',

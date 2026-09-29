@@ -131,6 +131,10 @@ class ProductService
         // translation is needed here, only routing it to the right row.
         $hasServiceCategoryUpdate = array_key_exists('service_category_id', $data);
         $serviceCategoryGhlId = $data['service_category_id'] ?? null;
+        // Max guests — a whole-listing value (null = any number), written to
+        // every rental row below, same as the service category.
+        $hasMaxGuestsUpdate = array_key_exists('max_guests', $data);
+        $maxGuests = $data['max_guests'] ?? null;
         // Manage Service's Variants tab — never the base/default rental
         // (that's $rentalData above), only the other variant rows.
         $variants = $data['variants'] ?? null;
@@ -138,7 +142,7 @@ class ProductService
             $data['category_ids'], $data['amenity_ids'], $data['feature_ids'], $data['variants'],
             $data['listing_price'], $data['service_duration_unit'], $data['security_deposit_amount'],
             $data['service_category_id'], $data['booking_period_type'], $data['booking_settings'],
-            $data['is_variants_enabled'], $data['has_quantity_enabled'],
+            $data['is_variants_enabled'], $data['has_quantity_enabled'], $data['max_guests'],
         );
 
         $product->update($data);
@@ -184,6 +188,10 @@ class ProductService
         // is now kept in sync with the same value in one update.
         if ($hasServiceCategoryUpdate && $product->isRental()) {
             $product->rentals()->update(['service_category_id' => $serviceCategoryGhlId]);
+        }
+
+        if ($hasMaxGuestsUpdate && $product->isRental()) {
+            $product->rentals()->update(['max_guests' => $maxGuests]);
         }
 
         // Keep both the product's own is_active and the base rental's
@@ -527,6 +535,15 @@ class ProductService
             $query->whereHas('rentals', fn (Builder $q) => $q->whereIn(
                 'service_category_id',
                 $ghlCategoryIds->isEmpty() ? ['__none__'] : $ghlCategoryIds
+            ));
+        }
+
+        // Guests filter (homepage search card) — keeps listings whose base
+        // rental takes at least this many guests, or has no limit set.
+        if (! empty($filters['guests']) && (int) $filters['guests'] > 0) {
+            $guests = (int) $filters['guests'];
+            $query->whereHas('defaultRental', fn (Builder $q) => $q->where(
+                fn (Builder $w) => $w->whereNull('max_guests')->orWhere('max_guests', '>=', $guests)
             ));
         }
 
