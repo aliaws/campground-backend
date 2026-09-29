@@ -472,6 +472,24 @@ TEXT;
                 'show_min_price' => true,
                 'show_max_price' => true,
             ],
+            // The filter row inside the "View site map" modal — same
+            // "seed today's exact hardcoded look" precedent as
+            // search_filters above.
+            'site_map_filters' => [
+                'checkin_label' => 'Check-in',
+                'checkout_label' => 'Check-out',
+                'min_price_label' => 'Min Price',
+                'min_price_placeholder' => '$0',
+                'max_price_label' => 'Max Price',
+                'max_price_placeholder' => 'Any',
+                'reset_filters_label' => 'Reset filters',
+                'site_type_label' => 'Site Type',
+                'show_checkin' => true,
+                'show_checkout' => true,
+                'show_min_price' => true,
+                'show_max_price' => true,
+                'show_site_type' => true,
+            ],
         ];
     }
 

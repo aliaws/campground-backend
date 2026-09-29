@@ -168,6 +168,25 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.search_filters.show_checkout' => ['required', 'boolean'],
                 'content.search_filters.show_min_price' => ['required', 'boolean'],
                 'content.search_filters.show_max_price' => ['required', 'boolean'],
+                // The filter row inside the "View site map" modal
+                // (components/map/SiteMapExplorer.tsx) — same labels +
+                // per-field visibility shape as search_filters above, for
+                // the map's own Check-in/Check-out/Min/Max Price/Site Type
+                // filters rather than the homepage's own search card.
+                'content.site_map_filters' => ['required', 'array'],
+                'content.site_map_filters.checkin_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.checkout_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.min_price_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.min_price_placeholder' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.max_price_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.max_price_placeholder' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.reset_filters_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.site_type_label' => ['required', 'string', 'max:100'],
+                'content.site_map_filters.show_checkin' => ['required', 'boolean'],
+                'content.site_map_filters.show_checkout' => ['required', 'boolean'],
+                'content.site_map_filters.show_min_price' => ['required', 'boolean'],
+                'content.site_map_filters.show_max_price' => ['required', 'boolean'],
+                'content.site_map_filters.show_site_type' => ['required', 'boolean'],
             ];
         }
 
