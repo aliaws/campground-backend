@@ -6,6 +6,7 @@ use App\Mail\StaffPasswordResetMail;
 use App\Models\EngageUserVerification;
 use App\Models\User;
 use App\Support\ActionJwt;
+use App\Support\PublicStorageUrl;
 use App\Support\SessionJwt;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
@@ -112,7 +113,7 @@ class StaffAccountService
         }
 
         $path = $file->store('avatars', 'public');
-        $user->avatar_url = Storage::url($path);
+        $user->avatar_url = PublicStorageUrl::absolute(Storage::url($path));
         $user->save();
 
         return $user->fresh();

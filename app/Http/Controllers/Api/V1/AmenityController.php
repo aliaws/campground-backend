@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreAmenityRequest;
 use App\Http\Resources\AmenityResource;
 use App\Models\Amenity;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -68,7 +69,7 @@ class AmenityController extends Controller
         $request->validate(['icon' => ['required', 'image', 'max:2048']]);
 
         $path = $request->file('icon')->store('amenity-icons', 'public');
-        $amenity->update(['icon' => Storage::url($path)]);
+        $amenity->update(['icon' => PublicStorageUrl::absolute(Storage::url($path))]);
 
         return response()->json([
             'success' => true,

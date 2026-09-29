@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSiteMapRequest;
 use App\Http\Resources\SiteMapResource;
 use App\Models\SiteMap;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -122,7 +123,7 @@ class SiteMapController extends Controller
         // anything fails partway through.
         DB::transaction(function () use ($siteMap, $path) {
             $siteMap->elements()->delete();
-            $siteMap->update(['image_url' => Storage::url($path)]);
+            $siteMap->update(['image_url' => PublicStorageUrl::absolute(Storage::url($path))]);
         });
 
         return response()->json([

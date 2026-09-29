@@ -70,6 +70,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Public Asset URL
+    |--------------------------------------------------------------------------
+    |
+    | The externally-reachable URL used to build links to anything on the
+    | `public` storage disk — avatars, CMS logos/background images, site
+    | map photos/icons, amenity/feature icons, product/service images.
+    | Distinct from `url` (APP_URL) above: APP_URL is what the backend
+    | itself is configured at (used for Artisan/OAuth callback URLs) and
+    | isn't always what a browser/GHL/etc. can actually reach it as — e.g.
+    | behind a reverse proxy, a container's internal hostname, or a
+    | different public domain than the one the app process believes it's
+    | running on. Falls back to APP_URL when unset, so leaving PUBLIC_URL
+    | out of .env is a no-op — nothing changes unless it's explicitly set.
+    |
+    */
+
+    'public_url' => env('PUBLIC_URL', env('APP_URL', 'http://localhost')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

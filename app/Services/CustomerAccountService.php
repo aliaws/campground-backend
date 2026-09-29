@@ -10,6 +10,7 @@ use App\Models\EngageOrganizationLocation;
 use App\Models\EngageUserVerification;
 use App\Models\User;
 use App\Support\ActionJwt;
+use App\Support\PublicStorageUrl;
 use App\Support\SessionJwt;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -423,7 +424,7 @@ class CustomerAccountService
         }
 
         $path = $file->store('avatars', 'public');
-        $customerUser->avatar_url = Storage::url($path);
+        $customerUser->avatar_url = PublicStorageUrl::absolute(Storage::url($path));
         $customerUser->save();
 
         return $customerUser->fresh();

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateCmsPageRequest;
 use App\Http\Resources\CmsPageResource;
 use App\Models\CmsPage;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -76,23 +77,6 @@ class CmsPageController extends Controller
             Arr::set($data['content'], $key, Arr::get($existing?->content ?? [], $key));
         }
 
-        // The header's Style editor (custom background/hover color) was
-        // removed from the UI — a fixed color doesn't adapt between light
-        // and dark mode, so a custom value always looks wrong in one of
-        // the two. Enforced here too, not just by omission in the
-        // frontend, so a direct API call can't reintroduce it.
-        if ($slug === CmsPage::SLUG_HEADER) {
-            $data['content']['style'] = [
-                'background_type' => 'default',
-                'background_color' => null,
-                'gradient_from' => null,
-                'gradient_to' => null,
-                'gradient_direction' => null,
-                'background_image_url' => null,
-                'hover_color' => '#135846',
-            ];
-        }
-
         $page = CmsPage::query()->updateOrCreate(['slug' => $slug], $data);
 
         Cache::forget(CmsPage::cacheKey($slug));
@@ -123,7 +107,7 @@ class CmsPageController extends Controller
 
         $page = CmsPage::query()->where('slug', $slug)->firstOrFail();
         $path = $request->file('image')->store('cms-images', 'public');
-        $url = Storage::url($path);
+        $url = PublicStorageUrl::absolute(Storage::url($path));
 
         $content = $page->content;
         if ($request->input('type') === 'logo') {

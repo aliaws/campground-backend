@@ -41,7 +41,12 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // PUBLIC_URL (falls back to APP_URL when unset) — see
+            // config/app.php's 'public_url' doc comment for why these can
+            // legitimately differ. This is what Storage::url() actually
+            // builds every stored-file URL from (avatars, CMS logos, site
+            // map images, amenity/feature icons, product/service images).
+            'url' => rtrim(env('PUBLIC_URL', env('APP_URL', 'http://localhost')), '/').'/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

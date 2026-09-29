@@ -50,7 +50,7 @@ class UpdateCmsPageRequest extends FormRequest
         }
 
         if ($slug === CmsPage::SLUG_HEADER) {
-            return $rules + $this->siteTitleRules() + $this->styleRules() + [
+            return $rules + $this->siteTitleRules() + $this->styleRules() + $this->logoStyleRules() + [
                 'content' => ['required', 'array'],
                 'content.menu_items' => ['present', 'array'],
                 'content.menu_items.*.id' => ['required', 'string', 'max:64'],
@@ -63,11 +63,16 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.layout.store_switcher_position' => ['required', 'string', 'in:left,right,after-login'],
                 'content.layout.login_order' => ['required', 'array', 'size:2'],
                 'content.layout.login_order.*' => ['required', 'string', 'in:customer,staff'],
+                // The nav menu items' own idle (non-active/non-hover) text
+                // color — distinct from style.hover_color above, which only
+                // ever controlled the active/hover state.
+                'content.menu_text_color' => ['nullable', 'string', 'max:20'],
+                'content.menu_text_color_dark' => ['nullable', 'string', 'max:20'],
             ];
         }
 
         if ($slug === CmsPage::SLUG_FOOTER) {
-            return $rules + $this->siteTitleRules() + $this->styleRules() + [
+            return $rules + $this->siteTitleRules() + $this->styleRules() + $this->logoStyleRules() + [
                 'content' => ['required', 'array'],
                 'content.description' => ['nullable', 'string', 'max:1000'],
                 'content.sections' => ['required', 'array'],
@@ -133,6 +138,36 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.rentals_section.heading' => ['required', 'string', 'max:200'],
                 'content.rentals_section.show_site_map_link' => ['required', 'boolean'],
                 'content.rentals_section.site_map_link_text' => ['required', 'string', 'max:100'],
+                // The search/filter card that sits between the hero and
+                // "Our Rentals" on the live homepage — was entirely
+                // hardcoded on the frontend before this, no CMS field for
+                // it existed at all.
+                'content.search_filters' => ['required', 'array'],
+                'content.search_filters.search_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.search_placeholder' => ['required', 'string', 'max:100'],
+                'content.search_filters.checkin_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.checkout_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.min_price_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.min_price_placeholder' => ['required', 'string', 'max:100'],
+                'content.search_filters.max_price_label' => ['required', 'string', 'max:100'],
+                'content.search_filters.max_price_placeholder' => ['required', 'string', 'max:100'],
+                'content.search_filters.reset_filters_label' => ['required', 'string', 'max:100'],
+                // The search/filter card's own background+text color —
+                // null on either means "use the card's default look",
+                // same fallback convention as every other optional color
+                // pair in this CMS.
+                'content.search_filters.background_color' => ['nullable', 'string', 'max:20'],
+                'content.search_filters.background_color_dark' => ['nullable', 'string', 'max:20'],
+                'content.search_filters.text_color' => ['nullable', 'string', 'max:20'],
+                'content.search_filters.text_color_dark' => ['nullable', 'string', 'max:20'],
+                // Independent show/hide per filter field — no coupling
+                // enforced between e.g. checkin/checkout, full control is
+                // the point (see CmsPageSearchFiltersContent's own doc).
+                'content.search_filters.show_search' => ['required', 'boolean'],
+                'content.search_filters.show_checkin' => ['required', 'boolean'],
+                'content.search_filters.show_checkout' => ['required', 'boolean'],
+                'content.search_filters.show_min_price' => ['required', 'boolean'],
+                'content.search_filters.show_max_price' => ['required', 'boolean'],
             ];
         }
 
@@ -197,10 +232,40 @@ class UpdateCmsPageRequest extends FormRequest
             "content.{$path}" => ['required', 'array'],
             "content.{$path}.background_type" => ['required', 'string', 'in:default,solid,gradient,image'],
             "content.{$path}.background_color" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.background_color_dark" => ['nullable', 'string', 'max:20'],
             "content.{$path}.gradient_from" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.gradient_from_dark" => ['nullable', 'string', 'max:20'],
             "content.{$path}.gradient_to" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.gradient_to_dark" => ['nullable', 'string', 'max:20'],
             "content.{$path}.gradient_direction" => ['nullable', 'string', 'max:20'],
+            // Raw CSS declarations (e.g. "object-fit: cover; object-position:
+            // center;") applied to the <img> a caller renders for an
+            // 'image' background — only meaningful for a caller that
+            // renders a real <img> (currently just the homepage hero)
+            // rather than a CSS background-image; validated the same
+            // everywhere regardless, since it's harmless/unused where it
+            // doesn't apply. Free text rather than a fixed keyword list, so
+            // more than one property can be set at once.
+            "content.{$path}.background_image_css" => ['nullable', 'string', 'max:2000'],
             "content.{$path}.hover_color" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.hover_color_dark" => ['nullable', 'string', 'max:20'],
+        ];
+    }
+
+    /**
+     * The logo icon box's own background color + corner radius — shared by
+     * header and footer. Null background means "keep the box's existing
+     * default token color", same fallback convention as styleRules() above;
+     * border_radius always has a real value (defaults to 12, today's
+     * rounded-xl look) so it's required, not nullable.
+     */
+    private function logoStyleRules(string $path = 'logo_style'): array
+    {
+        return [
+            "content.{$path}" => ['required', 'array'],
+            "content.{$path}.background_color" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.background_color_dark" => ['nullable', 'string', 'max:20'],
+            "content.{$path}.border_radius" => ['required', 'integer', 'min:0', 'max:100'],
         ];
     }
 }

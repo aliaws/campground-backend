@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreFeatureRequest;
 use App\Http\Resources\FeatureResource;
 use App\Models\Feature;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -66,7 +67,7 @@ class FeatureController extends Controller
         $request->validate(['icon' => ['required', 'image', 'max:2048']]);
 
         $path = $request->file('icon')->store('feature-icons', 'public');
-        $feature->update(['icon' => Storage::url($path)]);
+        $feature->update(['icon' => PublicStorageUrl::absolute(Storage::url($path))]);
 
         return response()->json([
             'success' => true,

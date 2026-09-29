@@ -45,7 +45,7 @@ class PublicStorageUrl
             return $value;
         }
 
-        return rtrim(config('app.url'), '/').'/'.ltrim($value, '/');
+        return rtrim(config('app.public_url'), '/').'/'.ltrim($value, '/');
     }
 
     /**

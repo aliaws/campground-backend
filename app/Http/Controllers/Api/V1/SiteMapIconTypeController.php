@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSiteMapIconTypeRequest;
 use App\Http\Resources\SiteMapIconTypeResource;
 use App\Models\SiteMapIconType;
+use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -31,7 +32,7 @@ class SiteMapIconTypeController extends Controller
 
         $iconType = SiteMapIconType::create([
             'name' => $request->validated('name'),
-            'image_url' => Storage::url($path),
+            'image_url' => PublicStorageUrl::absolute(Storage::url($path)),
             'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
         ]);
 

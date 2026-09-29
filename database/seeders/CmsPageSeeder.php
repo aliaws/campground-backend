@@ -270,6 +270,14 @@ TEXT;
                 'primary_color_dark' => '#f8f8f8',
                 'secondary_color_dark' => '#4ade80',
             ],
+            // Null background means "keep the box's default bg-primary
+            // token color" — today's exact look; 12 matches the box's
+            // previous hardcoded rounded-xl corner radius.
+            'logo_style' => [
+                'background_color' => null,
+                'background_color_dark' => null,
+                'border_radius' => 12,
+            ],
             'menu_items' => [
                 ['id' => 'site-map', 'label' => 'Site Map', 'href' => '/rentals/map', 'sort_order' => 1],
                 ['id' => 'shop', 'label' => 'Shop', 'href' => '/shop', 'sort_order' => 2],
@@ -289,12 +297,25 @@ TEXT;
             'style' => [
                 'background_type' => 'default',
                 'background_color' => null,
+                'background_color_dark' => null,
                 'gradient_from' => null,
+                'gradient_from_dark' => null,
                 'gradient_to' => null,
+                'gradient_to_dark' => null,
                 'gradient_direction' => 'to right',
                 'background_image_url' => null,
+                'background_image_css' => null,
+                // Matches navLinkStyle()'s previous hardcoded light/dark
+                // split exactly (app/(customer)/layout.tsx) — the same
+                // forest green in light mode, a brighter emerald in dark
+                // mode so it stays readable against the dark navbar.
                 'hover_color' => '#135846',
+                'hover_color_dark' => '#4ade80',
             ],
+            // The nav menu items' own idle text color — null means "use
+            // the theme's own default", i.e. today's exact look.
+            'menu_text_color' => null,
+            'menu_text_color_dark' => null,
         ];
     }
 
@@ -310,6 +331,13 @@ TEXT;
                 'secondary_color' => '#ffffff',
                 'primary_color_dark' => null,
                 'secondary_color_dark' => null,
+            ],
+            // Same default as the header's logo_style — null background =
+            // the box's default bg-white/10 token color, 12px radius.
+            'logo_style' => [
+                'background_color' => null,
+                'background_color_dark' => null,
+                'border_radius' => 12,
             ],
             'description' => 'Cabins, campsites and glamping stays — book your next escape in minutes and pay securely online.',
             'sections' => [
@@ -345,11 +373,16 @@ TEXT;
             'style' => [
                 'background_type' => 'default',
                 'background_color' => null,
+                'background_color_dark' => null,
                 'gradient_from' => null,
+                'gradient_from_dark' => null,
                 'gradient_to' => null,
+                'gradient_to_dark' => null,
                 'gradient_direction' => 'to right',
                 'background_image_url' => null,
+                'background_image_css' => null,
                 'hover_color' => '#ffffff',
+                'hover_color_dark' => null,
             ],
         ];
     }
@@ -387,11 +420,21 @@ TEXT;
                 'style' => [
                     'background_type' => 'default',
                     'background_color' => null,
+                    'background_color_dark' => null,
                     'gradient_from' => null,
+                    'gradient_from_dark' => null,
                     'gradient_to' => null,
+                    'gradient_to_dark' => null,
                     'gradient_direction' => 'to right',
                     'background_image_url' => null,
+                    // A hero background photo is rendered as a real <img>
+                    // (see app/(customer)/page.tsx), not a CSS
+                    // background-image — 'cover' matches the exact sizing
+                    // the CSS approach already used before this field
+                    // existed, so a fresh upload looks identical either way.
+                    'background_image_css' => null,
                     'hover_color' => null,
+                    'hover_color_dark' => null,
                 ],
             ],
             'rentals_section' => [
@@ -399,6 +442,35 @@ TEXT;
                 'heading' => 'Popular stays to book now',
                 'show_site_map_link' => true,
                 'site_map_link_text' => 'View site map',
+            ],
+            // The search/filter card between the hero and "Our Rentals" —
+            // matches its previous hardcoded labels/placeholders exactly,
+            // same "seed the current live output as the default" precedent
+            // as shopContent() below.
+            'search_filters' => [
+                'search_label' => 'Search',
+                'search_placeholder' => 'Search rentals...',
+                'checkin_label' => 'Check-in',
+                'checkout_label' => 'Check-out',
+                'min_price_label' => 'Min Price',
+                'min_price_placeholder' => '$0',
+                'max_price_label' => 'Max Price',
+                'max_price_placeholder' => 'Any',
+                'reset_filters_label' => 'Reset filters',
+                // Null on all four means "use the card's own default
+                // theme look" — today's exact bg-card/text-card-foreground
+                // appearance, unchanged until a super-admin sets one.
+                'background_color' => null,
+                'background_color_dark' => null,
+                'text_color' => null,
+                'text_color_dark' => null,
+                // Every field visible by default — today's exact look,
+                // unchanged until a super-admin hides one.
+                'show_search' => true,
+                'show_checkin' => true,
+                'show_checkout' => true,
+                'show_min_price' => true,
+                'show_max_price' => true,
             ],
         ];
     }
