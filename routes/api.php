@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\Superadmin\CmsPageController;
 use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
+use App\Http\Controllers\Api\V1\Superadmin\MailSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -387,6 +388,14 @@ Route::prefix('v1')->group(function () {
 
         Route::put('/menu-items', [MenuItemController::class, 'update'])
             ->middleware('permission:menu.manage');
+
+        // Mail (SMTP) settings check — read-only view of the loaded
+        // config/mail.php values plus a test send that returns the real
+        // transport error. Settings themselves stay in .env.
+        Route::get('/mail-settings', [MailSettingsController::class, 'show'])
+            ->middleware('permission:mail.settings.view');
+        Route::post('/mail-settings/test', [MailSettingsController::class, 'sendTest'])
+            ->middleware(['permission:mail.settings.test', 'throttle:10,1']);
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.

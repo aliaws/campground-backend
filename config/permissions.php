@@ -351,6 +351,16 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        // Mail (SMTP) settings check: view the loaded mail config and send a test email.
+        'mail.settings.view' => [
+            'group' => 'config', 'label' => 'View mail (SMTP) settings',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'mail.settings.test' => [
+            'group' => 'config', 'label' => 'Send a test email',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         // Org-level config (owner/admin)
         'custom_field.view' => [
             'group' => 'config', 'label' => 'View custom fields',
