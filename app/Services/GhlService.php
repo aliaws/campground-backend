@@ -580,7 +580,7 @@ class GhlService
                 'opportunity.stage_changed' => $this->handleOpportunityStageChanged($payload),
                 'InvoicePaid' => $this->handleInvoicePaid($payload),
                 'InvoicePartiallyPaid' => $this->handleInvoicePartiallyPaid($payload),
-                'InvoiceVoid' => $this->applyInvoiceStatus($payload, 'void'),
+                'InvoiceVoid' => $this->handleInvoiceVoid($payload),
                 'InvoiceUpdate' => $this->handleInvoiceUpdated($payload),
                 default => Log::info("Unhandled GHL event: {$eventType}"),
             };
@@ -741,6 +741,31 @@ class GhlService
     private function handleInvoicePartiallyPaid(array $payload): void
     {
         $this->applyInvoiceStatus($payload, 'partially_paid');
+    }
+
+    private function handleInvoiceVoid(array $payload): void
+    {
+        $this->logInvoiceVoidPayload($payload);
+        $this->applyInvoiceStatus($payload, 'void');
+    }
+
+    /**
+     * TEMPORARY: writes each InvoiceVoid webhook payload to its own file,
+     * storage/logs/invoice-void-webhook.log, so the real payload shape can be
+     * read (none was available when the handler was written). Remove this
+     * method and its call once the shape is confirmed. A logging failure
+     * never stops the webhook from being processed.
+     */
+    private function logInvoiceVoidPayload(array $payload): void
+    {
+        try {
+            Log::build([
+                'driver' => 'single',
+                'path' => storage_path('logs/invoice-void-webhook.log'),
+            ])->info('InvoiceVoid webhook payload', ['payload' => $payload]);
+        } catch (\Throwable $e) {
+            Log::warning('Could not write the InvoiceVoid payload log', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
