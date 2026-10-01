@@ -177,6 +177,10 @@ class GhlFullSyncService
                 return $result;
             });
 
+            $this->runPhase('voided_invoices', $phaseErrors, function () use ($tenantId) {
+                return $this->pullVoidedInvoices($tenantId);
+            });
+
             $this->runPhase('reconcile_existing_records', $phaseErrors, function () use ($tenantId) {
                 return $this->reconcileExistingRecords($tenantId);
             });
@@ -853,6 +857,114 @@ class GhlFullSyncService
         } catch (\Exception) {
             return null;
         }
+    }
+
+    /**
+     * Paginates Lead Connector's voided invoices and applies each one to the
+     * local booking or product order that owns it: an unpaid booking is
+     * cancelled (its dates become bookable again), an unpaid product order is
+     * cancelled, and a paid one only has its invoice status set to void.
+     *
+     * reconcileExistingRecords() below already notices a void on a row that
+     * is still unpaid locally, one request per row. This list is what also
+     * reaches rows it never re-checks (already paid locally), in one request
+     * per 100 voided invoices. `status=void` is a real server-side filter
+     * (checked against a live account); rows already recorded as void are
+     * skipped, so repeated runs do nothing.
+     *
+     * @return array{bookings: int, product_transactions: int, error_details: array}
+     */
+    private function pullVoidedInvoices(string $tenantId): array
+    {
+        $locationId = $this->client->getLocationId();
+
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        // Resolved lazily to avoid a circular constructor dependency
+        // (BookingService -> GhlBookingService -> GhlService).
+        $bookingService = app(BookingService::class);
+
+        $bookingCount = 0;
+        $productTransactionCount = 0;
+        $errors = [];
+
+        $offset = 0;
+        $limit = 100;
+        $page = 0;
+
+        do {
+            try {
+                $response = $this->client->get('invoices/', [
+                    'altId' => $locationId,
+                    'altType' => 'location',
+                    'status' => 'void',
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ], self::INVOICE_API_VERSION);
+            } catch (\Exception $e) {
+                $errors[] = ['page' => $page, 'error' => 'Voided invoice list fetch failed: '.$e->getMessage()];
+                Log::error('GHL voided invoice list fetch failed', ['offset' => $offset, 'error' => $e->getMessage()]);
+                break;
+            }
+
+            $batch = $response['invoices'] ?? $response['data'] ?? [];
+
+            // Client-side check as well, so nothing is ever cancelled on the
+            // strength of the query filter alone.
+            $voidedIds = collect($batch)
+                ->filter(fn ($invoice) => ($invoice['status'] ?? null) === 'void')
+                ->map(fn ($invoice) => $invoice['_id'] ?? $invoice['id'] ?? null)
+                ->filter()
+                ->values()
+                ->all();
+
+            if ($voidedIds) {
+                $notYetVoid = fn ($q) => $q->whereNull('ghl_invoice_status')->orWhere('ghl_invoice_status', '!=', 'void');
+
+                $bookings = EngageBooking::where('engage_organization_location_id', $tenantId)
+                    ->whereIn('ghl_invoice_id', $voidedIds)
+                    ->where($notYetVoid)
+                    ->with('transactions')
+                    ->get();
+
+                foreach ($bookings as $booking) {
+                    try {
+                        $bookingService->cancelForVoidedInvoice($booking);
+                        $bookingCount++;
+                    } catch (\Exception $e) {
+                        $errors[] = ['booking_id' => $booking->id, 'error' => $e->getMessage()];
+                        Log::error('Applying voided invoice to booking failed', ['booking_id' => $booking->id, 'error' => $e->getMessage()]);
+                    }
+                }
+
+                $productTransactions = EngageProductTransaction::where('engage_organization_location_id', $tenantId)
+                    ->whereIn('ghl_invoice_id', $voidedIds)
+                    ->whereNull('booking_id')
+                    ->where($notYetVoid)
+                    ->get();
+
+                foreach ($productTransactions as $productTransaction) {
+                    $this->productTransactionService->syncVoidStatusFromGhl($productTransaction);
+                    $productTransactionCount++;
+                }
+            }
+
+            $offset += $limit;
+            $page++;
+            usleep(100000);
+        } while (count($batch) === $limit && $page < self::MAX_INVOICE_PAGES);
+
+        if ($bookingCount || $productTransactionCount) {
+            Log::info('Voided Lead Connector invoices applied locally', [
+                'engage_organization_location_id' => $tenantId,
+                'bookings' => $bookingCount,
+                'product_transactions' => $productTransactionCount,
+            ]);
+        }
+
+        return ['bookings' => $bookingCount, 'product_transactions' => $productTransactionCount, 'error_details' => $errors];
     }
 
     /**

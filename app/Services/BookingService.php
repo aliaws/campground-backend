@@ -378,6 +378,54 @@ class BookingService
 
         $this->ghlBookingService->voidInvoice($booking);
 
+        return $this->cancelAfterInvoiceVoided($booking);
+    }
+
+    /**
+     * The invoice was voided in Lead Connector itself, not through
+     * voidInvoice() above — found by Pull Data, the daily sync, a bookings
+     * list reload or the InvoiceVoid webhook. Cancels the booking so its
+     * dates are bookable again (remainingStock() skips cancelled bookings).
+     *
+     * A paid booking is never cancelled here: its invoice status is recorded
+     * as void and the rest is left for staff, since a refund or a guest who
+     * has already checked in can't be decided automatically. Safe to call
+     * more than once.
+     */
+    public function cancelForVoidedInvoice(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing('transactions');
+
+        if ($booking->isPaid()) {
+            if ($booking->ghl_invoice_status !== 'void') {
+                $booking->update(['ghl_invoice_status' => 'void']);
+                Log::warning('Invoice voided in Lead Connector for a paid booking; booking left as is', [
+                    'booking_id' => $booking->id,
+                    'ghl_invoice_id' => $booking->ghl_invoice_id,
+                ]);
+            }
+
+            return $booking;
+        }
+
+        // Same local state GhlBookingService::voidInvoice() leaves behind.
+        $booking->update(['ghl_invoice_status' => 'void', 'ghl_invoice_url' => null]);
+
+        if ($booking->isCancelled()) {
+            return $booking;
+        }
+
+        Log::info('Booking cancelled because its invoice was voided in Lead Connector', [
+            'booking_id' => $booking->id,
+            'ghl_invoice_id' => $booking->ghl_invoice_id,
+        ]);
+
+        return $this->cancelAfterInvoiceVoided($booking);
+    }
+
+    /** Shared tail of both void paths: cancel locally, then remove the calendar booking (best-effort, only the cash/pay-later flow has one before payment). */
+    private function cancelAfterInvoiceVoided(EngageBooking $booking): EngageBooking
+    {
         $booking->update(['status' => 'cancelled']);
 
         if ($booking->ghl_booking_id) {

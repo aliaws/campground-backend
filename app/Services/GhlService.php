@@ -580,6 +580,7 @@ class GhlService
                 'opportunity.stage_changed' => $this->handleOpportunityStageChanged($payload),
                 'InvoicePaid' => $this->handleInvoicePaid($payload),
                 'InvoicePartiallyPaid' => $this->handleInvoicePartiallyPaid($payload),
+                'InvoiceVoid' => $this->applyInvoiceStatus($payload, 'void'),
                 default => Log::info("Unhandled GHL event: {$eventType}"),
             };
 
@@ -770,6 +771,14 @@ class GhlService
 
     private function markInvoiceStatus(EngageBooking $booking, string $status): void
     {
+        if ($status === 'void') {
+            // Unpaid: cancels the booking, freeing its dates. Paid: status only.
+            // Resolved lazily, same circular-dependency reason as below.
+            app(BookingService::class)->cancelForVoidedInvoice($booking);
+
+            return;
+        }
+
         $booking->update(['ghl_invoice_status' => $status]);
 
         if ($status === 'paid') {
@@ -801,6 +810,13 @@ class GhlService
     /** ProductTransaction-typed sibling of markInvoiceStatus() — a booking-less "card" product sale has no booking/status to auto-confirm, just its own status/ghl_invoice_status to flip. */
     private function markProductTransactionInvoiceStatus(EngageProductTransaction $productTransaction, string $status): void
     {
+        if ($status === 'void') {
+            // Resolved lazily, same circular-dependency reason as above.
+            app(ProductTransactionService::class)->syncVoidStatusFromGhl($productTransaction);
+
+            return;
+        }
+
         $productTransaction->update(['ghl_invoice_status' => $status]);
 
         if ($status === 'paid' && ! $productTransaction->isPaid()) {
@@ -839,6 +855,13 @@ class GhlService
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        // Void is final in Lead Connector, so there is nothing left to
+        // fetch. This also cancels a booking whose invoice was recorded as
+        // void before a void cancelled anything.
+        if ($booking->ghl_invoice_status === 'void') {
+            return app(BookingService::class)->cancelForVoidedInvoice($booking);
         }
 
         if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {
@@ -909,6 +932,13 @@ class GhlService
                     ]);
                     $results[$i] = $booking;
                 }
+
+                continue;
+            }
+
+            // Same as reconcileInvoiceStatus(): void is final, no fetch needed.
+            if ($booking->ghl_invoice_status === 'void') {
+                $results[$i] = app(BookingService::class)->cancelForVoidedInvoice($booking);
 
                 continue;
             }
@@ -996,6 +1026,12 @@ class GhlService
     {
         if (! $productTransaction->ghl_invoice_id || $productTransaction->isPaid()) {
             return $productTransaction;
+        }
+
+        // Void is final in Lead Connector: nothing to fetch, just make sure
+        // the unpaid order is cancelled.
+        if ($productTransaction->ghl_invoice_status === 'void') {
+            return app(ProductTransactionService::class)->syncVoidStatusFromGhl($productTransaction);
         }
 
         $locationId = $this->client->getLocationId();

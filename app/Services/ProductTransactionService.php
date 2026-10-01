@@ -325,4 +325,29 @@ class ProductTransactionService
 
         return $productTransaction;
     }
+
+    /**
+     * "Lead Connector already told us the invoice is void": an unpaid order
+     * whose invoice can no longer be paid is cancelled and its dead pay link
+     * dropped. A paid order only has the invoice status recorded. Status
+     * flip only, no Lead Connector call. Safe to call more than once.
+     */
+    public function syncVoidStatusFromGhl(EngageProductTransaction $productTransaction): EngageProductTransaction
+    {
+        if ($productTransaction->isPaid()) {
+            if ($productTransaction->ghl_invoice_status !== 'void') {
+                $productTransaction->update(['ghl_invoice_status' => 'void']);
+            }
+
+            return $productTransaction;
+        }
+
+        $productTransaction->update([
+            'status' => 'cancelled',
+            'ghl_invoice_status' => 'void',
+            'ghl_invoice_url' => null,
+        ]);
+
+        return $productTransaction;
+    }
 }
