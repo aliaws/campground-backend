@@ -581,6 +581,7 @@ class GhlService
                 'InvoicePaid' => $this->handleInvoicePaid($payload),
                 'InvoicePartiallyPaid' => $this->handleInvoicePartiallyPaid($payload),
                 'InvoiceVoid' => $this->applyInvoiceStatus($payload, 'void'),
+                'InvoiceUpdate' => $this->handleInvoiceUpdated($payload),
                 default => Log::info("Unhandled GHL event: {$eventType}"),
             };
 
@@ -740,6 +741,34 @@ class GhlService
     private function handleInvoicePartiallyPaid(array $payload): void
     {
         $this->applyInvoiceStatus($payload, 'partially_paid');
+    }
+
+    /**
+     * InvoiceUpdate fires for every edit to an invoice. Only one case is
+     * acted on: the invoice is now void. Every other update is ignored, so a
+     * draft/sent/paid/edited invoice never changes anything locally here
+     * (paid still arrives through InvoicePaid).
+     *
+     * No real payload was available when this was written, so the invoice is
+     * read from the top level (like InvoicePaid) or from a nested `invoice`
+     * object. If neither carries a void status, nothing happens.
+     */
+    private function handleInvoiceUpdated(array $payload): void
+    {
+        $invoice = is_array($payload['invoice'] ?? null) ? $payload['invoice'] : $payload;
+        $status = $invoice['status'] ?? null;
+
+        if (! is_string($status) || strtolower(trim($status)) !== 'void') {
+            return;
+        }
+
+        $ghlInvoiceId = $invoice['_id'] ?? $invoice['id'] ?? $payload['_id'] ?? $payload['invoiceId'] ?? null;
+
+        if (! is_string($ghlInvoiceId) || $ghlInvoiceId === '') {
+            return;
+        }
+
+        $this->applyInvoiceStatus(['_id' => $ghlInvoiceId], 'void');
     }
 
     private function applyInvoiceStatus(array $payload, string $status): void
