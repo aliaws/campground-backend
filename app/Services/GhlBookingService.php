@@ -28,6 +28,12 @@ use Illuminate\Support\Str;
  */
 class GhlBookingService
 {
+    /**
+     * Version header Lead Connector's Invoices API documents for the void
+     * and send endpoints (both also still accept the older 2021-07-28).
+     */
+    private const INVOICE_API_VERSION = 'v3';
+
     public function __construct(
         private GhlClient $client,
         private GhlService $ghlService,
@@ -382,6 +388,62 @@ class GhlBookingService
     }
 
     /**
+     * Staff-initiated "send the invoice again" (POST /invoices/{id}/send).
+     *
+     * Unlike sendInvoicePaymentEmail() above — a best-effort step inside the
+     * booking-creation flow that swallows failures — this is a deliberate
+     * click, so anything that stops the email from going out is thrown for
+     * the caller to show. `liveMode` is read from the invoice itself (it
+     * must match how the invoice was created, see createText2PayInvoice()),
+     * and the same lookup refuses an invoice Lead Connector already has as
+     * paid or void, whatever our local copy says.
+     */
+    public function resendInvoice(EngageBooking $booking): void
+    {
+        if (! $booking->ghl_invoice_id) {
+            throw new \InvalidArgumentException('This booking has no invoice to send.');
+        }
+
+        $locationId = $this->client->getLocationId();
+        $userId = $this->client->getUserId();
+        if (! $locationId || ! $userId) {
+            throw new \RuntimeException('Lead Connector is not connected. Please authorize via OAuth.');
+        }
+
+        $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+            'altId' => $locationId,
+            'altType' => 'location',
+        ], self::INVOICE_API_VERSION);
+
+        $liveStatus = strtolower((string) ($invoice['status'] ?? ''));
+        if (in_array($liveStatus, ['paid', 'void'], true)) {
+            throw new \InvalidArgumentException("This invoice is already {$liveStatus} in Lead Connector and can't be sent again.");
+        }
+
+        $payload = [
+            'altId' => $locationId,
+            'altType' => 'location',
+            'userId' => $userId,
+            'action' => 'email',
+            'liveMode' => (bool) ($invoice['liveMode'] ?? false),
+        ];
+
+        try {
+            $response = $this->client->post(
+                "invoices/{$booking->ghl_invoice_id}/send",
+                $payload,
+                [],
+                self::INVOICE_API_VERSION,
+            );
+            $this->logOutbound('invoice.resent', $payload, $response);
+            $this->syncInvoiceMetadataFromResponse($booking, $response);
+        } catch (\Exception $e) {
+            $this->logOutbound('invoice.resent', $payload, ['error' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /**
      * Record a manual POS payment against the GHL invoice for this booking.
      */
     public function recordInvoicePayment(EngageBooking $booking, float $amount, string $paymentMethod = 'cash'): void
@@ -515,7 +577,7 @@ class GhlBookingService
                 "invoices/{$booking->ghl_invoice_id}/void",
                 $payload,
                 [],
-                '2021-07-28',
+                self::INVOICE_API_VERSION,
             );
             $this->logOutbound('invoice.voided', $payload, $response);
 

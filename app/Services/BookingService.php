@@ -4,8 +4,11 @@ namespace App\Services;
 
 use App\Integrations\GHL\GhlServiceDetail;
 use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
+use App\Models\EngageRentalTransaction;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 
@@ -19,6 +22,14 @@ class BookingService
         private RentalResolver $resolver,
     ) {}
 
+    /**
+     * Columns the staff Bookings list can sort by (`sort_by`), mapped to
+     * how each one is ordered. `record` is the list's own default order
+     * (creation time) — the "Record #" column is a row number, not a stored
+     * value, so sorting by it means sorting by when the booking was created.
+     */
+    private const SORTABLE = ['record', 'created', 'customer', 'campsite', 'dates', 'total', 'status', 'paid'];
+
     public function list(array $filters = []): LengthAwarePaginator
     {
         $query = EngageBooking::query();
@@ -27,12 +38,23 @@ class BookingService
             $query->where('engage_organization_location_id', $filters['engage_organization_location_id']);
         }
 
-        if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
+        // status / customer_ids / product_ids each accept one value, a
+        // comma-separated list, or an array — so the Bookings page can keep
+        // its multi-select filters as short, readable URL params.
+        if ($statuses = $this->listFilter($filters['status'] ?? null)) {
+            $query->whereIn('status', $statuses);
         }
 
         if (! empty($filters['customer_id'])) {
             $query->where('customer_id', $filters['customer_id']);
+        }
+
+        if ($customerIds = $this->listFilter($filters['customer_ids'] ?? null)) {
+            $query->whereIn('customer_id', $customerIds);
+        }
+
+        if ($productIds = $this->listFilter($filters['product_ids'] ?? null)) {
+            $query->whereIn('product_id', $productIds);
         }
 
         if (! empty($filters['date_from'])) {
@@ -43,9 +65,90 @@ class BookingService
             $query->where('check_out_date', '<=', $filters['date_to']);
         }
 
+        // stay_from / stay_to (the Bookings page's date-range filter) match
+        // any booking whose stay overlaps the range — unlike date_from /
+        // date_to above, which require the stay to sit fully inside it.
+        if (! empty($filters['stay_from'])) {
+            $query->where('check_out_date', '>=', $filters['stay_from']);
+        }
+
+        if (! empty($filters['stay_to'])) {
+            $query->where('check_in_date', '<=', $filters['stay_to']);
+        }
+
+        // When the booking was made (whole days, inclusive on both ends).
+        if (! empty($filters['created_from'])) {
+            $query->whereDate('created_at', '>=', $filters['created_from']);
+        }
+
+        if (! empty($filters['created_to'])) {
+            $query->whereDate('created_at', '<=', $filters['created_to']);
+        }
+
+        // Same definition of "paid" the frontend's isPaid() uses: at least
+        // one linked rental transaction with status 'paid'.
+        $paid = fn ($q) => $q->where('status', 'paid');
+        if (($filters['payment_status'] ?? null) === 'paid') {
+            $query->whereHas('transactions', $paid);
+        } elseif (($filters['payment_status'] ?? null) === 'unpaid') {
+            $query->whereDoesntHave('transactions', $paid);
+        }
+
+        $this->applySort($query, $filters['sort_by'] ?? null, $filters['sort_dir'] ?? null);
+
         return $query->with(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions', 'organizationLocation'])
-            ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
+    }
+
+    /** Normalizes a single value, a comma-separated string, or an array into a clean list of strings. */
+    private function listFilter(mixed $value): array
+    {
+        if (is_string($value)) {
+            $value = explode(',', $value);
+        }
+
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            fn ($v) => is_scalar($v) ? trim((string) $v) : '',
+            $value
+        ), fn ($v) => $v !== ''));
+    }
+
+    private function applySort(Builder $query, mixed $sortBy, mixed $sortDir): void
+    {
+        $sortBy = in_array($sortBy, self::SORTABLE, true) ? $sortBy : 'record';
+        $dir = $sortDir === 'asc' ? 'asc' : 'desc';
+        $bookings = $query->getModel()->getTable();
+
+        match ($sortBy) {
+            'customer' => $query->orderBy(
+                EngageCustomer::withTrashed()->select('name')->whereColumn('id', "{$bookings}.customer_id")->limit(1),
+                $dir
+            ),
+            'campsite' => $query->orderBy(
+                EngageProduct::withTrashed()->select('name')->whereColumn('id', "{$bookings}.product_id")->limit(1),
+                $dir
+            ),
+            'dates' => $query->orderBy('check_in_date', $dir)->orderBy('check_out_date', $dir),
+            'total' => $query->orderBy('total_amount', $dir),
+            'status' => $query->orderBy('status', $dir),
+            'paid' => $query->orderBy(
+                EngageRentalTransaction::selectRaw('count(*)')
+                    ->whereColumn('booking_id', "{$bookings}.id")
+                    ->where('status', 'paid'),
+                $dir
+            ),
+            default => null,
+        };
+
+        // Always finish on creation time (+ id) so rows with equal sort
+        // values keep a stable order from one page to the next.
+        // ('created' is the Created At column — the same order as 'record'.)
+        $tieDir = in_array($sortBy, ['record', 'created'], true) ? $dir : 'desc';
+        $query->orderBy("{$bookings}.created_at", $tieDir)->orderBy("{$bookings}.id", $tieDir);
     }
 
     /**
@@ -222,6 +325,71 @@ class BookingService
         $this->ghlBookingService->createText2PayInvoice($booking);
         $this->rentalTransactionService->createFromBooking($booking);
         $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Staff "send the invoice again": re-emails the customer the existing
+     * unpaid invoice (same pay link — no new invoice is created).
+     */
+    public function resendInvoice(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing(['transactions', 'customer']);
+
+        if (! $booking->canResendInvoice()) {
+            throw new \InvalidArgumentException('Only an unpaid booking with an open invoice can have its invoice sent again.');
+        }
+
+        if (! $booking->customer?->email) {
+            throw new \InvalidArgumentException('This customer has no email address to send the invoice to.');
+        }
+
+        $this->ghlBookingService->resendInvoice($booking);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Staff "void invoice": for an invoice that has gone unpaid for 24 hours
+     * or more. Voids it in Lead Connector (its pay link stops working) and
+     * cancels the booking, which frees the dates again.
+     *
+     * The void comes first and is not best-effort: if Lead Connector refuses
+     * or can't be reached, nothing changes locally — otherwise the booking
+     * would read "cancelled" here while the customer could still pay the
+     * live invoice. Removing the calendar booking afterwards (only the
+     * cash/pay-later flow has one before payment) is best-effort, the same
+     * as every other cancellation.
+     */
+    public function voidInvoice(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing('transactions');
+
+        if (! $booking->hasOpenUnpaidInvoice()) {
+            throw new \InvalidArgumentException('Only an unpaid booking with an open invoice can be voided.');
+        }
+
+        if (! $booking->canVoidInvoice()) {
+            throw new \InvalidArgumentException(
+                'An invoice can only be voided once it has been unpaid for '.EngageBooking::voidInvoiceAfterHours().' hours or more.'
+            );
+        }
+
+        $this->ghlBookingService->voidInvoice($booking);
+
+        $booking->update(['status' => 'cancelled']);
+
+        if ($booking->ghl_booking_id) {
+            try {
+                $this->ghlBookingService->cancelBooking($booking);
+            } catch (\Exception $e) {
+                Log::error('Lead Connector booking removal failed after voiding its invoice', [
+                    'booking_id' => $booking->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
     }

@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\Customer\CustomerVerificationController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FeatureController;
+use App\Http\Controllers\Api\V1\MenuItemController;
 use App\Http\Controllers\Api\V1\OrganizationProfileController;
 use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ProductController;
@@ -149,7 +150,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/permissions', [PermissionController::class, 'index']);
         // Staff sidebar menu config (label/visibility/order) — read by every
         // staff Sidebar; edited only via PUT /superadmin/menu-items.
-        Route::get('/menu-items', [\App\Http\Controllers\Api\V1\MenuItemController::class, 'index']);
+        Route::get('/menu-items', [MenuItemController::class, 'index']);
     });
 
     // Tier 1 — org-scoped day-to-day operations: owner, admin, staff.
@@ -236,6 +237,13 @@ Route::prefix('v1')->group(function () {
         // Tier 2 — owner/admin only, nested inside Tier 1: management,
         // deletion, and GHL-sync-triggering actions.
         Route::middleware('role:owner,admin')->group(function () {
+            // Unpaid-invoice follow-up on a booking: send it again, or
+            // (once unpaid for 24h+) void it and cancel the booking.
+            Route::post('/bookings/{booking}/resend-invoice', [BookingController::class, 'resendInvoice'])
+                ->middleware('permission:booking.invoice.resend');
+            Route::post('/bookings/{booking}/void-invoice', [BookingController::class, 'voidInvoice'])
+                ->middleware('permission:booking.invoice.void');
+
             // Self-service — the Profile page's "Business Information"
             // section, editing the caller's OWN organization (not the
             // superadmin cross-org drill-down under /superadmin/*).
@@ -377,7 +385,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/pages/{slug}/image', [CmsPageController::class, 'deleteImage'])
             ->middleware('permission:cms.pages.update');
 
-        Route::put('/menu-items', [\App\Http\Controllers\Api\V1\MenuItemController::class, 'update'])
+        Route::put('/menu-items', [MenuItemController::class, 'update'])
             ->middleware('permission:menu.manage');
 
         // Platform-level reference data, moved here from the owner/admin

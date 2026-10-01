@@ -47,6 +47,12 @@ class BookingResource extends JsonResource
             'ghl_invoice_url' => $this->ghl_invoice_url,
             'ghl_invoice_view_url' => $this->ghlInvoiceViewUrl(),
             'transactions' => BookingTransactionResource::collection($this->whenLoaded('transactions')),
+            // Business-rule eligibility for the staff "send invoice again" /
+            // "void invoice" actions (who may use them is a separate
+            // permission check). Decided here, not in the browser, so the
+            // 24-hour rule uses the server's clock.
+            'can_resend_invoice' => $this->whenLoaded('transactions', fn () => $this->canResendInvoice()),
+            'can_void_invoice' => $this->whenLoaded('transactions', fn () => $this->canVoidInvoice()),
             'created_by' => $this->created_by,
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,

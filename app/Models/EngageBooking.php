@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -92,6 +93,52 @@ class EngageBooking extends Model
      * across BookingService/BookingController/CustomerPortalController/
      * GhlService/ReportService keep working unchanged.
      */
+    /** Hours an invoice must have gone unpaid before it may be voided (config/booking.php, see canVoidInvoice()). */
+    public static function voidInvoiceAfterHours(): int
+    {
+        return max(0, (int) config('booking.void_invoice_after_hours', 24));
+    }
+
+    /**
+     * SQL counterpart of hasOpenUnpaidInvoice() — narrows a query to bookings
+     * that could have their invoice voided. Only a pre-filter for batch work:
+     * each row is still checked by canVoidInvoice() before anything happens.
+     */
+    public function scopeWithOpenUnpaidInvoice(Builder $query): Builder
+    {
+        return $query->where('status', '!=', 'cancelled')
+            ->whereNotNull('ghl_invoice_id')
+            ->where(fn (Builder $q) => $q->whereNull('ghl_invoice_status')->orWhereNotIn('ghl_invoice_status', ['paid', 'void']))
+            ->whereDoesntHave('transactions', fn (Builder $q) => $q->where('status', 'paid'));
+    }
+
+    /**
+     * An invoice that can still be acted on: the booking isn't cancelled or
+     * paid, and it has a Lead Connector invoice that hasn't been voided.
+     * Needs `transactions` loaded (isPaid()).
+     */
+    public function hasOpenUnpaidInvoice(): bool
+    {
+        return $this->status !== 'cancelled'
+            && ! empty($this->ghl_invoice_id)
+            && ! in_array($this->ghl_invoice_status, ['paid', 'void'], true)
+            && ! $this->isPaid();
+    }
+
+    /** Staff may send the unpaid invoice to the customer again at any time. */
+    public function canResendInvoice(): bool
+    {
+        return $this->hasOpenUnpaidInvoice();
+    }
+
+    /** The invoice may be voided (and the booking cancelled) only once it has gone unpaid for the configured hours — 24 by default. */
+    public function canVoidInvoice(): bool
+    {
+        return $this->hasOpenUnpaidInvoice()
+            && $this->created_at !== null
+            && $this->created_at->lte(now()->subHours(self::voidInvoiceAfterHours()));
+    }
+
     public function transactions(): HasMany
     {
         return $this->hasMany(EngageRentalTransaction::class, 'booking_id');

@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('engage:sync-all')
             ->everySixHours()
             ->withoutOverlapping();
+        // Once a day: void invoices unpaid for BOOKING_AUTO_VOID_UNPAID_AFTER_DAYS
+        // (config/booking.php, 7 by default) and cancel their bookings.
+        $schedule->command('bookings:void-unpaid-invoices')
+            ->daily()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([

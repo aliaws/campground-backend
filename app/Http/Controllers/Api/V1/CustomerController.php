@@ -39,10 +39,14 @@ class CustomerController extends Controller
         );
 
         if ($request->search) {
-            $query->where(function ($q) use ($request) {
-                $q->where('name', 'like', "%{$request->search}%")
-                    ->orWhere('email', 'like', "%{$request->search}%")
-                    ->orWhere('phone', 'like', "%{$request->search}%");
+            // Case-insensitive on every driver (Postgres' LIKE is
+            // case-sensitive) — this search also backs the Bookings page's
+            // customer autocomplete, where "john" must find "John".
+            $term = '%'.mb_strtolower($request->search).'%';
+            $query->where(function ($q) use ($term) {
+                $q->whereRaw('LOWER(name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(email) LIKE ?', [$term])
+                    ->orWhere('phone', 'like', $term);
             });
         }
 

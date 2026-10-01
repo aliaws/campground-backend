@@ -210,6 +210,14 @@ return [
             'group' => 'bookings', 'label' => 'View a booking invoice',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
+        'booking.invoice.resend' => [
+            'group' => 'bookings', 'label' => 'Send an unpaid booking invoice again',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
+        'booking.invoice.void' => [
+            'group' => 'bookings', 'label' => 'Void an unpaid booking invoice (cancels the booking)',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
 
         // POS / products
         'pos.sell' => [

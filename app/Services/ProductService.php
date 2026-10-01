@@ -49,9 +49,13 @@ class ProductService
         }
 
         if (! empty($filters['search'])) {
-            $query->where(function (Builder $q) use ($filters) {
-                $q->where('name', 'like', "%{$filters['search']}%")
-                    ->orWhere('description', 'like', "%{$filters['search']}%");
+            // Case-insensitive on every driver (Postgres' LIKE is
+            // case-sensitive) — also backs the Bookings page's campsite
+            // autocomplete.
+            $term = '%'.mb_strtolower($filters['search']).'%';
+            $query->where(function (Builder $q) use ($term) {
+                $q->whereRaw('LOWER(name) LIKE ?', [$term])
+                    ->orWhereRaw('LOWER(description) LIKE ?', [$term]);
             });
         }
 

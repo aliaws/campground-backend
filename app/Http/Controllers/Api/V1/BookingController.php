@@ -230,6 +230,59 @@ class BookingController extends Controller
         ]);
     }
 
+    /** Emails the customer their existing unpaid invoice again (see BookingService::resendInvoice()). */
+    public function resendInvoice(Request $request, EngageBooking $booking): JsonResponse
+    {
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->resendInvoice($b),
+            'Invoice sent to the customer again.',
+            'Failed to send the invoice',
+        );
+    }
+
+    /** Voids an invoice unpaid for 24+ hours and cancels the booking (see BookingService::voidInvoice()). */
+    public function voidInvoice(Request $request, EngageBooking $booking): JsonResponse
+    {
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->voidInvoice($b),
+            'Invoice voided and booking cancelled.',
+            'Failed to void the invoice',
+        );
+    }
+
+    /**
+     * Shared shell for the two staff invoice actions above. Checks Lead
+     * Connector for a payment first (reconcileInvoiceStatus()) — the customer
+     * may have paid moments ago without our copy knowing yet, and a paid
+     * invoice must never be voided or chased.
+     */
+    private function invoiceAction(Request $request, EngageBooking $booking, callable $action, string $success, string $failure): JsonResponse
+    {
+        if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+        }
+
+        try {
+            $booking = $action($this->ghlService->reconcileInvoiceStatus($booking));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'data' => null, 'message' => $e->getMessage()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'data' => null, 'message' => $failure.': '.$e->getMessage()], 422);
+        }
+
+        $booking->loadMissing(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
+
+        return response()->json([
+            'success' => true,
+            'data' => new BookingResource($booking),
+            'message' => $success,
+        ]);
+    }
+
     /** Marks a cash "pay later" reservation as paid; self-heals a missing GHL calendar booking first (see BookingService::payCash()). */
     public function payCash(Request $request, EngageBooking $booking): JsonResponse
     {
