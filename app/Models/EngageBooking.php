@@ -99,6 +99,37 @@ class EngageBooking extends Model
         return max(0, (int) config('booking.void_invoice_after_hours', 24));
     }
 
+    /** Hours an unpaid booking may stay without any invoice before the scheduled command cancels it (config/booking.php). */
+    public static function cancelWithoutInvoiceAfterHours(): int
+    {
+        return max(1, (int) config('booking.auto_cancel_without_invoice_after_hours', 24));
+    }
+
+    /** SQL counterpart of isAwaitingInvoice(), for batch work. */
+    public function scopeAwaitingInvoice(Builder $query): Builder
+    {
+        return $query->whereIn('status', ['pending', 'requested'])
+            ->whereNull('ghl_booking_id')
+            ->whereNull('ghl_invoice_id')
+            ->whereDoesntHave('transactions', fn (Builder $q) => $q->where('status', 'paid'));
+    }
+
+    /**
+     * Nothing exists in Lead Connector for this booking yet: no calendar
+     * booking and no invoice, and it isn't paid, confirmed or cancelled.
+     * That is a cash/pay-later booking nobody has collected on, or a
+     * booking whose invoice could not be created. Staff can create and send
+     * its invoice or cancel it; left alone it is cancelled automatically.
+     * Needs `transactions` loaded (isPaid()).
+     */
+    public function isAwaitingInvoice(): bool
+    {
+        return in_array($this->status, ['pending', 'requested'], true)
+            && empty($this->ghl_booking_id)
+            && empty($this->ghl_invoice_id)
+            && ! $this->isPaid();
+    }
+
     /**
      * SQL counterpart of hasOpenUnpaidInvoice() — narrows a query to bookings
      * that could have their invoice voided. Only a pre-filter for batch work:

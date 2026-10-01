@@ -218,6 +218,14 @@ return [
             'group' => 'bookings', 'label' => 'Void an unpaid booking invoice (cancels the booking)',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
+        'booking.invoice.create' => [
+            'group' => 'bookings', 'label' => 'Create and send the invoice for a booking that has none',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
+        'booking.cancel_uninvoiced' => [
+            'group' => 'bookings', 'label' => 'Cancel a booking that has no invoice',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
 
         // POS / products
         'pos.sell' => [

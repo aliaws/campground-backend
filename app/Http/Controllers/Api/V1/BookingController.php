@@ -254,8 +254,32 @@ class BookingController extends Controller
         );
     }
 
+    /** Creates and emails the invoice for a booking that has none yet (see BookingService::createAndSendInvoice()). */
+    public function createInvoice(Request $request, EngageBooking $booking): JsonResponse
+    {
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->createAndSendInvoice($b),
+            'Invoice created and sent to the customer.',
+            'Failed to create the invoice',
+        );
+    }
+
+    /** Cancels a booking that never got an invoice (see BookingService::cancelWithoutInvoice()). */
+    public function cancelUninvoiced(Request $request, EngageBooking $booking): JsonResponse
+    {
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->cancelWithoutInvoice($b),
+            'Booking cancelled.',
+            'Failed to cancel the booking',
+        );
+    }
+
     /**
-     * Shared shell for the two staff invoice actions above. Checks Lead
+     * Shared shell for the staff invoice actions above. Checks Lead
      * Connector for a payment first (reconcileInvoiceStatus()) — the customer
      * may have paid moments ago without our copy knowing yet, and a paid
      * invoice must never be voided or chased.

@@ -53,6 +53,8 @@ class BookingResource extends JsonResource
             // 24-hour rule uses the server's clock.
             'can_resend_invoice' => $this->whenLoaded('transactions', fn () => $this->canResendInvoice()),
             'can_void_invoice' => $this->whenLoaded('transactions', fn () => $this->canVoidInvoice()),
+            // No Lead Connector booking or invoice yet: staff can create and send the invoice, or cancel.
+            'awaiting_invoice' => $this->whenLoaded('transactions', fn () => $this->isAwaitingInvoice()),
             'created_by' => $this->created_by,
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,

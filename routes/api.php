@@ -244,6 +244,12 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:booking.invoice.resend');
             Route::post('/bookings/{booking}/void-invoice', [BookingController::class, 'voidInvoice'])
                 ->middleware('permission:booking.invoice.void');
+            // A booking with nothing in Lead Connector yet (no calendar
+            // booking, no invoice): create and send its invoice, or cancel it.
+            Route::post('/bookings/{booking}/create-invoice', [BookingController::class, 'createInvoice'])
+                ->middleware('permission:booking.invoice.create');
+            Route::post('/bookings/{booking}/cancel-uninvoiced', [BookingController::class, 'cancelUninvoiced'])
+                ->middleware('permission:booking.cancel_uninvoiced');
 
             // Self-service — the Profile page's "Business Information"
             // section, editing the caller's OWN organization (not the

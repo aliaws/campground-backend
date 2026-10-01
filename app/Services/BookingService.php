@@ -330,6 +330,62 @@ class BookingService
     }
 
     /**
+     * Staff "Create & Send": for an unpaid booking that has nothing in Lead
+     * Connector yet (see EngageBooking::isAwaitingInvoice()). Creates the
+     * pay-link invoice, which Lead Connector emails to the customer, and
+     * from then on the booking is an ordinary online-payment booking:
+     * `requested`, one unpaid card transaction, confirmed once it is paid.
+     *
+     * The invoice comes first: if Lead Connector refuses or can't be
+     * reached, nothing changes locally. An existing unpaid transaction (a
+     * cash booking has one) is switched to card instead of adding a second.
+     */
+    public function createAndSendInvoice(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing(['transactions', 'customer']);
+
+        if (! $booking->isAwaitingInvoice()) {
+            throw new \InvalidArgumentException('Only an unpaid booking that has no invoice yet can have one created.');
+        }
+
+        if (! $booking->customer?->email) {
+            throw new \InvalidArgumentException('This customer has no email address to send the invoice to.');
+        }
+
+        $this->ghlBookingService->createText2PayInvoice($booking);
+
+        $booking->update(['status' => 'requested']);
+
+        $transaction = $booking->transactions()->latest()->first();
+        if ($transaction) {
+            $transaction->update(['payment_method' => 'card']);
+        } else {
+            $this->rentalTransactionService->createFromBooking($booking);
+        }
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Staff "Cancel" (and the scheduled command) for a booking that never
+     * got an invoice: cancels it locally, which frees its dates. There is
+     * nothing in Lead Connector to undo.
+     */
+    public function cancelWithoutInvoice(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing('transactions');
+
+        if (! $booking->isAwaitingInvoice()) {
+            throw new \InvalidArgumentException('Only an unpaid booking that has no invoice yet can be cancelled this way.');
+        }
+
+        $booking->update(['status' => 'cancelled']);
+
+        return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
      * Staff "send the invoice again": re-emails the customer the existing
      * unpaid invoice (same pay link — no new invoice is created).
      */

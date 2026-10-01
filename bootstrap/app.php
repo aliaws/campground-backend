@@ -23,10 +23,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('engage:sync-all')
             ->everySixHours()
             ->withoutOverlapping();
-        // Once a day: void invoices unpaid for BOOKING_AUTO_VOID_UNPAID_AFTER_DAYS
-        // (config/booking.php, 7 by default) and cancel their bookings.
+        // Every hour: void invoices unpaid for BOOKING_AUTO_VOID_UNPAID_AFTER_DAYS
+        // (7 by default) and cancel their bookings, and cancel unpaid
+        // bookings still without any invoice after
+        // BOOKING_AUTO_CANCEL_WITHOUT_INVOICE_AFTER_HOURS (24 by default).
+        // Hourly so the 24-hour rule is not up to a day late. See config/booking.php.
         $schedule->command('bookings:void-unpaid-invoices')
-            ->daily()
+            ->hourly()
             ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware) {
