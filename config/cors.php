@@ -15,6 +15,7 @@ return [
         '#^https://[\w-]+\.hostingersite\.com$#',
         '#^https://[\w-]+\.builder-preview\.com$#',
         '#^https://[\w-]+\.accuratedigital\.dev$#',
+        '#^https?://(www\.)?wpcamp\.site$#',
     ],
 
     'allowed_headers' => ['*'],
