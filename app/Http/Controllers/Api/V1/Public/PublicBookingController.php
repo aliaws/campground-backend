@@ -150,6 +150,7 @@ class PublicBookingController extends Controller
                 'quantity' => $request->validated('quantity'),
                 'engage_organization_location_id' => $locationId,
                 'created_by' => $createdBy,
+                'source' => EngageBooking::SOURCE_WEBSITE,
             ], autoConfirm: false);
         } catch (\InvalidArgumentException $e) {
             return response()->json([

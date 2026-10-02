@@ -125,6 +125,7 @@ class BookingController extends Controller
                 $request->validated() + [
                     'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
                     'created_by' => User::createdByLabel($request->user(), ''),
+                    'source' => EngageBooking::SOURCE_POS,
                 ],
                 autoConfirm: $autoConfirm,
             );

@@ -701,6 +701,7 @@ class GhlFullSyncService
                 'engage_organization_location_id' => $tenantId,
                 'notes' => 'Synced from Lead Connector via Pull Data — this booking was made directly through Lead Connector, not through this app.',
                 'created_by' => 'Lead Connector Sync',
+                'source' => EngageBooking::SOURCE_LEAD_CONNECTOR,
             ]);
 
             Log::info('Created local Booking from synced Lead Connector rental invoice', [

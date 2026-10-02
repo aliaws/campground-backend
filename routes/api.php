@@ -288,6 +288,9 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/reports/summary', [ReportController::class, 'summary']);
 
+            Route::get('/dashboard/summary', [DashboardController::class, 'summary'])
+                ->middleware('permission:dashboard.view');
+
             // Owner-only dashboard entity-count summary — narrower than the
             // owner+admin role: check this Tier 2 group already enforces, so
             // gated with its own permission action rather than relying on

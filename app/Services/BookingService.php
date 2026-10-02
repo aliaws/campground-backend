@@ -8,6 +8,7 @@ use App\Models\EngageCustomer;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageRentalTransaction;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
@@ -28,7 +29,7 @@ class BookingService
      * (creation time) — the "Record #" column is a row number, not a stored
      * value, so sorting by it means sorting by when the booking was created.
      */
-    private const SORTABLE = ['record', 'created', 'customer', 'campsite', 'dates', 'total', 'status', 'paid'];
+    private const SORTABLE = ['record', 'created', 'customer', 'campsite', 'dates', 'total', 'status', 'paid', 'source'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -43,6 +44,11 @@ class BookingService
         // its multi-select filters as short, readable URL params.
         if ($statuses = $this->listFilter($filters['status'] ?? null)) {
             $query->whereIn('status', $statuses);
+        }
+
+        // Where the booking was made (pos / website / lead_connector).
+        if ($sources = $this->listFilter($filters['source'] ?? null)) {
+            $query->whereIn('source', $sources);
         }
 
         if (! empty($filters['customer_id'])) {
@@ -83,6 +89,28 @@ class BookingService
 
         if (! empty($filters['created_to'])) {
             $query->whereDate('created_at', '<=', $filters['created_to']);
+        }
+
+        // When the booking was paid (paid_at of its paid rental transaction),
+        // as whole days in the caller's timezone. This is exactly what the
+        // dashboard's Booking Revenue cards add up, so a card's link lists
+        // the bookings behind its total — cancelled/unpaid ones never match.
+        if (! empty($filters['paid_from']) || ! empty($filters['paid_to'])) {
+            $timezone = in_array($filters['timezone'] ?? null, timezone_identifiers_list(), true)
+                ? $filters['timezone']
+                : config('app.timezone');
+
+            $query->whereHas('transactions', function ($q) use ($filters, $timezone) {
+                $q->where('status', 'paid');
+
+                if (! empty($filters['paid_from'])) {
+                    $q->where('paid_at', '>=', Carbon::parse($filters['paid_from'], $timezone)->startOfDay()->utc());
+                }
+
+                if (! empty($filters['paid_to'])) {
+                    $q->where('paid_at', '<', Carbon::parse($filters['paid_to'], $timezone)->addDay()->startOfDay()->utc());
+                }
+            });
         }
 
         // Same definition of "paid" the frontend's isPaid() uses: at least
@@ -135,6 +163,7 @@ class BookingService
             'dates' => $query->orderBy('check_in_date', $dir)->orderBy('check_out_date', $dir),
             'total' => $query->orderBy('total_amount', $dir),
             'status' => $query->orderBy('status', $dir),
+            'source' => $query->orderBy('source', $dir),
             'paid' => $query->orderBy(
                 EngageRentalTransaction::selectRaw('count(*)')
                     ->whereColumn('booking_id', "{$bookings}.id")

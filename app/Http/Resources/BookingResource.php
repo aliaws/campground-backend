@@ -56,6 +56,8 @@ class BookingResource extends JsonResource
             // No Lead Connector booking or invoice yet: staff can create and send the invoice, or cancel.
             'awaiting_invoice' => $this->whenLoaded('transactions', fn () => $this->isAwaitingInvoice()),
             'created_by' => $this->created_by,
+            // Where the booking was made: pos | website | lead_connector.
+            'source' => $this->source,
             'engage_organization_location_id' => $this->engage_organization_location_id,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

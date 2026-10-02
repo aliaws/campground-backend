@@ -51,6 +51,79 @@ class ReportService
         ];
     }
 
+    /**
+     * Everything the staff dashboard's revenue cards and "Rental
+     * Transactions" panel need, in two queries (one per ledger) — every
+     * figure is a database aggregate, nothing is loaded and summed in PHP.
+     *
+     * Revenue is money actually received: status 'paid', counted on the day
+     * it was paid (paid_at). Booking revenue (rental transactions) and
+     * product revenue (product transactions) are kept apart.
+     *
+     * The periods are rolling and made of whole days in the viewer's
+     * timezone: today, the last 7 days and the last 30 days (each including
+     * today), so a payment taken late in the evening doesn't land on the
+     * next day's card.
+     */
+    public function dashboardSummary(string $locationId, ?string $timezone = null): array
+    {
+        //                \DB::enableQueryLog(); // Enable query log
+
+        $now = Carbon::now($timezone ?: config('app.timezone'));
+        $today = $now->copy()->startOfDay();
+        $last7Start = $today->copy()->subDays(6);
+        $last30Start = $today->copy()->subDays(29);
+
+        $revenueSql = implode(', ', array_map(
+            fn (string $alias) => "COALESCE(SUM(amount) FILTER (WHERE status = 'paid' AND paid_at >= ?), 0) AS {$alias}",
+            ['today', 'last_7_days', 'last_30_days']
+        ));
+        // paid_at is stored in UTC.
+        $since = array_map(
+            fn (CarbonInterface $start) => $start->copy()->utc()->toDateTimeString(),
+            [$today, $last7Start, $last30Start]
+        );
+
+        $rental = EngageRentalTransaction::where('engage_organization_location_id', $locationId)
+            ->selectRaw($revenueSql, $since)
+            ->selectRaw(
+                "COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE status = 'paid') AS paid,
+                 COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                 COUNT(*) FILTER (WHERE status = 'draft') AS draft"
+            )
+            ->toBase()
+            ->first();
+
+        $product = EngageProductTransaction::where('engage_organization_location_id', $locationId)
+            ->selectRaw($revenueSql, $since)
+            ->toBase()
+            ->first();
+
+        $revenue = fn (object $row) => [
+            'today' => (float) $row->today,
+            'last_7_days' => (float) $row->last_7_days,
+            'last_30_days' => (float) $row->last_30_days,
+        ];
+        //                dd(\DB::getQueryLog()); // Show results of log
+
+        return [
+            'timezone' => $now->timezoneName,
+            // Local calendar dates the cards cover — the dashboard uses them to build its links.
+            'today' => $today->toDateString(),
+            'last_7_days_start' => $last7Start->toDateString(),
+            'last_30_days_start' => $last30Start->toDateString(),
+            'booking_revenue' => $revenue($rental),
+            'product_revenue' => $revenue($product),
+            'rental_transactions' => [
+                'total' => (int) $rental->total,
+                'paid' => (int) $rental->paid,
+                'pending' => (int) $rental->pending,
+                'draft' => (int) $rental->draft,
+            ],
+        ];
+    }
+
     public function summary(string $locationId): array
     {
         $today = Carbon::today();

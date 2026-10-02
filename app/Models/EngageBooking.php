@@ -14,6 +14,15 @@ class EngageBooking extends Model
 
     protected $table = 'engage_bookings';
 
+    /** Where a booking was made — stored in `source`. */
+    public const SOURCE_POS = 'pos';
+
+    public const SOURCE_WEBSITE = 'website';
+
+    public const SOURCE_LEAD_CONNECTOR = 'lead_connector';
+
+    public const SOURCES = [self::SOURCE_POS, self::SOURCE_WEBSITE, self::SOURCE_LEAD_CONNECTOR];
+
     protected $fillable = [
         'customer_id',
         'product_id',
@@ -40,6 +49,7 @@ class EngageBooking extends Model
         'ghl_invoice_url',
         'engage_organization_location_id',
         'created_by',
+        'source',
     ];
 
     protected function casts(): array
