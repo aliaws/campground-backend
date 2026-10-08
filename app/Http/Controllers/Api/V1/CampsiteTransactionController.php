@@ -43,10 +43,7 @@ class CampsiteTransactionController extends Controller
             }
 
             $payLink = $transaction->booking?->ghl_invoice_url
-                ?? ($fallbackPayLink ??= EngageBooking::where('engage_organization_location_id', $locationId)
-                    ->whereNotNull('ghl_invoice_url')
-                    ->latest()
-                    ->value('ghl_invoice_url') ?? '');
+                ?? ($fallbackPayLink ??= EngageBooking::payLinkForOrganization($locationId) ?? '');
 
             $transaction->setAttribute(
                 'ghl_invoice_view_url',

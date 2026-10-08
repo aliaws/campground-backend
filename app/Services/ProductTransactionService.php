@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EngageProduct;
 use App\Models\EngageProductTransaction;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -28,6 +29,20 @@ class ProductTransactionService
     ) {}
 
     public function list(array $filters = []): LengthAwarePaginator
+    {
+        return $this->filteredQuery($filters)
+            ->with(['customer', 'items.product', 'booking', 'organizationLocation'])
+            ->orderBy('created_at', 'desc')
+            ->paginate($filters['per_page'] ?? 15);
+    }
+
+    /** Sum of `amount` over everything list() would return across all pages (same filters). */
+    public function totalAmount(array $filters = []): float
+    {
+        return (float) $this->filteredQuery($filters)->sum('amount');
+    }
+
+    private function filteredQuery(array $filters): Builder
     {
         $query = EngageProductTransaction::query();
 
@@ -57,9 +72,7 @@ class ProductTransactionService
             $query->where('booking_id', $filters['booking_id']);
         }
 
-        return $query->with(['customer', 'items.product', 'booking', 'organizationLocation'])
-            ->orderBy('created_at', 'desc')
-            ->paginate($filters['per_page'] ?? 15);
+        return $query;
     }
 
     /**

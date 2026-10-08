@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreProductTransactionRequest;
 use App\Http\Requests\UpdateProductTransactionPaymentStatusRequest;
 use App\Http\Resources\ProductTransactionResource;
+use App\Models\EngageBooking;
 use App\Models\EngageProductTransaction;
 use App\Services\GhlService;
 use App\Services\ProductTransactionService;
@@ -52,9 +53,29 @@ class ProductTransactionController extends Controller
                 : $reconciled->load(['customer.customerAccount', 'items.product', 'booking']);
         });
 
+        // Lead Connector's public invoice page. A synced row has no pay link
+        // of its own, so the domain comes from any pay link of this organization.
+        $fallbackPayLink = null;
+        $productTransactions->getCollection()->each(function (EngageProductTransaction $productTransaction) use (&$fallbackPayLink, $filters) {
+            if (! $productTransaction->ghl_invoice_id) {
+                return;
+            }
+
+            $payLink = $productTransaction->ghl_invoice_url
+                ?? ($fallbackPayLink ??= EngageBooking::payLinkForOrganization($filters['engage_organization_location_id']) ?? '');
+
+            $productTransaction->setAttribute(
+                'ghl_invoice_view_url',
+                EngageBooking::invoiceViewUrlFor($productTransaction->ghl_invoice_id, $payLink ?: null)
+            );
+        });
+
         return response()->json([
             'success' => true,
-            'data' => $this->paginatedData($productTransactions, ProductTransactionResource::class),
+            'data' => $this->paginatedData($productTransactions, ProductTransactionResource::class) + [
+                // Sum of every transaction matching the filters, across all pages (the table's footer).
+                'total_amount' => $this->productTransactionService->totalAmount($filters),
+            ],
             'message' => 'Product transactions retrieved.',
         ]);
     }

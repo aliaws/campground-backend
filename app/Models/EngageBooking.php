@@ -228,6 +228,23 @@ class EngageBooking extends Model
      * domain from. Also used for a transaction whose own booking has no pay
      * link stored (e.g. one synced in from Lead Connector).
      */
+    /**
+     * Any pay link of this organization, to take the invoice page's domain
+     * from when a record has none of its own (the domain is the same for
+     * the whole organization).
+     */
+    public static function payLinkForOrganization(string $locationId): ?string
+    {
+        return self::where('engage_organization_location_id', $locationId)
+            ->whereNotNull('ghl_invoice_url')
+            ->latest()
+            ->value('ghl_invoice_url')
+            ?? EngageProductTransaction::where('engage_organization_location_id', $locationId)
+                ->whereNotNull('ghl_invoice_url')
+                ->latest()
+                ->value('ghl_invoice_url');
+    }
+
     public static function invoiceViewUrlFor(?string $invoiceId, ?string $payLinkUrl): ?string
     {
         if (! $invoiceId || ! $payLinkUrl) {

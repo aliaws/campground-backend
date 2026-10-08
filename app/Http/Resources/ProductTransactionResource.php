@@ -38,6 +38,8 @@ class ProductTransactionResource extends JsonResource
                 'status' => $this->ghl_invoice_status,
             ]),
             'ghl_invoice_url' => $this->ghl_invoice_url,
+            // Lead Connector's public invoice page (set by the list endpoint; otherwise from this row's own pay link).
+            'ghl_invoice_view_url' => $this->resource->getAttribute('ghl_invoice_view_url') ?? $this->ghlInvoiceViewUrl(),
             'paid_at' => $this->paid_at,
             'invoice_date' => $this->invoice_date,
             'created_at' => $this->created_at,
