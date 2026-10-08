@@ -219,17 +219,28 @@ class EngageBooking extends Model
      */
     public function ghlInvoiceViewUrl(): ?string
     {
-        if (! $this->ghl_invoice_id || ! $this->ghl_invoice_url) {
+        return self::invoiceViewUrlFor($this->ghl_invoice_id, $this->ghl_invoice_url);
+    }
+
+    /**
+     * The public invoice view page for any invoice id, given a pay link
+     * (`ghl_invoice_url`) from the same organization to take the white-label
+     * domain from. Also used for a transaction whose own booking has no pay
+     * link stored (e.g. one synced in from Lead Connector).
+     */
+    public static function invoiceViewUrlFor(?string $invoiceId, ?string $payLinkUrl): ?string
+    {
+        if (! $invoiceId || ! $payLinkUrl) {
             return null;
         }
 
-        $host = parse_url($this->ghl_invoice_url, PHP_URL_HOST);
-        $scheme = parse_url($this->ghl_invoice_url, PHP_URL_SCHEME) ?? 'https';
+        $host = parse_url($payLinkUrl, PHP_URL_HOST);
+        $scheme = parse_url($payLinkUrl, PHP_URL_SCHEME) ?? 'https';
 
         if (! $host) {
             return null;
         }
 
-        return "{$scheme}://{$host}/invoice/{$this->ghl_invoice_id}";
+        return "{$scheme}://{$host}/invoice/{$invoiceId}";
     }
 }

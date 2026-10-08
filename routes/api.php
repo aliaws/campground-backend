@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AmenityController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\CampsiteTransactionController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\Customer\CustomerPasswordController;
 use App\Http\Controllers\Api\V1\Customer\CustomerPortalController;
@@ -27,7 +28,6 @@ use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicShopController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
-use App\Http\Controllers\Api\V1\RentalTransactionController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceCategoryController;
 use App\Http\Controllers\Api\V1\ServiceController;
@@ -206,7 +206,7 @@ Route::prefix('v1')->group(function () {
 
         // Transactions — sole source of truth split across two tables as of
         // the 2026-08-10 refactor (no more generic /transactions*).
-        Route::get('/rental-transactions', [RentalTransactionController::class, 'index']);
+        Route::get('/campsite-transactions', [CampsiteTransactionController::class, 'index']);
         Route::get('/product-transactions', [ProductTransactionController::class, 'index']);
         Route::post('/product-transactions', [ProductTransactionController::class, 'store']);
         Route::get('/product-transactions/{productTransaction}', [ProductTransactionController::class, 'show']);

@@ -3,7 +3,10 @@
 namespace App\Services;
 
 use App\Models\EngageBooking;
+use App\Models\EngageCustomer;
+use App\Models\EngageProduct;
 use App\Models\EngageRentalTransaction;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 
@@ -25,6 +28,13 @@ class RentalTransactionService
     public function __construct(
         private GhlBookingService $ghlBookingService,
     ) {}
+
+    /**
+     * Columns the staff Campsite Transactions list can sort by (`sort_by`).
+     * `record` is the list's default order (newest first) — the "#" column
+     * is a row number, not a stored value.
+     */
+    private const SORTABLE = ['record', 'customer', 'campsite', 'booking', 'dates', 'amount', 'status', 'method', 'invoice', 'paid_at'];
 
     public function list(array $filters = []): LengthAwarePaginator
     {
@@ -50,9 +60,44 @@ class RentalTransactionService
             $query->where('booking_id', $filters['booking_id']);
         }
 
-        return $query->with(['customer', 'product', 'productRental', 'booking'])
-            ->orderBy('created_at', 'desc')
+        $this->applySort($query, $filters['sort_by'] ?? null, $filters['sort_dir'] ?? null);
+
+        return $query->with(['customer.customerAccount', 'product', 'booking'])
             ->paginate($filters['per_page'] ?? 15);
+    }
+
+    private function applySort(Builder $query, mixed $sortBy, mixed $sortDir): void
+    {
+        $sortBy = in_array($sortBy, self::SORTABLE, true) ? $sortBy : 'record';
+        $dir = $sortDir === 'asc' ? 'asc' : 'desc';
+        $table = $query->getModel()->getTable();
+        // Rows with no value (unpaid, no invoice, ...) always go last.
+        $nullsLast = fn (string $column) => $query->orderByRaw("{$table}.{$column} {$dir} nulls last");
+
+        match ($sortBy) {
+            'customer' => $query->orderBy(
+                EngageCustomer::withTrashed()->select('name')->whereColumn('id', "{$table}.customer_id")->limit(1),
+                $dir
+            ),
+            'campsite' => $query->orderBy(
+                EngageProduct::withTrashed()->select('name')->whereColumn('id', "{$table}.product_id")->limit(1),
+                $dir
+            ),
+            // The booking reference shown in the list is derived from the booking id.
+            'booking' => $nullsLast('booking_id'),
+            'dates' => $query->orderByRaw("{$table}.check_in_date {$dir} nulls last, {$table}.check_out_date {$dir} nulls last"),
+            'amount' => $query->orderBy("{$table}.amount", $dir),
+            'status' => $query->orderBy("{$table}.status", $dir),
+            'method' => $nullsLast('payment_method'),
+            'invoice' => $nullsLast('ghl_invoice_id'),
+            'paid_at' => $nullsLast('paid_at'),
+            default => null,
+        };
+
+        // Always finish on creation time (+ id) so rows with equal sort
+        // values keep a stable order from one page to the next.
+        $tieDir = $sortBy === 'record' ? $dir : 'desc';
+        $query->orderBy("{$table}.created_at", $tieDir)->orderBy("{$table}.id", $tieDir);
     }
 
     /**
