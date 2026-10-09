@@ -49,6 +49,17 @@ class UpdateCmsPageRequest extends FormRequest
             ];
         }
 
+        if ($slug === CmsPage::SLUG_PORTAL_BRANDING) {
+            // Staff portal top bar: logo (uploaded separately), two-word
+            // app name, and a small tagline under it.
+            return $rules + $this->siteTitleRules() + $this->logoStyleRules() + [
+                'content' => ['required', 'array'],
+                'content.tagline' => ['nullable', 'string', 'max:150'],
+                'content.tagline_color' => ['nullable', 'string', 'max:20'],
+                'content.tagline_color_dark' => ['nullable', 'string', 'max:20'],
+            ];
+        }
+
         if ($slug === CmsPage::SLUG_HEADER) {
             return $rules + $this->siteTitleRules() + $this->styleRules() + $this->logoStyleRules() + [
                 'content' => ['required', 'array'],

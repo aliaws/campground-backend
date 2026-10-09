@@ -14,9 +14,10 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Manages the ten fixed platform CMS pages (CmsPage::SLUGS) — not a
+ * Manages the fixed platform CMS pages (CmsPage::SLUGS) — not a
  * general page builder, so there's no store()/destroy(); every slug
- * already exists via CmsPageSeeder and only its title/content are edited.
+ * already exists (CmsPageSeeder, or its own migration for
+ * portal-branding) and only its title/content are edited.
  *
  * These endpoints always read/write the database directly (never the
  * Redis cache) — the cache exists purely to spare the *public* site
@@ -91,7 +92,7 @@ class CmsPageController extends Controller
     /** One endpoint for both images header/footer/home-page can carry — `type` picks which content key gets the resulting URL. */
     public function uploadImage(Request $request, string $slug): JsonResponse
     {
-        if (! in_array($slug, CmsPage::BACKGROUND_IMAGE_SLUGS, true)) {
+        if (! $this->hasImages($slug)) {
             return response()->json(['success' => false, 'message' => 'This page has no manageable images.'], 404);
         }
 
@@ -103,6 +104,9 @@ class CmsPageController extends Controller
         // home-page's hero has no logo_url field at all — only header/footer do.
         if ($request->input('type') === 'logo' && ! in_array($slug, CmsPage::LOGO_SLUGS, true)) {
             return response()->json(['success' => false, 'message' => 'This page has no logo field.'], 422);
+        }
+        if ($request->input('type') === 'background' && ! in_array($slug, CmsPage::BACKGROUND_IMAGE_SLUGS, true)) {
+            return response()->json(['success' => false, 'message' => 'This page has no background image field.'], 422);
         }
 
         $page = CmsPage::query()->where('slug', $slug)->firstOrFail();
@@ -128,7 +132,7 @@ class CmsPageController extends Controller
 
     public function deleteImage(Request $request, string $slug): JsonResponse
     {
-        if (! in_array($slug, CmsPage::BACKGROUND_IMAGE_SLUGS, true)) {
+        if (! $this->hasImages($slug)) {
             return response()->json(['success' => false, 'message' => 'This page has no manageable images.'], 404);
         }
 
@@ -138,6 +142,9 @@ class CmsPageController extends Controller
 
         if ($request->input('type') === 'logo' && ! in_array($slug, CmsPage::LOGO_SLUGS, true)) {
             return response()->json(['success' => false, 'message' => 'This page has no logo field.'], 422);
+        }
+        if ($request->input('type') === 'background' && ! in_array($slug, CmsPage::BACKGROUND_IMAGE_SLUGS, true)) {
+            return response()->json(['success' => false, 'message' => 'This page has no background image field.'], 422);
         }
 
         $page = CmsPage::query()->where('slug', $slug)->firstOrFail();
@@ -157,6 +164,12 @@ class CmsPageController extends Controller
             'data' => new CmsPageResource($page->fresh()),
             'message' => 'Image removed.',
         ]);
+    }
+
+    /** A page takes image uploads when it has a logo, a background image, or both (portal-branding has a logo only). */
+    private function hasImages(string $slug): bool
+    {
+        return in_array($slug, CmsPage::LOGO_SLUGS, true) || in_array($slug, CmsPage::BACKGROUND_IMAGE_SLUGS, true);
     }
 
     /** Dot-notation path to `background_image_url` within a page's content — header/footer keep `style` at the top level, home-page nests it under `hero` since that background belongs to the hero section specifically, not the whole page. */

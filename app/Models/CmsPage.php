@@ -30,7 +30,10 @@ class CmsPage extends Model
 
     public const SLUG_SHOP = 'shop';
 
-    /** The ten fixed slugs this table holds — not a general-purpose page builder. */
+    /** Branding of the staff portal (owner/admin/staff): logo, two-word app name and tagline shown in its top bar. Not a public page. */
+    public const SLUG_PORTAL_BRANDING = 'portal-branding';
+
+    /** The fixed slugs this table holds — not a general-purpose page builder. */
     public const SLUGS = [
         self::SLUG_TERMS_OF_SERVICE,
         self::SLUG_PRIVACY_POLICY,
@@ -42,12 +45,14 @@ class CmsPage extends Model
         self::SLUG_FAQ,
         self::SLUG_HOME_PAGE,
         self::SLUG_SHOP,
+        self::SLUG_PORTAL_BRANDING,
     ];
 
     /** header/footer have a logo_url field superadmin can upload an image into — see Superadmin\CmsPageController::uploadLogo(). */
     public const LOGO_SLUGS = [
         self::SLUG_HEADER,
         self::SLUG_FOOTER,
+        self::SLUG_PORTAL_BRANDING,
     ];
 
     /**
