@@ -100,6 +100,19 @@ class ReportService
             ->toBase()
             ->first();
 
+        // Campsites occupied tonight: a non-cancelled booking that has started
+        // and checks out after today (the check-out day itself is free) —
+        // the same overlap rule as BookingService::remainingStock().
+        $bookedToday = EngageBooking::where('engage_organization_location_id', $locationId)
+            ->where('status', '!=', 'cancelled')
+            ->whereDate('check_in_date', '<=', $today->toDateString())
+            ->whereDate('check_out_date', '>', $today->toDateString())
+            ->groupBy('product_id')
+            ->selectRaw('product_id, SUM(quantity) AS booked')
+            ->toBase()
+            ->pluck('booked', 'product_id')
+            ->map(fn ($booked) => (int) $booked);
+
         $revenue = fn (object $row) => [
             'today' => (float) $row->today,
             'last_7_days' => (float) $row->last_7_days,
@@ -121,6 +134,8 @@ class ReportService
                 'pending' => (int) $rental->pending,
                 'draft' => (int) $rental->draft,
             ],
+            // product id => quantity booked for today; a campsite not listed is free today.
+            'campsites_booked_today' => (object) $bookedToday->all(),
         ];
     }
 
