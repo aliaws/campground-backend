@@ -394,6 +394,9 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:cms.pages.update');
         Route::delete('/pages/{slug}/image', [CmsPageController::class, 'deleteImage'])
             ->middleware('permission:cms.pages.update');
+        // Video / thumbnail upload in chunks (Schedule Demo page).
+        Route::post('/pages/{slug}/media', [CmsPageController::class, 'uploadMedia'])
+            ->middleware('permission:cms.pages.update');
 
         Route::put('/menu-items', [MenuItemController::class, 'update'])
             ->middleware('permission:menu.manage');

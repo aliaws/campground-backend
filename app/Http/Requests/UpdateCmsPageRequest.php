@@ -49,6 +49,39 @@ class UpdateCmsPageRequest extends FormRequest
             ];
         }
 
+        if ($slug === CmsPage::SLUG_SCHEDULE_DEMO) {
+            // Every part is optional except the heading; the public page
+            // only renders the parts that are filled in. Video and
+            // thumbnail URLs are either pasted links or the URL returned
+            // by the media upload endpoint.
+            return $rules + [
+                'content' => ['required', 'array'],
+                'content.heading' => ['required', 'string', 'max:200'],
+                'content.subheading' => ['nullable', 'string', 'max:500'],
+                'content.body' => ['nullable', 'string', 'max:50000'],
+                // On/off switches: a section that is off stays saved but
+                // is not shown on the public page.
+                'content.show_body' => ['required', 'boolean'],
+                'content.embed.enabled' => ['required', 'boolean'],
+                'content.embed' => ['required', 'array'],
+                // A page URL, or the embed code a provider hands out (an
+                // <iframe> plus its <script>). The public page reads the
+                // iframe and script addresses out of it; nothing else in
+                // the code is rendered.
+                'content.embed.code' => ['nullable', 'string', 'max:5000'],
+                'content.embed.title' => ['nullable', 'string', 'max:200'],
+                'content.embed.height' => ['required', 'integer', 'min:200', 'max:2000'],
+                'content.videos_heading' => ['nullable', 'string', 'max:200'],
+                'content.videos' => ['present', 'array', 'max:50'],
+                'content.videos.*.id' => ['required', 'string', 'max:64'],
+                'content.videos.*.title' => ['nullable', 'string', 'max:200'],
+                'content.videos.*.source' => ['required', 'string', 'in:url,upload'],
+                'content.videos.*.url' => ['required', 'url:http,https', 'max:2000'],
+                'content.videos.*.thumbnail_url' => ['nullable', 'url:http,https', 'max:2000'],
+                'content.videos.*.sort_order' => ['required', 'integer'],
+            ];
+        }
+
         if ($slug === CmsPage::SLUG_PORTAL_BRANDING) {
             // Staff portal top bar: logo (uploaded separately), two-word
             // app name, and a small tagline under it.

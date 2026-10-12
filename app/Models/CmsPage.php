@@ -33,6 +33,9 @@ class CmsPage extends Model
     /** Branding of the staff portal (owner/admin/staff): logo, two-word app name and tagline shown in its top bar. Not a public page. */
     public const SLUG_PORTAL_BRANDING = 'portal-branding';
 
+    /** Public "Schedule Demo" page: heading, rich text, an embed (a page URL or a provider's iframe + script code) and a list of videos (links or uploads). */
+    public const SLUG_SCHEDULE_DEMO = 'schedule-demo';
+
     /** The fixed slugs this table holds — not a general-purpose page builder. */
     public const SLUGS = [
         self::SLUG_TERMS_OF_SERVICE,
@@ -46,7 +49,16 @@ class CmsPage extends Model
         self::SLUG_HOME_PAGE,
         self::SLUG_SHOP,
         self::SLUG_PORTAL_BRANDING,
+        self::SLUG_SCHEDULE_DEMO,
     ];
+
+    /** Pages whose content can reference uploaded videos / thumbnails — see Superadmin\CmsPageController::uploadMedia(). */
+    public const MEDIA_SLUGS = [
+        self::SLUG_SCHEDULE_DEMO,
+    ];
+
+    /** Public-disk folder uploaded CMS media is stored in. */
+    public const MEDIA_FOLDER = 'cms-media';
 
     /** header/footer have a logo_url field superadmin can upload an image into — see Superadmin\CmsPageController::uploadLogo(). */
     public const LOGO_SLUGS = [
