@@ -5,13 +5,15 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Cache;
 
 /**
  * A code snippet (HTML with <script> tags, or plain JavaScript) the
- * superadmin adds to the customer website, the staff portal, or both.
- * Platform-global. The frontend inserts it in the page head, at the start
- * of the body, or at the end of the body.
+ * superadmin adds for every organization or only selected ones, and in each
+ * of them to the customer website, the staff portal, or both. The frontend
+ * inserts it in the page head, at the start of the body, or at the end of
+ * the body.
  */
 class CustomScript extends Model
 {
@@ -46,25 +48,50 @@ class CustomScript extends Model
         ];
     }
 
-    /** Active scripts that run in the given workspace (customer|staff), in display order. */
-    public function scopeActiveFor(Builder $query, string $workspace): Builder
+    /** The organizations this script is limited to; none means every organization. */
+    public function organizations(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            EngageOrganizationLocation::class,
+            'custom_script_organizations',
+            'custom_script_id',
+            'engage_organization_location_id',
+        );
+    }
+
+    /**
+     * Active scripts that run in the given workspace (customer|staff) for the
+     * given organization, in display order. Without an organization (e.g. a
+     * superadmin page) only the scripts meant for every organization match.
+     */
+    public function scopeActiveFor(Builder $query, string $workspace, ?string $organizationId = null): Builder
     {
         return $query->where('is_active', true)
             ->whereIn('target', [$workspace, self::TARGET_BOTH])
+            ->where(function (Builder $q) use ($organizationId) {
+                $q->whereDoesntHave('organizations');
+                if ($organizationId) {
+                    $q->orWhereHas('organizations', fn (Builder $o) => $o->whereKey($organizationId));
+                }
+            })
             ->orderBy('sort_order')
             ->orderBy('created_at');
     }
 
-    public static function cacheKey(string $workspace): string
+    /**
+     * Cache key for one workspace + organization. The version number is
+     * bumped on every write, which retires every cached combination at once.
+     */
+    public static function cacheKey(string $workspace, ?string $organizationId): string
     {
-        return "custom-scripts:{$workspace}";
+        $version = (int) Cache::get('custom-scripts:version', 1);
+
+        return "custom-scripts:v{$version}:{$workspace}:".($organizationId ?: 'all');
     }
 
-    /** Called after every write: the public read is cached forever per workspace. */
+    /** Called after every write. */
     public static function forgetCache(): void
     {
-        foreach (self::WORKSPACES as $workspace) {
-            Cache::forget(self::cacheKey($workspace));
-        }
+        Cache::forever('custom-scripts:version', (int) Cache::get('custom-scripts:version', 1) + 1);
     }
 }
