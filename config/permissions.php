@@ -369,6 +369,15 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        'custom_scripts.view' => [
+            'group' => 'config', 'label' => 'View custom scripts',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'custom_scripts.manage' => [
+            'group' => 'config', 'label' => 'Add, edit and delete custom scripts',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         // Org-level config (owner/admin)
         'custom_field.view' => [
             'group' => 'config', 'label' => 'View custom fields',

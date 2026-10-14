@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\V1\Public\PublicBookingController;
 use App\Http\Controllers\Api\V1\Public\PublicCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicCmsPageController;
 use App\Http\Controllers\Api\V1\Public\PublicCountryController;
+use App\Http\Controllers\Api\V1\Public\PublicCustomScriptController;
 use App\Http\Controllers\Api\V1\Public\PublicEngageController;
 use App\Http\Controllers\Api\V1\Public\PublicOrganizationController;
 use App\Http\Controllers\Api\V1\Public\PublicProductController;
@@ -37,6 +38,7 @@ use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\Superadmin\CmsPageController;
+use App\Http\Controllers\Api\V1\Superadmin\CustomScriptController;
 use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\MailSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
@@ -82,6 +84,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/shop/products', [PublicProductController::class, 'index']);
             Route::get('/shop/orders/{productTransaction}', [PublicShopController::class, 'show']);
             Route::get('/pages/{slug}', [PublicCmsPageController::class, 'show']);
+            Route::get('/custom-scripts', [PublicCustomScriptController::class, 'index']);
             Route::get('/engage/installation-url-template', [PublicEngageController::class, 'installationUrlTemplate']);
             Route::get('/countries', [PublicCountryController::class, 'index']);
             Route::post('/bookings/quote', [PublicBookingController::class, 'quote']);
@@ -408,6 +411,17 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:mail.settings.view');
         Route::post('/mail-settings/test', [MailSettingsController::class, 'sendTest'])
             ->middleware(['permission:mail.settings.test', 'throttle:10,1']);
+
+        // Custom Scripts: code snippets for the customer website and/or the
+        // staff portal (head, body start, body end).
+        Route::get('/custom-scripts', [CustomScriptController::class, 'index'])
+            ->middleware('permission:custom_scripts.view');
+        Route::post('/custom-scripts', [CustomScriptController::class, 'store'])
+            ->middleware('permission:custom_scripts.manage');
+        Route::put('/custom-scripts/{customScript}', [CustomScriptController::class, 'update'])
+            ->middleware('permission:custom_scripts.manage');
+        Route::delete('/custom-scripts/{customScript}', [CustomScriptController::class, 'destroy'])
+            ->middleware('permission:custom_scripts.manage');
 
         // Platform-level reference data, moved here from the owner/admin
         // group — same controller/path, gate changed to superadmin only.
