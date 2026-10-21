@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             EngageLocationOwnerSeeder::class,
             SuperAdminSeeder::class,
             CmsPageSeeder::class,
+            PricingPlanSeeder::class,
         ]);
     }
 }
