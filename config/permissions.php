@@ -378,6 +378,32 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        // Usage-based pricing plans and estimated billing (platform-wide).
+        'billing.view' => [
+            'group' => 'billing', 'label' => 'View usage and estimated bills',
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
+        ],
+        'billing.measure' => [
+            'group' => 'billing', 'label' => 'Run a usage measurement now',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'billing.manage' => [
+            'group' => 'billing', 'label' => 'Assign pricing plans and pricing factors',
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
+        ],
+        'billing.export' => [
+            'group' => 'billing', 'label' => 'Export usage and billing to CSV',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'pricing_plans.view' => [
+            'group' => 'billing', 'label' => 'View pricing plans',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+        'pricing_plans.manage' => [
+            'group' => 'billing', 'label' => 'Create, edit and delete pricing plans',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         // Org-level config (owner/admin)
         'custom_field.view' => [
             'group' => 'config', 'label' => 'View custom fields',

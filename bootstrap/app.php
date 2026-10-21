@@ -33,6 +33,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('bookings:void-unpaid-invoices')
             ->hourly()
             ->withoutOverlapping();
+        // Daily usage snapshot for usage-based billing (docs/usage-billing.md).
+        $schedule->command('usage:snapshot')
+            ->dailyAt('01:15')
+            ->timezone('UTC')
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([

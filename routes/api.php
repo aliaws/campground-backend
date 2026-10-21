@@ -43,6 +43,8 @@ use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\MailSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
+use App\Http\Controllers\Api\V1\Superadmin\PricingPlanController;
+use App\Http\Controllers\Api\V1\Superadmin\UsageBillingController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -359,6 +361,42 @@ Route::prefix('v1')->group(function () {
     // organization via an explicit {organization} route id, never the JWT
     // active-org claim.
     Route::prefix('superadmin')->middleware(['auth:api', 'role:superadmin'])->group(function () {
+        // Usage-based pricing plans and estimated monthly billing
+        // (docs/usage-billing.md). Estimates only — nothing is charged.
+        Route::get('/billing/metrics', [UsageBillingController::class, 'metrics'])
+            ->middleware('permission:billing.view');
+        Route::get('/billing/status', [UsageBillingController::class, 'status'])
+            ->middleware('permission:billing.view');
+        Route::get('/billing/export', [UsageBillingController::class, 'export'])
+            ->middleware('permission:billing.export');
+        Route::post('/billing/measure', [UsageBillingController::class, 'measure'])
+            ->middleware(['permission:billing.measure', 'throttle:6,1']);
+        Route::get('/billing/organizations', [UsageBillingController::class, 'index'])
+            ->middleware('permission:billing.view');
+        Route::get('/billing/organizations/{organization}', [UsageBillingController::class, 'show'])
+            ->middleware('permission:billing.view');
+        Route::put('/billing/organizations/{organization}/plan', [UsageBillingController::class, 'assignPlan'])
+            ->middleware('permission:billing.manage');
+        Route::get('/pricing-plans', [PricingPlanController::class, 'index'])
+            ->middleware('permission:pricing_plans.view');
+        // Before /pricing-plans/{pricingPlan} so "pdf" isn't read as a plan id.
+        Route::get('/pricing-plans/pdf', [PricingPlanController::class, 'pdf'])
+            ->middleware('permission:pricing_plans.view');
+        Route::post('/pricing-plans', [PricingPlanController::class, 'store'])
+            ->middleware('permission:pricing_plans.manage');
+        Route::get('/pricing-plans/{pricingPlan}', [PricingPlanController::class, 'show'])
+            ->middleware('permission:pricing_plans.view');
+        Route::put('/pricing-plans/{pricingPlan}', [PricingPlanController::class, 'update'])
+            ->middleware('permission:pricing_plans.manage');
+        Route::post('/pricing-plans/{pricingPlan}/activate', [PricingPlanController::class, 'activate'])
+            ->middleware('permission:pricing_plans.manage');
+        Route::post('/pricing-plans/{pricingPlan}/deactivate', [PricingPlanController::class, 'deactivate'])
+            ->middleware('permission:pricing_plans.manage');
+        Route::post('/pricing-plans/{pricingPlan}/make-default', [PricingPlanController::class, 'makeDefault'])
+            ->middleware('permission:pricing_plans.manage');
+        Route::delete('/pricing-plans/{pricingPlan}', [PricingPlanController::class, 'destroy'])
+            ->middleware('permission:pricing_plans.manage');
+
         Route::get('/organizations', [OrganizationController::class, 'index']);
         Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
         Route::post('/organizations/{organization}/block', [OrganizationController::class, 'block'])

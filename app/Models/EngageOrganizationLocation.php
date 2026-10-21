@@ -59,7 +59,25 @@ class EngageOrganizationLocation extends Model
             'business_information' => 'array',
             'is_default' => 'boolean',
             'blocked_at' => 'datetime',
+            'pricing_factor' => 'decimal:4',
         ];
+    }
+
+    /** Assigned pricing plan; null means the default plan applies (see effectivePricingPlan()). */
+    public function pricingPlan(): BelongsTo
+    {
+        return $this->belongsTo(PricingPlan::class);
+    }
+
+    public function usageSnapshots(): HasMany
+    {
+        return $this->hasMany(OrganizationUsageSnapshot::class);
+    }
+
+    /** The plan this organization is billed on: its assigned plan, else the default plan. */
+    public function effectivePricingPlan(): ?PricingPlan
+    {
+        return $this->pricingPlan ?? PricingPlan::default();
     }
 
     public function scopeActive(Builder $query): Builder
