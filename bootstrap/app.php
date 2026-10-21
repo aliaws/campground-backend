@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\CompressApiResponse;
+use App\Http\Middleware\DecompressApiRequest;
 use App\Http\Middleware\EnsureOrganizationNotBlocked;
 use App\Http\Middleware\PermissionMiddleware;
 use App\Http\Middleware\RoleMiddleware;
@@ -38,6 +40,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => PermissionMiddleware::class,
             'org.active' => EnsureOrganizationNotBlocked::class,
         ]);
+        // HTTP compression (docs/http-compression.md). Request bodies are
+        // unpacked before anything else touches them (first global
+        // middleware, ahead of CORS/TrimStrings); responses are compressed
+        // last (outermost in the api group) so the final body is packed.
+        $middleware->prepend(DecompressApiRequest::class);
+        $middleware->prependToGroup('api', CompressApiResponse::class);
         // This app is API-only — no `web` route group, no `login` named
         // route. Laravel's default guest-redirect logic calls route('login')
         // directly while building the AuthenticationException it's about to

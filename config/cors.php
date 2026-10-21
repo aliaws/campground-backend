@@ -20,7 +20,10 @@ return [
 
     'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    // Accept-Encoding: lets the browser app read the request-compression
+    // handshake (docs/http-compression.md). Content-Encoding on requests is
+    // covered by allowed_headers '*'.
+    'exposed_headers' => ['Accept-Encoding'],
 
     'max_age' => 0,
 
