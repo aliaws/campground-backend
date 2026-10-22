@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\V1\SiteMapElementController;
 use App\Http\Controllers\Api\V1\SiteMapIconTypeController;
 use App\Http\Controllers\Api\V1\StaffController;
 use App\Http\Controllers\Api\V1\Superadmin\CmsPageController;
+use App\Http\Controllers\Api\V1\Superadmin\CompressionTestController;
 use App\Http\Controllers\Api\V1\Superadmin\CustomScriptController;
 use App\Http\Controllers\Api\V1\Superadmin\EngageSettingsController;
 use App\Http\Controllers\Api\V1\Superadmin\MailSettingsController;
@@ -449,6 +450,15 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:mail.settings.view');
         Route::post('/mail-settings/test', [MailSettingsController::class, 'sendTest'])
             ->middleware(['permission:mail.settings.test', 'throttle:10,1']);
+
+        // Compression test: upload chunks plain vs gzip/deflate, and a large
+        // database-built response plain vs gzip/br/zstd. Nothing is stored.
+        Route::middleware('permission:compression.test')->group(function () {
+            Route::get('/compression-test', [CompressionTestController::class, 'info']);
+            Route::post('/compression-test/upload', [CompressionTestController::class, 'upload']);
+            Route::get('/compression-test/response', [CompressionTestController::class, 'response'])
+                ->middleware('throttle:60,1');
+        });
 
         // Custom Scripts: code snippets for the customer website and/or the
         // staff portal (head, body start, body end).

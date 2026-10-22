@@ -23,7 +23,17 @@ return [
     // Accept-Encoding: lets the browser app read the request-compression
     // handshake (docs/http-compression.md). Content-Encoding on requests is
     // covered by allowed_headers '*'.
-    'exposed_headers' => ['Accept-Encoding'],
+    // X-Compression-* / X-Build-Ms: read by the superadmin compression test page.
+    'exposed_headers' => [
+        'Accept-Encoding',
+        'X-Compression-Encoding',
+        'X-Compression-Original-Bytes',
+        'X-Compression-Sent-Bytes',
+        'X-Compression-Ms',
+        'X-Compression-Level',
+        'X-Compression-Note',
+        'X-Build-Ms',
+    ],
 
     'max_age' => 0,
 

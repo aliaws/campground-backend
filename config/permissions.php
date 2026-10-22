@@ -369,6 +369,11 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        'compression.test' => [
+            'group' => 'config', 'label' => 'Run the compression test',
+            'roles' => ['superadmin'], 'decider' => 'role',
+        ],
+
         'custom_scripts.view' => [
             'group' => 'config', 'label' => 'View custom scripts',
             'roles' => ['superadmin'], 'decider' => 'role',

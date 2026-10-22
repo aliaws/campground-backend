@@ -100,14 +100,100 @@ class DecompressApiRequestTest extends TestCase
             ->assertJsonPath('reason', 'decompressed_body_too_large');
     }
 
+    private function handshake(): string
+    {
+        return implode(', ', DecompressApiRequest::encodings());
+    }
+
     public function test_unsupported_encodings_are_415_with_handshake(): void
     {
-        foreach (['br', 'zstd', 'compress'] as $encoding) {
+        $unsupported = array_values(array_diff(['br', 'zstd', 'compress', 'xz'], DecompressApiRequest::encodings()));
+
+        foreach ($unsupported as $encoding) {
             $this->send('/api/v1/_test/echo', 'xxx', ['Content-Encoding' => $encoding])
                 ->assertStatus(415)
                 ->assertJsonPath('reason', 'unsupported_content_encoding')
-                ->assertHeader('Accept-Encoding', 'gzip, deflate');
+                ->assertHeader('Accept-Encoding', $this->handshake());
         }
+    }
+
+    public function test_brotli_body_reaches_the_controller_unpacked(): void
+    {
+        if (! function_exists('brotli_compress')) {
+            $this->markTestSkipped('The brotli PHP extension is not installed.');
+        }
+
+        $body = json_encode($this->payload());
+        $this->send('/api/v1/_test/echo', brotli_compress($body, 5), ['Content-Encoding' => 'br'])
+            ->assertOk()
+            ->assertJsonPath('input.name', 'Whispering Pines')
+            ->assertJsonPath('raw_sha1', sha1($body));
+    }
+
+    public function test_cut_off_brotli_is_400(): void
+    {
+        if (! function_exists('brotli_compress')) {
+            $this->markTestSkipped('The brotli PHP extension is not installed.');
+        }
+
+        $packed = brotli_compress(random_bytes(20000), 5);
+        $this->send('/api/v1/_test/echo', substr($packed, 0, (int) (strlen($packed) / 2)), ['Content-Encoding' => 'br'])
+            ->assertStatus(400)
+            ->assertJsonPath('reason', 'invalid_compressed_body');
+    }
+
+    public function test_cut_off_zstd_is_400(): void
+    {
+        if (! function_exists('zstd_compress')) {
+            $this->markTestSkipped('The zstd PHP extension is not installed.');
+        }
+
+        foreach ([random_bytes(20000), str_repeat('quiet site ', 5000)] as $body) {
+            $packed = zstd_compress($body, 3);
+            $this->send('/api/v1/_test/echo', substr($packed, 0, (int) (strlen($packed) / 2)), ['Content-Encoding' => 'zstd'])
+                ->assertStatus(400)
+                ->assertJsonPath('reason', 'invalid_compressed_body');
+        }
+    }
+
+    public function test_zstd_declared_size_is_read_from_the_frame_header(): void
+    {
+        $this->assertNull(DecompressApiRequest::zstdDeclaredSize('not zstd'));
+
+        if (function_exists('zstd_compress')) {
+            foreach ([10, 300, 70000, 5000000] as $length) {
+                $this->assertSame($length, DecompressApiRequest::zstdDeclaredSize(substr(zstd_compress(str_repeat('a', $length)), 0, 18)));
+            }
+        }
+    }
+
+    public function test_zstd_body_reaches_the_controller_unpacked(): void
+    {
+        if (! function_exists('zstd_compress')) {
+            $this->markTestSkipped('The zstd PHP extension is not installed.');
+        }
+
+        $body = json_encode($this->payload());
+        $this->send('/api/v1/_test/echo', zstd_compress($body, 3), ['Content-Encoding' => 'zstd'])
+            ->assertOk()
+            ->assertJsonPath('input.name', 'Whispering Pines')
+            ->assertJsonPath('raw_sha1', sha1($body));
+    }
+
+    public function test_brotli_and_zstd_bodies_bigger_than_max_bytes_are_413(): void
+    {
+        config(['compression.request.max_bytes' => 1000]);
+        $big = str_repeat('a', 50000);
+
+        foreach (['br' => 'brotli_compress', 'zstd' => 'zstd_compress'] as $encoding => $function) {
+            if (! function_exists($function)) {
+                continue;
+            }
+            $this->send('/api/v1/_test/echo', $function($big), ['Content-Encoding' => $encoding])
+                ->assertStatus(413)
+                ->assertJsonPath('reason', 'decompressed_body_too_large');
+        }
+        $this->assertTrue(true);
     }
 
     public function test_disabled_feature_is_415_and_advertises_identity(): void
@@ -130,20 +216,22 @@ class DecompressApiRequestTest extends TestCase
 
     public function test_error_answers_carry_cors_headers(): void
     {
-        $this->send('/api/v1/_test/echo', 'xxx', ['Content-Encoding' => 'br', 'Origin' => 'http://localhost:3000'])
+        $this->send('/api/v1/_test/echo', 'xxx', ['Content-Encoding' => 'xz', 'Origin' => 'http://localhost:3000'])
             ->assertStatus(415)
             ->assertHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
     }
 
     public function test_api_responses_carry_the_handshake_header(): void
     {
-        $this->send('/api/v1/_test/echo', '{}', [])->assertHeader('Accept-Encoding', 'gzip, deflate');
+        $this->send('/api/v1/_test/echo', '{}', [])->assertHeader('Accept-Encoding', $this->handshake());
     }
 
     public function test_cors_exposes_the_handshake_header(): void
     {
-        $this->send('/api/v1/_test/echo', '{}', ['Origin' => 'http://localhost:3000'])
-            ->assertHeader('Access-Control-Expose-Headers', 'Accept-Encoding');
+        $exposed = $this->send('/api/v1/_test/echo', '{}', ['Origin' => 'http://localhost:3000'])
+            ->headers->get('Access-Control-Expose-Headers');
+
+        $this->assertContains('Accept-Encoding', array_map('trim', explode(',', (string) $exposed)));
     }
 
     public function test_webhooks_stay_raw(): void

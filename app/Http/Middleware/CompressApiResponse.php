@@ -25,9 +25,19 @@ class CompressApiResponse
         'image/svg+xml',
     ];
 
+    /**
+     * Internal header set only by the superadmin compression test endpoint:
+     * auto | none | gzip | br | zstd. Never sent to the client.
+     */
+    public const TEST_HEADER = 'X-Compression-Test';
+
     public function handle(Request $request, Closure $next): Response
     {
         $response = $next($request);
+
+        if ($response->headers->has(self::TEST_HEADER)) {
+            return $this->handleTest($request, $response);
+        }
 
         if (! $this->shouldCompress($request, $response)) {
             return $response;
@@ -218,6 +228,86 @@ class CompressApiResponse
         };
 
         return is_string($packed) ? $packed : null;
+    }
+
+    /**
+     * Superadmin compression test: compress with the requested encoding (or
+     * none, or the normal negotiation for "auto") and report what was done in
+     * X-Compression-* headers. Asks proxies not to compress the body again
+     * (no-transform), so the browser sees exactly what the app sent.
+     */
+    private function handleTest(Request $request, Response $response): Response
+    {
+        $mode = strtolower(trim((string) $response->headers->get(self::TEST_HEADER)));
+        $response->headers->remove(self::TEST_HEADER);
+
+        $body = (string) $response->getContent();
+        $accepted = (string) $request->headers->get('Accept-Encoding', '');
+        $available = self::availableEncodings();
+        $encoding = null;
+        $note = null;
+
+        if ($mode === 'none') {
+            $note = 'Compression switched off for this request.';
+        } elseif ($mode === 'auto') {
+            if (! config('compression.response.enabled', true)) {
+                $note = 'Response compression is disabled (RESPONSE_COMPRESSION_ENABLED).';
+            } elseif (strlen($body) < (int) config('compression.response.min_bytes', 1024)) {
+                $note = 'Body is smaller than RESPONSE_COMPRESSION_MIN_BYTES.';
+            } else {
+                $encoding = self::negotiate($accepted, $available, (array) config('compression.response.order', ['zstd', 'br', 'gzip']));
+                $note = $encoding === null ? 'The browser and the server have no encoding in common.' : null;
+            }
+        } elseif (! in_array($mode, $available, true)) {
+            $note = "This server's PHP cannot produce {$mode}.";
+        } elseif (self::negotiate($accepted, [$mode], [$mode]) === null) {
+            $note = "The browser did not offer {$mode} in Accept-Encoding.";
+        } else {
+            $encoding = $mode;
+        }
+
+        $sent = $body;
+        $ms = 0.0;
+
+        if ($encoding !== null) {
+            $started = hrtime(true);
+            $packed = $this->encode($encoding, $body);
+            $ms = (hrtime(true) - $started) / 1e6;
+
+            if ($packed === null) {
+                $note = "{$encoding} compression failed.";
+                $encoding = null;
+            } elseif ($mode === 'auto' && strlen($packed) >= strlen($body)) {
+                // Same rule as normal responses.
+                $note = 'Compressed body was not smaller, so it was sent plain.';
+                $encoding = null;
+            } else {
+                $sent = $packed;
+            }
+        }
+
+        if ($encoding !== null) {
+            $response->setContent($sent);
+            $response->headers->set('Content-Encoding', $encoding);
+            $response->headers->set('Content-Length', (string) strlen($sent));
+        }
+
+        $this->addVary($response);
+        $response->headers->set('Cache-Control', 'no-store, no-transform');
+        $response->headers->set('Timing-Allow-Origin', '*');
+        $response->headers->set('X-Compression-Encoding', $encoding ?? 'identity');
+        $response->headers->set('X-Compression-Original-Bytes', (string) strlen($body));
+        $response->headers->set('X-Compression-Sent-Bytes', (string) strlen($sent));
+        $response->headers->set('X-Compression-Ms', number_format($ms, 3, '.', ''));
+        if ($encoding !== null) {
+            $level = (int) (((array) config('compression.response.levels', []))[$encoding] ?? 0);
+            $response->headers->set('X-Compression-Level', (string) $level);
+        }
+        if ($note !== null) {
+            $response->headers->set('X-Compression-Note', $note);
+        }
+
+        return $response;
     }
 
     private function addVary(Response $response): void
