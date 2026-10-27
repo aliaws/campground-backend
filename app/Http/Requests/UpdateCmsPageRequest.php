@@ -62,7 +62,11 @@ class UpdateCmsPageRequest extends FormRequest
                 // On/off switches: a section that is off stays saved but
                 // is not shown on the public page.
                 'content.show_body' => ['required', 'boolean'],
+                'content.show_videos' => ['sometimes', 'boolean'],
                 'content.embed.enabled' => ['required', 'boolean'],
+                // Order of the three sections on the public page.
+                'content.section_order' => ['sometimes', 'array', 'max:3'],
+                'content.section_order.*' => ['required', 'string', 'distinct', 'in:content,embed,videos'],
                 'content.embed' => ['required', 'array'],
                 // A page URL, or the embed code a provider hands out (an
                 // <iframe> plus its <script>). The public page reads the
@@ -79,6 +83,8 @@ class UpdateCmsPageRequest extends FormRequest
                 'content.videos.*.url' => ['required', 'url:http,https', 'max:2000'],
                 'content.videos.*.thumbnail_url' => ['nullable', 'url:http,https', 'max:2000'],
                 'content.videos.*.sort_order' => ['required', 'integer'],
+                // Off = the video is kept but not shown on the public page.
+                'content.videos.*.is_visible' => ['sometimes', 'boolean'],
             ];
         }
 
