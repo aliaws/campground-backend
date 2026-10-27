@@ -96,6 +96,7 @@ Route::prefix('v1')->group(function () {
             // Interactive site map (customer/visitor viewer)
             Route::get('/site-maps', [PublicSiteMapController::class, 'index']);
             Route::get('/site-maps/{siteMap}', [PublicSiteMapController::class, 'show']);
+            Route::get('/site-maps/{siteMap}/availability', [PublicSiteMapController::class, 'availability']);
         });
         Route::middleware('throttle:customer-booking')->group(function () {
             Route::post('/bookings', [PublicBookingController::class, 'store']);
