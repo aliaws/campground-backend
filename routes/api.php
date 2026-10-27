@@ -229,6 +229,8 @@ Route::prefix('v1')->group(function () {
         // Site maps — viewing only; editing (the map builder) is Tier 2
         Route::get('/site-maps', [SiteMapController::class, 'index']);
         Route::get('/site-maps/{siteMap}', [SiteMapController::class, 'show']);
+        Route::get('/site-maps/{siteMap}/image/download', [SiteMapController::class, 'downloadImage'])
+            ->middleware('permission:site_map.view');
         Route::get('/site-map-icon-types', [SiteMapIconTypeController::class, 'index']);
 
         // Engage OAuth — Refresh Token page, staff-visible too (2026-08-14,

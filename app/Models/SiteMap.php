@@ -14,6 +14,8 @@ class SiteMap extends Model
     protected $fillable = [
         'name',
         'image_url',
+        'image_width',
+        'image_height',
         'is_default',
         'engage_organization_location_id',
     ];
@@ -22,6 +24,8 @@ class SiteMap extends Model
     {
         return [
             'is_default' => 'boolean',
+            'image_width' => 'integer',
+            'image_height' => 'integer',
         ];
     }
 

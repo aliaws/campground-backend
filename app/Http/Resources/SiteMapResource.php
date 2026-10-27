@@ -13,6 +13,8 @@ class SiteMapResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'image_url' => $this->image_url,
+            'image_width' => $this->image_width,
+            'image_height' => $this->image_height,
             'is_default' => $this->is_default,
             'elements' => SiteMapElementResource::collection($this->whenLoaded('elements')),
             'created_at' => $this->created_at,

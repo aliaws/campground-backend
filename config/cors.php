@@ -33,6 +33,7 @@ return [
         'X-Compression-Level',
         'X-Compression-Note',
         'X-Build-Ms',
+        'Content-Disposition',
     ],
 
     'max_age' => 0,

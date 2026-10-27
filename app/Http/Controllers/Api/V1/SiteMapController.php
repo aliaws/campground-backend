@@ -11,6 +11,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SiteMapController extends Controller
 {
@@ -121,9 +123,17 @@ class SiteMapController extends Controller
         // spot of the new image. Wrapped in a transaction so the map never
         // ends up with a new photo but stale markers (or vice versa) if
         // anything fails partway through.
-        DB::transaction(function () use ($siteMap, $path) {
+        // The real pixel size lets the canvas take the photo's own shape, so
+        // the whole photo is shown instead of a cropped 4:3 middle.
+        $size = @getimagesize(Storage::disk('public')->path($path));
+
+        DB::transaction(function () use ($siteMap, $path, $size) {
             $siteMap->elements()->delete();
-            $siteMap->update(['image_url' => PublicStorageUrl::absolute(Storage::url($path))]);
+            $siteMap->update([
+                'image_url' => PublicStorageUrl::absolute(Storage::url($path)),
+                'image_width' => $size ? $size[0] : null,
+                'image_height' => $size ? $size[1] : null,
+            ]);
         });
 
         return response()->json([
@@ -143,7 +153,7 @@ class SiteMapController extends Controller
         // marker's position is meaningless, so clear them together with it.
         DB::transaction(function () use ($siteMap) {
             $siteMap->elements()->delete();
-            $siteMap->update(['image_url' => null]);
+            $siteMap->update(['image_url' => null, 'image_width' => null, 'image_height' => null]);
         });
 
         return response()->json([
@@ -151,5 +161,29 @@ class SiteMapController extends Controller
             'data' => new SiteMapResource($siteMap->fresh()),
             'message' => 'Map photo and markers removed.',
         ]);
+    }
+
+    /**
+     * Downloads the map's uploaded photo as a file. Open to everyone who can
+     * view the map (site_map.view), not only those who can edit it.
+     */
+    public function downloadImage(Request $request, SiteMap $siteMap): StreamedResponse|JsonResponse
+    {
+        if ($siteMap->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Map not found.'], 404);
+        }
+
+        $path = $siteMap->image_url && PublicStorageUrl::isOwnStoragePath($siteMap->image_url)
+            ? PublicStorageUrl::diskRelativePath($siteMap->image_url)
+            : null;
+
+        if (! $path || ! Storage::disk('public')->exists($path)) {
+            return response()->json(['success' => false, 'data' => null, 'message' => 'This map has no photo to download.'], 404);
+        }
+
+        $extension = pathinfo($path, PATHINFO_EXTENSION) ?: 'jpg';
+        $filename = (Str::slug($siteMap->name) ?: 'site-map').'.'.$extension;
+
+        return Storage::disk('public')->download($path, $filename);
     }
 }
