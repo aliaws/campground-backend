@@ -48,16 +48,7 @@ class ProductService
             $query->where('engage_sync_status', $filters['engage_sync_status']);
         }
 
-        if (! empty($filters['search'])) {
-            // Case-insensitive on every driver (Postgres' LIKE is
-            // case-sensitive) — also backs the Bookings page's campsite
-            // autocomplete.
-            $term = '%'.mb_strtolower($filters['search']).'%';
-            $query->where(function (Builder $q) use ($term) {
-                $q->whereRaw('LOWER(name) LIKE ?', [$term])
-                    ->orWhereRaw('LOWER(description) LIKE ?', [$term]);
-            });
-        }
+        $this->applySearch($query, $filters);
 
         if (! empty($filters['category_id'])) {
             $query->whereHas('categories', fn (Builder $q) => $q->where('engage_categories.id', $filters['category_id']));
@@ -439,12 +430,7 @@ class ProductService
 
         $this->scopeToLocationOrAllActiveOrgs($query, $filters);
 
-        if (! empty($filters['search'])) {
-            $query->where(function (Builder $q) use ($filters) {
-                $q->where('name', 'like', "%{$filters['search']}%")
-                    ->orWhere('description', 'like', "%{$filters['search']}%");
-            });
-        }
+        $this->applySearch($query, $filters);
 
         // Multiple categories, OR'd together — a product matching any one
         // of the selected categories is included.
@@ -477,6 +463,20 @@ class ProductService
         return $query->paginate($filters['per_page'] ?? 15);
     }
 
+    /** Name or description contains the search text, ignoring case (Postgres' LIKE is case-sensitive). */
+    private function applySearch(Builder $query, array $filters): void
+    {
+        if (empty($filters['search'])) {
+            return;
+        }
+
+        $term = '%'.mb_strtolower($filters['search']).'%';
+        $query->where(function (Builder $q) use ($term) {
+            $q->whereRaw('LOWER(name) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(description) LIKE ?', [$term]);
+        });
+    }
+
     /**
      * Bookable services for the storefront: GHL-linked rental listings only.
      * Local-only fast query — live detail fetched on show/quote.
@@ -490,12 +490,7 @@ class ProductService
 
         $this->scopeToLocationOrAllActiveOrgs($query, $filters);
 
-        if (! empty($filters['search'])) {
-            $query->where(function (Builder $q) use ($filters) {
-                $q->where('name', 'like', "%{$filters['search']}%")
-                    ->orWhere('description', 'like', "%{$filters['search']}%");
-            });
-        }
+        $this->applySearch($query, $filters);
 
         if (! empty($filters['category_id'])) {
             $query->whereHas('categories', fn (Builder $q) => $q->where('engage_categories.id', $filters['category_id']));

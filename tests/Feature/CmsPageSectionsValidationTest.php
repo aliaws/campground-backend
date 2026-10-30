@@ -96,6 +96,35 @@ class CmsPageSectionsValidationTest extends TestCase
         $this->assertArrayHasKey('content.hero.video_overlay_opacity', $errors);
     }
 
+    public function test_hero_video_layout_is_validated(): void
+    {
+        foreach (['background', 'above_search', 'split'] as $layout) {
+            $errors = $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['hero' => ['video_layout' => $layout]]);
+            $this->assertArrayNotHasKey('content.hero.video_layout', $errors);
+        }
+
+        $errors = $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['hero' => ['video_layout' => 'sideways']]);
+        $this->assertArrayHasKey('content.hero.video_layout', $errors);
+    }
+
+    public function test_search_bar_placement_is_validated(): void
+    {
+        foreach (['above_heading', 'under_heading', 'hero'] as $placement) {
+            $errors = $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['search_filters' => ['placement' => $placement]]);
+            $this->assertArrayNotHasKey('content.search_filters.placement', $errors);
+        }
+
+        $errors = $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['search_filters' => ['placement' => 'footer', 'enabled' => 'maybe']]);
+        $this->assertArrayHasKey('content.search_filters.placement', $errors);
+        $this->assertArrayHasKey('content.search_filters.enabled', $errors);
+    }
+
+    public function test_hero_min_height_is_validated(): void
+    {
+        $this->assertArrayNotHasKey('content.hero.min_height', $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['hero' => ['min_height' => 420]]));
+        $this->assertArrayHasKey('content.hero.min_height', $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['hero' => ['min_height' => 50]]));
+    }
+
     public function test_an_unknown_hero_media_type_is_refused(): void
     {
         $errors = $this->errorsFor(CmsPage::SLUG_HOME_PAGE, ['hero' => ['media_type' => 'gif']]);

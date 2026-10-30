@@ -439,8 +439,10 @@ TEXT;
                 ['id' => 'shop_categories', 'type' => 'shop_categories', 'enabled' => true],
             ],
             'hero' => [
+                'min_height' => 420,
                 'media_type' => 'background',
                 'video_code' => null,
+                'video_layout' => 'background',
                 'video_overlay_opacity' => 30,
                 'video_sound_button' => true,
                 'show_badge' => true,
@@ -494,6 +496,8 @@ TEXT;
             // Location/Check-in/Check-out/Guests + a "Find Campsites" CTA;
             // the min/max price fields still exist, just hidden by default.
             'search_filters' => [
+                'enabled' => true,
+                'placement' => 'above_heading',
                 'search_label' => 'Location or Site',
                 'search_placeholder' => 'Search rentals, tent or RV...',
                 'checkin_label' => 'Check-in',

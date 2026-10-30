@@ -174,6 +174,12 @@ class UpdateCmsPageRequest extends FormRequest
                 // public page reads the address out of it; nothing else in
                 // the code is rendered.
                 'content.hero.video_code' => ['nullable', 'string', 'max:5000'],
+                // The hero's minimum height in pixels; it still grows to fit
+                // its content.
+                'content.hero.min_height' => ['sometimes', 'integer', 'min:200', 'max:1000'],
+                // Where the video sits: behind the text, above the search
+                // card, or to the right of the text.
+                'content.hero.video_layout' => ['sometimes', 'string', 'in:background,above_search,split'],
                 // How much of the overlay stays over a video, in percent.
                 'content.hero.video_overlay_opacity' => ['sometimes', 'integer', 'min:0', 'max:100'],
                 // Button visitors click to hear the video: browsers refuse
@@ -244,6 +250,10 @@ class UpdateCmsPageRequest extends FormRequest
                 // hardcoded on the frontend before this, no CMS field for
                 // it existed at all.
                 'content.search_filters' => ['required', 'array'],
+                // Part of Our Rentals: off hides it, and it sits above or
+                // under that section's heading (or inside the hero).
+                'content.search_filters.enabled' => ['sometimes', 'boolean'],
+                'content.search_filters.placement' => ['sometimes', 'string', 'in:above_heading,under_heading,hero'],
                 'content.search_filters.search_label' => ['required', 'string', 'max:100'],
                 'content.search_filters.search_placeholder' => ['required', 'string', 'max:100'],
                 'content.search_filters.checkin_label' => ['required', 'string', 'max:100'],
