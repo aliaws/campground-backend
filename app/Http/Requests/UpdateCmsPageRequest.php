@@ -164,9 +164,28 @@ class UpdateCmsPageRequest extends FormRequest
             // together here. $this->siteTitleRules()/styleRules() are
             // plain dot-path builders, so nesting them under `hero.` needs
             // no changes to either helper.
-            return $rules + $this->siteTitleRules('hero.heading') + $this->styleRules('hero.style') + [
+            return $rules + $this->siteTitleRules('hero.heading') + $this->styleRules('hero.style') + $this->pageSectionRules(['hero', 'rentals', 'shop_categories']) + [
                 'content' => ['required', 'array'],
                 'content.hero' => ['required', 'array'],
+                // Which background the hero shows: the existing image/color
+                // (`style` below) or a video. Switching keeps both saved.
+                'content.hero.media_type' => ['sometimes', 'string', 'in:background,video'],
+                // A video link or a provider's <iframe> embed code. The
+                // public page reads the address out of it; nothing else in
+                // the code is rendered.
+                'content.hero.video_code' => ['nullable', 'string', 'max:5000'],
+                // How much of the overlay stays over a video, in percent.
+                'content.hero.video_overlay_opacity' => ['sometimes', 'integer', 'min:0', 'max:100'],
+                // Button visitors click to hear the video: browsers refuse
+                // to autoplay with sound.
+                'content.hero.video_sound_button' => ['sometimes', 'boolean'],
+                // Off = the part is kept but not shown (show_text_color:
+                // the default text color is used instead of the custom one).
+                'content.hero.show_badge' => ['sometimes', 'boolean'],
+                'content.hero.show_heading' => ['sometimes', 'boolean'],
+                'content.hero.show_subtext' => ['sometimes', 'boolean'],
+                'content.hero.show_text_color' => ['sometimes', 'boolean'],
+                'content.hero.show_background' => ['sometimes', 'boolean'],
                 'content.hero.badge' => ['required', 'array'],
                 // Built-in icon-gallery key (lib/utils/mapIcons.ts on the
                 // frontend) — free-text rather than an `in:` whitelist kept
@@ -278,7 +297,7 @@ class UpdateCmsPageRequest extends FormRequest
         }
 
         if ($slug === CmsPage::SLUG_SHOP) {
-            return $rules + [
+            return $rules + $this->pageSectionRules(['banner', 'products']) + [
                 'content' => ['required', 'array'],
                 'content.badge' => ['required', 'array'],
                 'content.badge.icon' => ['required', 'string', 'max:64'],
@@ -300,6 +319,30 @@ class UpdateCmsPageRequest extends FormRequest
         return $rules + [
             'content' => ['required', 'array'],
             'content.body' => ['required', 'string', 'max:50000'],
+        ];
+    }
+
+    /**
+     * The page's ordered section list (home-page and shop): its built-in
+     * sections plus any custom title + HTML sections. Optional, so a page
+     * saved before this existed still validates; the frontend fills in the
+     * default list when it is missing.
+     *
+     * @param  array<int, string>  $builtInTypes
+     */
+    private function pageSectionRules(array $builtInTypes): array
+    {
+        $types = implode(',', [...$builtInTypes, 'custom']);
+
+        return [
+            'content.page_sections' => ['sometimes', 'array', 'max:30'],
+            'content.page_sections.*.id' => ['required', 'string', 'max:64', 'distinct'],
+            'content.page_sections.*.type' => ['required', 'string', "in:{$types}"],
+            'content.page_sections.*.enabled' => ['required', 'boolean'],
+            'content.page_sections.*.title' => ['nullable', 'string', 'max:200'],
+            // Superadmin-authored HTML, may be an <iframe> embed. Sanitized
+            // when rendered on the public page.
+            'content.page_sections.*.html' => ['nullable', 'string', 'max:50000'],
         ];
     }
 

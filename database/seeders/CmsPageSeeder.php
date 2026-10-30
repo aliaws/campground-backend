@@ -433,7 +433,21 @@ TEXT;
                 'highlight_color' => null,
                 'highlight_color_dark' => '#22a06b',
             ],
+            'page_sections' => [
+                ['id' => 'hero', 'type' => 'hero', 'enabled' => true],
+                ['id' => 'rentals', 'type' => 'rentals', 'enabled' => true],
+                ['id' => 'shop_categories', 'type' => 'shop_categories', 'enabled' => true],
+            ],
             'hero' => [
+                'media_type' => 'background',
+                'video_code' => null,
+                'video_overlay_opacity' => 30,
+                'video_sound_button' => true,
+                'show_badge' => true,
+                'show_heading' => true,
+                'show_subtext' => true,
+                'show_text_color' => true,
+                'show_background' => true,
                 'badge' => [
                     'icon' => 'compass',
                     'text' => 'Explore the Outdoors',
@@ -527,6 +541,10 @@ TEXT;
     private function shopContent(): array
     {
         return [
+            'page_sections' => [
+                ['id' => 'banner', 'type' => 'banner', 'enabled' => true],
+                ['id' => 'products', 'type' => 'products', 'enabled' => true],
+            ],
             'badge' => [
                 'icon' => 'store',
                 'text' => 'Camp store',
