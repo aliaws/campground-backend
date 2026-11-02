@@ -11,6 +11,7 @@ use App\Models\EngageRentalTransaction;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class BookingService
@@ -323,7 +324,9 @@ class BookingService
             throw new \InvalidArgumentException('Only requested bookings can be confirmed this way.');
         }
 
-        $this->ghlBookingService->createBooking($booking);
+        if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b))) {
+            throw new \InvalidArgumentException('This booking is being created in Lead Connector right now. Refresh in a moment.');
+        }
         $booking->update(['status' => 'confirmed']);
         $this->rentalTransactionService->createFromBooking($booking);
         $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
@@ -429,9 +432,44 @@ class BookingService
             throw new \InvalidArgumentException('This campsite is not free in Lead Connector for these dates. Change the dates or campsite, or cancel and refund.');
         }
 
-        $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+        if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, recordPaymentAs: 'card'))) {
+            throw new \InvalidArgumentException('This booking is being created in Lead Connector right now. Refresh in a moment.');
+        }
 
         return $this->finishLeadConnectorFix($booking);
+    }
+
+    /**
+     * Creates the Lead Connector calendar booking for $booking at most once.
+     * Lead Connector sends each InvoicePaid webhook twice, and the customer
+     * confirmation page re-checks the invoice every few seconds, so several
+     * requests can get here at the same moment for one booking — each one
+     * used to create its own calendar booking and invoice.
+     *
+     * Only the request holding the lock runs $create, and it re-reads the
+     * booking first, so it skips the call when an earlier request already
+     * created it. Returns false when another request holds the lock (it is
+     * creating the booking right now); true otherwise.
+     */
+    private function createInLeadConnectorOnce(EngageBooking $booking, callable $create): bool
+    {
+        $lock = Cache::lock('booking:lead-connector-create:'.$booking->id, 120);
+
+        if (! $lock->get()) {
+            return false;
+        }
+
+        try {
+            $booking->refresh();
+
+            if (empty($booking->ghl_booking_id)) {
+                $create($booking);
+            }
+
+            return true;
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -690,12 +728,21 @@ class BookingService
         }
 
         // Guard against duplicate real GHL calendar bookings: this runs from
-        // the InvoicePaid webhook, live invoice-status reconciliation, cash
-        // pay, and payment-status updates — so it must tolerate being called
-        // more than once for the same booking.
+        // the InvoicePaid webhook (which Lead Connector sends twice), live
+        // invoice-status reconciliation (the confirmation page polls it),
+        // cash pay, and payment-status updates — often at the same moment.
         if (! $booking->ghl_booking_id) {
             try {
-                $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+                $created = $this->createInLeadConnectorOnce(
+                    $booking,
+                    fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, recordPaymentAs: 'card'),
+                );
+
+                // Another request is creating it right now and will confirm it.
+                if (! $created) {
+                    return $booking->fresh()->load(['customer', 'product', 'transactions']);
+                }
+
                 $booking = $booking->fresh() ?? $booking;
             } catch (\Exception $e) {
                 // Payment is already collected — confirm locally anyway so the
@@ -727,7 +774,10 @@ class BookingService
     {
         if (! $booking->ghl_booking_id) {
             try {
-                $this->ghlBookingService->createBooking($booking, skipPaymentEmail: true);
+                $this->createInLeadConnectorOnce(
+                    $booking,
+                    fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, skipPaymentEmail: true),
+                );
             } catch (\Exception $e) {
                 Log::error('Lead Connector booking creation failed (cash pay retry)', [
                     'booking_id' => $booking->id,

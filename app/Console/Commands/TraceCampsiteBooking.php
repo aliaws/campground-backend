@@ -352,8 +352,10 @@ class TraceCampsiteBooking extends Command
                     'skipSchedulingNotice' => true,
                     // Check-in/out date + the variant's booking times, in the
                     // location's timezone, converted to UTC.
-                    'startDate' => $this->isoUtc($checkIn, $booking->booking_start_time ?? '09:00', $timezone),
-                    'endDate' => $this->isoUtc($checkOut, $booking->booking_end_time ?? '17:00', $timezone),
+                    // Same time on both days when the campsite has none, so Lead Connector
+                    // counts exactly the nights paid (GhlBookingService::stayWindow()).
+                    'startDate' => $this->isoUtc($checkIn, $booking->booking_start_time ?? $booking->booking_end_time ?? '12:00', $timezone),
+                    'endDate' => $this->isoUtc($checkOut, $booking->booking_end_time ?? $booking->booking_start_time ?? '12:00', $timezone),
                     'quantity' => $quantity,
                     'overrideAvailability' => true,
                     'skipLookBusy' => false,

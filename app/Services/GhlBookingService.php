@@ -34,6 +34,9 @@ class GhlBookingService
      */
     private const INVOICE_API_VERSION = 'v3';
 
+    /** Check-in and check-out time for a campsite with no fixed times (see stayWindow()). */
+    private const DEFAULT_STAY_TIME = '12:00';
+
     public function __construct(
         private GhlClient $client,
         private GhlService $ghlService,
@@ -166,8 +169,7 @@ class GhlBookingService
         $timezone = $this->client->getTimezone();
         $payload = [
             'serviceId' => $rental->ghl_id,
-            'startTime' => $this->buildIsoDateTime($checkIn, $startTime ?? '09:00', $timezone),
-            'endTime' => $this->buildIsoDateTime($checkOut, $endTime ?? '17:00', $timezone),
+            ...$this->stayWindow($checkIn, $checkOut, $startTime, $endTime, $timezone, 'startTime', 'endTime'),
             'quantity' => max($quantity, 1),
             'timezone' => $timezone,
         ];
@@ -689,15 +691,14 @@ class GhlBookingService
             'id' => $rental->ghl_id,
             'position' => 0,
             'skipSchedulingNotice' => true,
-            'startDate' => $this->buildIsoDateTime(
+            ...$this->stayWindow(
                 $booking->check_in_date->format('Y-m-d'),
-                $booking->booking_start_time ?? $detail->bookingStartTime() ?? '09:00',
-                $timezone,
-            ),
-            'endDate' => $this->buildIsoDateTime(
                 $booking->check_out_date->format('Y-m-d'),
-                $booking->booking_end_time ?? $detail->bookingEndTime() ?? '17:00',
+                $booking->booking_start_time ?? $detail->bookingStartTime(),
+                $booking->booking_end_time ?? $detail->bookingEndTime(),
                 $timezone,
+                'startDate',
+                'endDate',
             ),
             'quantity' => max((int) $booking->quantity, 1),
             'overrideAvailability' => true,
@@ -711,6 +712,28 @@ class GhlBookingService
             'bookingPeriodType' => $baseDetail->bookingPeriodType() ?? 'date-selection',
             'isVariantsEnabled' => $baseDetail->isVariantsEnabled(),
             'productId' => $detail->paymentsProductId(),
+        ];
+    }
+
+    /**
+     * Start and end of the stay sent to Lead Connector. It prices a rental by
+     * the hours booked (whole days, rounded up), so the times decide what the
+     * invoice it creates will total. Fixed check-in/out times from the
+     * campsite are used as they are. A campsite without them (date-time
+     * selection, no times set) gets the same time on both days, so Lead
+     * Connector counts exactly the nights the customer paid for — the old
+     * 9:00 -> 17:00 default added a day and left the invoice partially paid.
+     *
+     * @return array<string, string>
+     */
+    private function stayWindow(string $checkIn, string $checkOut, ?string $startTime, ?string $endTime, string $timezone, string $startKey, string $endKey): array
+    {
+        $startTime ??= $endTime ?? self::DEFAULT_STAY_TIME;
+        $endTime ??= $startTime;
+
+        return [
+            $startKey => $this->buildIsoDateTime($checkIn, $startTime, $timezone),
+            $endKey => $this->buildIsoDateTime($checkOut, $endTime, $timezone),
         ];
     }
 
