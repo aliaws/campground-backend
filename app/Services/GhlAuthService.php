@@ -36,6 +36,9 @@ class GhlAuthService
         'calendars/events.readonly',
         'calendars/events.write',
         'calendars/resources.readonly',
+        // Refund check: read a payment's amountRefunded (GET payments/transactions).
+        // Takes effect only after Lead Connector is re-authorized.
+        'payments/transactions.readonly',
         // Added 2026-08-11 for GET calendars/service-categories (Service
         // Categories feature) — that endpoint isn't in GHL's own published
         // scope docs (confirmed by reading the live Scopes reference

@@ -150,6 +150,35 @@ class GhlBookingService
     }
 
     /**
+     * Asks Lead Connector whether the campsite is free for these dates, the
+     * same check its own booking page makes (POST backend
+     * calendars/bookings/rental/validate). createBooking() sends
+     * overrideAvailability:true, so without this check a booking created
+     * after the fact could double-book a site. Times default like
+     * createBooking() does when the campsite has none.
+     */
+    public function isRentalAvailable(EngageProductRental $rental, string $checkIn, string $checkOut, int $quantity = 1, ?string $startTime = null, ?string $endTime = null): bool
+    {
+        if (! $rental->ghl_id) {
+            throw new \InvalidArgumentException('This campsite is not linked to Lead Connector. Pull services first.');
+        }
+
+        $timezone = $this->client->getTimezone();
+        $payload = [
+            'serviceId' => $rental->ghl_id,
+            'startTime' => $this->buildIsoDateTime($checkIn, $startTime ?? '09:00', $timezone),
+            'endTime' => $this->buildIsoDateTime($checkOut, $endTime ?? '17:00', $timezone),
+            'quantity' => max($quantity, 1),
+            'timezone' => $timezone,
+        ];
+
+        $response = $this->client->postToBackend('calendars/bookings/rental/validate', $payload);
+        $this->logOutbound('booking.validate', $payload, $response);
+
+        return (bool) ($response['isAvailable'] ?? false);
+    }
+
+    /**
      * Create a standalone GHL "Text2Pay" invoice for a customer booking and persist
      * its hosted payment URL — no calendar booking required. Used to let a customer pay
      * immediately (e.g. via a QR code) without waiting for staff to confirm availability.

@@ -32,6 +32,7 @@ class ProductTransactionService
     {
         return $this->filteredQuery($filters)
             ->with(['customer', 'items.product', 'booking', 'organizationLocation'])
+            ->withSum('refunds as refunded_amount', 'amount')
             ->orderBy('created_at', 'desc')
             ->paginate($filters['per_page'] ?? 15);
     }

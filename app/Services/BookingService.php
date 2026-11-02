@@ -122,9 +122,15 @@ class BookingService
             $query->whereDoesntHave('transactions', $paid);
         }
 
+        // Paid bookings that never reached Lead Connector (see EngageBooking::isPaidMissingInLeadConnector()).
+        if (($filters['lead_connector'] ?? null) === 'missing') {
+            $query->paidMissingInLeadConnector();
+        }
+
         $this->applySort($query, $filters['sort_by'] ?? null, $filters['sort_dir'] ?? null);
 
         return $query->with(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions', 'organizationLocation'])
+            ->withSum('refunds as refunded_amount', 'amount')
             ->paginate($filters['per_page'] ?? 15);
     }
 
@@ -394,6 +400,141 @@ class BookingService
         $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
+    }
+
+    /**
+     * Staff fix for a paid booking that never reached Lead Connector (see
+     * EngageBooking::isPaidMissingInLeadConnector()): creates the calendar
+     * booking for the dates already paid for. The new invoice Lead Connector
+     * makes with it is recorded as paid at once, so the customer isn't asked
+     * to pay twice — the same steps autoConfirmAfterPayment() runs.
+     *
+     * Refused when the same stay already exists in Lead Connector as another
+     * booking (refund this one instead) or the site isn't free there.
+     */
+    public function createMissingInLeadConnector(EngageBooking $booking): EngageBooking
+    {
+        $booking->loadMissing(['transactions', 'productRental']);
+        $this->assertFixableInLeadConnector($booking);
+
+        if (! $booking->productRental
+            || ! $this->ghlBookingService->isRentalAvailable(
+                $booking->productRental,
+                $booking->check_in_date->format('Y-m-d'),
+                $booking->check_out_date->format('Y-m-d'),
+                (int) $booking->quantity,
+                $booking->booking_start_time,
+                $booking->booking_end_time,
+            )) {
+            throw new \InvalidArgumentException('This campsite is not free in Lead Connector for these dates. Change the dates or campsite, or cancel and refund.');
+        }
+
+        $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+
+        return $this->finishLeadConnectorFix($booking);
+    }
+
+    /**
+     * Same fix on other dates and/or another campsite (an offer agreed with
+     * the customer). The amounts the customer paid are kept as they are.
+     * Checked locally and in Lead Connector first; if creating the booking
+     * in Lead Connector still fails, the booking goes back to what it was.
+     */
+    public function moveAndCreateInLeadConnector(EngageBooking $booking, string $campsiteId, string $checkIn, string $checkOut): EngageBooking
+    {
+        $booking->loadMissing(['transactions', 'product', 'productRental']);
+        $this->assertFixableInLeadConnector($booking);
+
+        if ($checkOut <= $checkIn) {
+            throw new \InvalidArgumentException('Check-out must be after check-in.');
+        }
+
+        $resolved = $this->resolver->resolve($campsiteId, $booking->engage_organization_location_id);
+        if (! $resolved) {
+            throw new \InvalidArgumentException('That campsite was not found.');
+        }
+        [$product, $rental] = $resolved;
+
+        $detail = $this->gateway->fetchRentalDetail($rental);
+        $quantity = max((int) $booking->quantity, 1);
+
+        // Local check, not counting this booking itself.
+        if ($detail->quantity() !== null) {
+            $booked = (int) EngageBooking::where('product_rental_id', $rental->id)
+                ->where('id', '!=', $booking->id)
+                ->where('status', '!=', 'cancelled')
+                ->where('check_in_date', '<', $checkOut)
+                ->where('check_out_date', '>', $checkIn)
+                ->sum('quantity');
+
+            if ($detail->quantity() - $booked < $quantity) {
+                throw new \InvalidArgumentException('This campsite is already booked for those dates.');
+            }
+        }
+
+        $startTime = $detail->bookingStartTime();
+        $endTime = $detail->bookingEndTime();
+
+        if (! $this->ghlBookingService->isRentalAvailable($rental, $checkIn, $checkOut, $quantity, $startTime, $endTime)) {
+            throw new \InvalidArgumentException('This campsite is not free in Lead Connector for those dates.');
+        }
+
+        $original = $booking->only(['product_id', 'product_rental_id', 'check_in_date', 'check_out_date', 'booking_start_time', 'booking_end_time', 'notes']);
+        $from = trim(($booking->product?->name ?? 'campsite').', '.$booking->check_in_date->format('M j').' – '.$booking->check_out_date->format('M j, Y'));
+
+        $booking->update([
+            'product_id' => $product->id,
+            'product_rental_id' => $rental->id,
+            'check_in_date' => $checkIn,
+            'check_out_date' => $checkOut,
+            'booking_start_time' => $startTime,
+            'booking_end_time' => $endTime,
+            'notes' => trim(($booking->notes ? $booking->notes."\n" : '')."Moved by staff from {$from}; amount paid kept."),
+        ]);
+        $booking->unsetRelation('product')->unsetRelation('productRental');
+
+        try {
+            $this->ghlBookingService->createBooking($booking, recordPaymentAs: 'card');
+        } catch (\Exception $e) {
+            $booking->update($original);
+
+            throw $e;
+        }
+
+        $booking->transactions()->update([
+            'product_id' => $product->id,
+            'product_rental_id' => $rental->id,
+            'rental_name' => $rental->name ?? $product->name,
+            'check_in_date' => $checkIn,
+            'check_out_date' => $checkOut,
+        ]);
+
+        return $this->finishLeadConnectorFix($booking);
+    }
+
+    private function assertFixableInLeadConnector(EngageBooking $booking): void
+    {
+        if (! $booking->isPaidMissingInLeadConnector()) {
+            throw new \InvalidArgumentException('Only a paid booking that is missing in Lead Connector can be fixed this way.');
+        }
+
+        if ($covering = $booking->coveringLeadConnectorBooking()) {
+            throw new \InvalidArgumentException(
+                'This stay is already booked in Lead Connector as another booking (#'.strtoupper(substr($covering->id, -8)).'). The customer probably paid twice: cancel and refund this one instead.'
+            );
+        }
+    }
+
+    private function finishLeadConnectorFix(EngageBooking $booking): EngageBooking
+    {
+        $booking = $booking->fresh() ?? $booking;
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        if ($booking->status !== 'confirmed') {
+            $booking->update(['status' => 'confirmed']);
+        }
+
+        return $booking->fresh()->load(['customer', 'product', 'productRental', 'transactions']);
     }
 
     /**

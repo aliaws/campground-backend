@@ -185,6 +185,56 @@ class EngageBooking extends Model
         return $this->hasMany(EngageRentalTransaction::class, 'booking_id');
     }
 
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(EngageRefund::class, 'booking_id');
+    }
+
+    /**
+     * Paid, not cancelled, but there is no Lead Connector calendar booking
+     * for it: the payment went through but creating the booking in Lead
+     * Connector failed. Staff fix it (create it there, possibly on other
+     * dates or another campsite) or cancel and refund. Needs `transactions`.
+     */
+    public function isPaidMissingInLeadConnector(): bool
+    {
+        return $this->status !== 'cancelled'
+            && empty($this->ghl_booking_id)
+            && $this->isPaid();
+    }
+
+    /** SQL counterpart of isPaidMissingInLeadConnector(). */
+    public function scopePaidMissingInLeadConnector(Builder $query): Builder
+    {
+        return $query->where('status', '!=', 'cancelled')
+            ->whereNull('ghl_booking_id')
+            ->whereHas('transactions', fn (Builder $q) => $q->where('status', 'paid'));
+    }
+
+    /**
+     * Another booking of the same customer for the same campsite and
+     * overlapping dates that does exist in Lead Connector — i.e. the stay
+     * was booked there separately, so creating this one too would book the
+     * site twice. Usually means the customer paid twice: refund this one.
+     */
+    public function coveringLeadConnectorBooking(): ?self
+    {
+        if (! $this->customer_id || ! $this->check_in_date || ! $this->check_out_date) {
+            return null;
+        }
+
+        return self::query()
+            ->where('id', '!=', $this->id)
+            ->where('engage_organization_location_id', $this->engage_organization_location_id)
+            ->where('customer_id', $this->customer_id)
+            ->where('product_id', $this->product_id)
+            ->where('status', '!=', 'cancelled')
+            ->whereNotNull('ghl_booking_id')
+            ->where('check_in_date', '<', $this->check_out_date)
+            ->where('check_out_date', '>', $this->check_in_date)
+            ->first();
+    }
+
     public function isPending(): bool
     {
         return $this->status === 'pending';

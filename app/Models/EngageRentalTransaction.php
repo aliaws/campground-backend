@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * The sole source of truth for every rental/booking transaction — GHL
@@ -81,6 +82,11 @@ class EngageRentalTransaction extends Model
     public function isPaid(): bool
     {
         return $this->status === 'paid';
+    }
+
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(EngageRefund::class, 'rental_transaction_id');
     }
 
     public function isPending(): bool

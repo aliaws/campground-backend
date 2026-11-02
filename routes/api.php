@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\V1\Public\PublicServiceCategoryController;
 use App\Http\Controllers\Api\V1\Public\PublicServiceController;
 use App\Http\Controllers\Api\V1\Public\PublicShopController;
 use App\Http\Controllers\Api\V1\Public\PublicSiteMapController;
+use App\Http\Controllers\Api\V1\RefundController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ServiceCategoryController;
 use App\Http\Controllers\Api\V1\ServiceController;
@@ -259,6 +260,22 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:booking.invoice.create');
             Route::post('/bookings/{booking}/cancel-uninvoiced', [BookingController::class, 'cancelUninvoiced'])
                 ->middleware('permission:booking.cancel_uninvoiced');
+            // A paid booking that never reached Lead Connector: create it
+            // there, as booked or on other dates / another campsite.
+            Route::post('/bookings/{booking}/create-in-lead-connector', [BookingController::class, 'createInLeadConnector'])
+                ->middleware('permission:booking.fix_lead_connector');
+            Route::post('/bookings/{booking}/move-and-create-in-lead-connector', [BookingController::class, 'moveAndCreateInLeadConnector'])
+                ->middleware('permission:booking.fix_lead_connector');
+
+            // Refunds — recorded here, the money is sent back in Lead Connector.
+            Route::get('/refunds', [RefundController::class, 'index'])
+                ->middleware('permission:refund.view');
+            Route::post('/refunds', [RefundController::class, 'store'])
+                ->middleware('permission:refund.create');
+            Route::post('/refunds/{refund}/confirm', [RefundController::class, 'confirm'])
+                ->middleware('permission:refund.create');
+            Route::post('/refunds/{refund}/check', [RefundController::class, 'check'])
+                ->middleware('permission:refund.create');
 
             // Self-service — the Profile page's "Business Information"
             // section, editing the caller's OWN organization (not the

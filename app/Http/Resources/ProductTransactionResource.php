@@ -17,6 +17,10 @@ class ProductTransactionResource extends JsonResource
             'customer_name' => $this->customer_name,
             'customer_email' => $this->customer_email,
             'amount' => (float) $this->amount,
+            // Refunds recorded against this sale (list() adds it with withSum(); otherwise one query).
+            'refunded_amount' => round((float) (array_key_exists('refunded_amount', $this->resource->getAttributes())
+                ? $this->resource->getAttributes()['refunded_amount']
+                : $this->resource->refunds()->sum('amount')), 2),
             'status' => $this->status,
             'payment_method' => $this->payment_method,
             // Relational items() as of the 2026-08-10 transactions refactor

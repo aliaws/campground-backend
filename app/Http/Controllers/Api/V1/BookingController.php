@@ -279,6 +279,36 @@ class BookingController extends Controller
         );
     }
 
+    /** Creates the missing Lead Connector booking for a paid booking (see BookingService::createMissingInLeadConnector()). */
+    public function createInLeadConnector(Request $request, EngageBooking $booking): JsonResponse
+    {
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->createMissingInLeadConnector($b),
+            'Booking created in Lead Connector.',
+            'Failed to create the booking in Lead Connector',
+        );
+    }
+
+    /** Same, on other dates and/or another campsite (see BookingService::moveAndCreateInLeadConnector()). */
+    public function moveAndCreateInLeadConnector(Request $request, EngageBooking $booking): JsonResponse
+    {
+        $data = $request->validate([
+            'campsite_id' => ['required', 'string', 'max:255'],
+            'check_in_date' => ['required', 'date_format:Y-m-d'],
+            'check_out_date' => ['required', 'date_format:Y-m-d', 'after:check_in_date'],
+        ]);
+
+        return $this->invoiceAction(
+            $request,
+            $booking,
+            fn (EngageBooking $b) => $this->bookingService->moveAndCreateInLeadConnector($b, $data['campsite_id'], $data['check_in_date'], $data['check_out_date']),
+            'Booking moved and created in Lead Connector.',
+            'Failed to create the booking in Lead Connector',
+        );
+    }
+
     /**
      * Shared shell for the staff invoice actions above. Checks Lead
      * Connector for a payment first (reconcileInvoiceStatus()) — the customer

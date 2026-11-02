@@ -55,6 +55,21 @@ class BookingResource extends JsonResource
             'can_void_invoice' => $this->whenLoaded('transactions', fn () => $this->canVoidInvoice()),
             // No Lead Connector booking or invoice yet: staff can create and send the invoice, or cancel.
             'awaiting_invoice' => $this->whenLoaded('transactions', fn () => $this->isAwaitingInvoice()),
+            // Paid, but no calendar booking in Lead Connector: staff create it,
+            // move it, or cancel and refund. covered_by is set when the same
+            // stay exists in Lead Connector as another booking (paid twice).
+            'missing_in_lead_connector' => $this->whenLoaded('transactions', fn () => $this->isPaidMissingInLeadConnector()),
+            'covered_by_booking_id' => $this->whenLoaded('transactions', fn () => $this->isPaidMissingInLeadConnector()
+                ? $this->coveringLeadConnectorBooking()?->id
+                : null),
+            // Refunds: the paid campsite transaction a refund is made against,
+            // what has been refunded so far, and what is left.
+            'refund_transaction_id' => $this->whenLoaded('transactions', fn () => $this->transactions->first(fn ($t) => $t->isPaid())?->id),
+            'refunded_amount' => $this->refundedAmount(),
+            'refundable_amount' => $this->whenLoaded('transactions', fn () => max(0, round(
+                (float) ($this->transactions->first(fn ($t) => $t->isPaid())?->amount ?? 0) - $this->refundedAmount(),
+                2,
+            ))),
             'created_by' => $this->created_by,
             // Where the booking was made: pos | website | lead_connector.
             'source' => $this->source,
@@ -62,5 +77,15 @@ class BookingResource extends JsonResource
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
+    }
+
+    /** From the list query's withSum() when present, otherwise one query. */
+    private function refundedAmount(): float
+    {
+        $amount = array_key_exists('refunded_amount', $this->resource->getAttributes())
+            ? $this->resource->getAttributes()['refunded_amount']
+            : $this->resource->refunds()->sum('amount');
+
+        return round((float) $amount, 2);
     }
 }

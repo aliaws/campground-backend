@@ -81,6 +81,11 @@ class EngageProductTransaction extends Model
         return $this->status === 'paid';
     }
 
+    public function refunds(): HasMany
+    {
+        return $this->hasMany(EngageRefund::class, 'product_transaction_id');
+    }
+
     public function isPending(): bool
     {
         return $this->status === 'pending';
