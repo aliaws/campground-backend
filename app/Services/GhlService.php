@@ -572,6 +572,29 @@ class GhlService
             'status' => 'received',
         ]);
 
+        // Invoice webhooks carry the location as altId, contact/opportunity ones as locationId.
+        $ghlLocationId = $this->webhookGhlLocationId($payload, $payload['invoice'] ?? [])
+            ?? (is_string($payload['altId'] ?? null) && $payload['altId'] !== '' ? $payload['altId'] : null);
+
+        // Only the active organization is served by this deployment; events
+        // from a blocked/uninstalled organization's location are not handled.
+        if (OrganizationLocationResolver::isInactiveGhlLocation($ghlLocationId)) {
+            $log->update(['status' => 'ignored']);
+            Log::info('Lead Connector webhook from an inactive organization ignored', [
+                'event_type' => $eventType,
+                'ghl_location_id' => $ghlLocationId,
+            ]);
+
+            return;
+        }
+
+        // A webhook has no logged-in user, so set the organization explicitly.
+        // Without it, GhlClient had no organization to use for the calls a
+        // payment triggers (the Lead Connector calendar booking).
+        $locationContext = app(GhlLocationContext::class);
+        $previousLocationId = $locationContext->get();
+        $locationContext->set(OrganizationLocationResolver::resolveFromGhlLocationId($ghlLocationId));
+
         try {
             match ($eventType) {
                 'contact.created' => $this->handleContactCreated($payload),
@@ -592,6 +615,8 @@ class GhlService
                 'event_type' => $eventType,
                 'error' => $e->getMessage(),
             ]);
+        } finally {
+            $locationContext->set($previousLocationId);
         }
     }
 

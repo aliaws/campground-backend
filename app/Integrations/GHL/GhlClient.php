@@ -6,6 +6,7 @@ use App\Models\EngageSetting;
 use App\Models\EngageToken;
 use App\Services\GhlAuthService;
 use App\Services\GhlLocationContext;
+use App\Services\OrganizationLocationResolver;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
@@ -48,6 +49,11 @@ class GhlClient
      */
     private string|null|false $resolvedForLocationId = false;
 
+    /** The location the caller asked for (before mapping it to an active organization), and whether it has been resolved. */
+    private ?string $requestedLocationId = null;
+
+    private bool $credentialsResolved = false;
+
     /**
      * GhlClient is bound as a container *singleton* (AppServiceProvider) —
      * one instance lives for an entire request or console command, which is
@@ -80,9 +86,27 @@ class GhlClient
      */
     private function ensureCredentials(): void
     {
-        $locationId = $this->locationContext->get() ?? $this->authenticatedUserLocationId();
+        $requested = $this->locationContext->get() ?? $this->authenticatedUserLocationId();
 
-        if ($this->resolvedForLocationId === $locationId) {
+        if ($this->credentialsResolved && $this->requestedLocationId === $requested) {
+            return;
+        }
+
+        // Only an active organization's token is ever used. With nothing
+        // requested (webhooks, public pages) or a blocked/uninstalled one
+        // requested, this is the active default organization. It used to
+        // fall back to EngageSetting::first()'s token, which was a blocked
+        // organization's, so paid bookings were sent to the wrong location.
+        try {
+            $locationId = OrganizationLocationResolver::activeOrDefault($requested);
+        } catch (\RuntimeException) {
+            $locationId = $requested;
+        }
+
+        $this->requestedLocationId = $requested;
+        $this->credentialsResolved = true;
+
+        if ($this->resolvedForLocationId === $locationId && $this->accessToken !== null) {
             return;
         }
 
@@ -93,6 +117,11 @@ class GhlClient
         if ($token && $token->setting) {
             $this->token = $token;
             $this->setting = $token->setting;
+        } elseif ($locationId !== null) {
+            // The active organization isn't connected: never borrow another
+            // organization's token, fail with "not configured" instead.
+            $this->setting = EngageSetting::query()->first();
+            $this->token = null;
         } else {
             $this->setting = EngageSetting::with('token')->first();
             $this->token = $this->setting?->token
