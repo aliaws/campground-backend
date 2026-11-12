@@ -573,7 +573,7 @@ class GhlService
         ]);
 
         // Invoice webhooks carry the location as altId, contact/opportunity ones as locationId.
-        $ghlLocationId = $this->webhookGhlLocationId($payload, $payload['invoice'] ?? [])
+        $ghlLocationId = $this->webhookGhlLocationId($payload, $payload['invoice'] ?? $payload['appointment'] ?? [])
             ?? (is_string($payload['altId'] ?? null) && $payload['altId'] !== '' ? $payload['altId'] : null);
 
         // Only the active organization is served by this deployment; events
@@ -605,6 +605,7 @@ class GhlService
                 'InvoicePartiallyPaid' => $this->handleInvoicePartiallyPaid($payload),
                 'InvoiceVoid' => $this->handleInvoiceVoid($payload),
                 'InvoiceUpdate' => $this->handleInvoiceUpdated($payload),
+                'AppointmentCreate', 'AppointmentUpdate', 'AppointmentDelete' => $this->handleAppointmentEvent($payload, $eventType),
                 default => Log::info("Unhandled GHL event: {$eventType}"),
             };
 
@@ -618,6 +619,18 @@ class GhlService
         } finally {
             $locationContext->set($previousLocationId);
         }
+    }
+
+    /**
+     * A rental appointment created, changed or deleted in Lead Connector:
+     * imported, updated or cancelled locally by the same code Pull Data uses.
+     */
+    private function handleAppointmentEvent(array $payload, string $eventType): void
+    {
+        $tenantId = app(GhlLocationContext::class)->get()
+            ?? OrganizationLocationResolver::resolveDefaultLocationId();
+
+        app(GhlAppointmentSyncService::class)->handleWebhook($tenantId, $payload, $eventType);
     }
 
     private function handleContactCreated(array $payload): void
