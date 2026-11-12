@@ -67,6 +67,7 @@ class GhlFullSyncService
         private RentalTransactionService $rentalTransactionService,
         private ProductTransactionService $productTransactionService,
         private GhlLocationContext $locationContext,
+        private GhlAppointmentSyncService $appointmentSyncService,
     ) {}
 
     /**
@@ -175,6 +176,14 @@ class GhlFullSyncService
                 $counts['total_paid_invoices_pulled'] = $result['invoices'];
 
                 return $result;
+            });
+
+            // Every rental appointment, paid or not. Runs after paid_invoices
+            // so a paid one has already been created there with its full
+            // invoice data; this adds the unpaid / partly paid ones and
+            // follows date changes and cancellations.
+            $this->runPhase('rental_appointments', $phaseErrors, function () use ($tenantId) {
+                return $this->appointmentSyncService->pullRentalAppointments($tenantId);
             });
 
             $this->runPhase('voided_invoices', $phaseErrors, function () use ($tenantId) {
@@ -695,6 +704,7 @@ class GhlFullSyncService
                 'security_deposit_amount' => 0,
                 'status' => 'confirmed',
                 'ghl_booking_id' => $ghlBookingId,
+                'ghl_appointment_id' => $ghlBookingMatch['appointment_id'] ?? null,
                 'ghl_invoice_id' => $ghlInvoiceId,
                 'ghl_invoice_number' => $invoice['invoiceNumber'] ?? null,
                 'ghl_invoice_status' => 'paid',
@@ -721,27 +731,7 @@ class GhlFullSyncService
     /** Never creates a Customer — only resolves against what's already local (contacts phase runs first in the same pullAll()). */
     private function resolveLocalCustomer(string $locationId, array $contact): ?EngageCustomer
     {
-        $ghlContactId = $contact['id'] ?? null;
-        $email = $contact['email'] ?? null;
-
-        if ($ghlContactId) {
-            $customer = EngageCustomer::whereHas(
-                'locationLinks',
-                fn ($q) => $q->where('engage_organization_location_id', $locationId)->where('ghl_contact_id', $ghlContactId)
-            )->first();
-            if ($customer) {
-                return $customer;
-            }
-        }
-
-        if ($email) {
-            return EngageCustomer::whereHas(
-                'locationLinks',
-                fn ($q) => $q->where('engage_organization_location_id', $locationId)
-            )->whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
-        }
-
-        return null;
+        return $this->appointmentSyncService->resolveLocalCustomer($locationId, $contact);
     }
 
     /**
@@ -786,26 +776,18 @@ class GhlFullSyncService
     private function fetchCalendarBookingIndex(string $locationId): array
     {
         try {
-            $response = $this->client->postToBackend(
-                "calendars/events/{$locationId}/search/",
-                [
-                    'filters' => [
-                        ['group' => 'AND', 'filters' => []],
-                        ['group' => 'AND', 'filters' => [
-                            ['field' => 'appointmentMeta.eventType', 'operator' => 'eq', 'value' => 'rental'],
-                        ]],
-                    ],
-                ],
-            );
-
-            $appointments = $response['appointments'] ?? [];
+            // All pages: the search returns only 10 appointments unless asked
+            // for more, which left older paid invoices with no dates.
+            $appointments = $this->appointmentSyncService->fetchRentalAppointments($locationId);
             $index = [];
 
             foreach ($appointments as $appt) {
+                $dates = $this->appointmentSyncService->bookingDates($appt);
                 $entry = [
                     'id' => $appt['serviceBookingId'] ?? $appt['id'] ?? null,
-                    'start' => $this->parseGhlDate($appt['startTime'] ?? null)?->toDateString(),
-                    'end' => $this->parseGhlDate($appt['endTime'] ?? null)?->toDateString(),
+                    'appointment_id' => $appt['id'] ?? null,
+                    'start' => $dates['check_in'] ?? null,
+                    'end' => $dates['check_out'] ?? null,
                     'contactId' => $appt['contactId'] ?? null,
                     'productId' => null,
                 ];
