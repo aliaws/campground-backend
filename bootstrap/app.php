@@ -25,6 +25,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('engage:sync-all')
             ->everySixHours()
             ->withoutOverlapping();
+        // Every 5 minutes: Lead Connector bookings (paid or not) without
+        // waiting for the 6-hourly full sync or an AppointmentCreate webhook.
+        $schedule->command('engage:sync-appointments')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
         // Every hour: void invoices unpaid for BOOKING_AUTO_VOID_UNPAID_AFTER_DAYS
         // (7 by default) and cancel their bookings, and cancel unpaid
         // bookings still without any invoice after

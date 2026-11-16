@@ -43,6 +43,7 @@ class EngageBooking extends Model
         'status',
         'ghl_opportunity_id',
         'ghl_booking_id',
+        'ghl_appointment_id',
         'ghl_invoice_id',
         'ghl_invoice_number',
         'ghl_invoice_status',
@@ -149,7 +150,7 @@ class EngageBooking extends Model
     {
         return $query->where('status', '!=', 'cancelled')
             ->whereNotNull('ghl_invoice_id')
-            ->where(fn (Builder $q) => $q->whereNull('ghl_invoice_status')->orWhereNotIn('ghl_invoice_status', ['paid', 'void']))
+            ->where(fn (Builder $q) => $q->whereNull('ghl_invoice_status')->orWhereNotIn('ghl_invoice_status', ['paid', 'void', 'partially_paid']))
             ->whereDoesntHave('transactions', fn (Builder $q) => $q->where('status', 'paid'));
     }
 
@@ -172,10 +173,15 @@ class EngageBooking extends Model
         return $this->hasOpenUnpaidInvoice();
     }
 
-    /** The invoice may be voided (and the booking cancelled) only once it has gone unpaid for the configured hours — 24 by default. */
+    /**
+     * The invoice may be voided (and the booking cancelled) only once it has
+     * gone unpaid for the configured hours — 24 by default — and nothing has
+     * been paid on it: a partly paid invoice is never voided.
+     */
     public function canVoidInvoice(): bool
     {
         return $this->hasOpenUnpaidInvoice()
+            && $this->ghl_invoice_status !== 'partially_paid'
             && $this->created_at !== null
             && $this->created_at->lte(now()->subHours(self::voidInvoiceAfterHours()));
     }
