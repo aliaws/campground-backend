@@ -388,6 +388,11 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role',
         ],
 
+        'webhook_logs.view' => [
+            'group' => 'config', 'label' => 'View webhook logs (all organizations)',
+            'roles' => ['superadmin'], 'decider' => 'role+platform',
+        ],
+
         'custom_scripts.view' => [
             'group' => 'config', 'label' => 'View custom scripts',
             'roles' => ['superadmin'], 'decider' => 'role',
