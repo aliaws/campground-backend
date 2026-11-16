@@ -44,8 +44,21 @@ class GhlAppointmentSyncService
     /** Every rental appointment on a Lead Connector location, all pages. */
     public function fetchRentalAppointments(string $ghlLocationId): array
     {
+        return $this->fetchRentalAppointmentList($ghlLocationId)['appointments'];
+    }
+
+    /**
+     * Every rental appointment plus whether the list is complete (as many
+     * rows as Lead Connector says it has). Only a complete list may be used
+     * to decide that an appointment no longer exists.
+     *
+     * @return array{appointments: array, complete: bool}
+     */
+    public function fetchRentalAppointmentList(string $ghlLocationId): array
+    {
         $appointments = [];
         $page = 1;
+        $total = 0;
 
         do {
             $response = $this->client->postToBackend("calendars/events/{$ghlLocationId}/search/", [
@@ -65,7 +78,7 @@ class GhlAppointmentSyncService
             $page++;
         } while (count($batch) === self::PAGE_SIZE && count($appointments) < $total && $page <= self::MAX_PAGES);
 
-        return $appointments;
+        return ['appointments' => $appointments, 'complete' => count($appointments) > 0 && count($appointments) >= $total];
     }
 
     /**
@@ -113,17 +126,20 @@ class GhlAppointmentSyncService
             throw new \RuntimeException('Lead Connector location not configured. Please authorize via OAuth.');
         }
 
-        $appointments = $this->fetchRentalAppointments($ghlLocationId);
-        $counts = ['appointments' => count($appointments), 'created' => 0, 'updated' => 0, 'cancelled' => 0, 'skipped' => 0, 'error_details' => []];
+        $list = $this->fetchRentalAppointmentList($ghlLocationId);
+        $appointments = $list['appointments'];
+        $counts = ['appointments' => count($appointments), 'created' => 0, 'linked' => 0, 'updated' => 0, 'cancelled' => 0, 'skipped' => 0, 'skipped_unknown_contact' => 0, 'error_details' => []];
 
         foreach ($appointments as $appointment) {
             try {
                 $outcome = $this->importAppointment($tenantId, $appointment);
                 match ($outcome) {
                     'created' => $counts['created']++,
+                    'linked' => $counts['linked']++,
                     'updated' => $counts['updated']++,
                     'cancelled' => $counts['cancelled']++,
                     'unchanged' => null,
+                    'skipped:unknown_contact' => $counts['skipped_unknown_contact']++,
                     default => $counts['skipped']++,
                 };
             } catch (\Exception $e) {
@@ -133,6 +149,10 @@ class GhlAppointmentSyncService
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        if ($list['complete']) {
+            $counts['cancelled'] += $this->cancelBookingsWithMissingAppointments($tenantId, $appointments);
         }
 
         Log::info('Lead Connector rental appointments pulled', ['engage_organization_location_id' => $tenantId] + array_diff_key($counts, ['error_details' => 1]));
@@ -256,6 +276,13 @@ class GhlAppointmentSyncService
 
         if ($this->isBeingCreatedLocally($tenantId, $customer, $rental, $dates)) {
             return 'skipped:in_flight';
+        }
+
+        // The same stay already exists here without a Lead Connector booking
+        // (e.g. a website booking whose Lead Connector booking failed and was
+        // then made by hand in Lead Connector): link it rather than show it twice.
+        if ($this->linkUnlinkedLocalBooking($tenantId, $appointment, $customer, $rental, $dates)) {
+            return 'linked';
         }
 
         $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds);
@@ -387,6 +414,78 @@ class GhlAppointmentSyncService
         }
 
         return true;
+    }
+
+    /**
+     * Same customer, campsite and dates, not cancelled, and no Lead Connector
+     * booking yet: attach the appointment to that booking. Not done when both
+     * sides are paid: that is two payments for one stay, so both stay listed
+     * and the local one is flagged "Not in Lead Connector" for a refund.
+     */
+    private function linkUnlinkedLocalBooking(string $tenantId, array $appointment, EngageCustomer $customer, EngageProductRental $rental, array $dates): bool
+    {
+        $booking = EngageBooking::with('transactions')
+            ->where('engage_organization_location_id', $tenantId)
+            ->where('customer_id', $customer->id)
+            ->where('product_id', $rental->product_id)
+            ->whereDate('check_in_date', $dates['check_in'])
+            ->whereDate('check_out_date', $dates['check_out'])
+            ->where('status', '!=', 'cancelled')
+            ->whereNull('ghl_booking_id')
+            ->orderBy('created_at')
+            ->first();
+
+        if (! $booking) {
+            return false;
+        }
+
+        $appointmentPaid = ($appointment['paymentMeta']['bookingPaymentStatus'] ?? null) === 'completed';
+        if ($appointmentPaid && $booking->isPaid()) {
+            Log::warning('Lead Connector appointment and a local booking for the same stay are both paid; kept separate for a refund', [
+                'booking_id' => $booking->id,
+                'appointment_id' => $appointment['id'] ?? null,
+            ]);
+
+            return false;
+        }
+
+        $booking->update([
+            'ghl_booking_id' => $appointment['serviceBookingId'] ?? null,
+            'ghl_appointment_id' => $appointment['id'] ?? null,
+        ]);
+        Log::info('Linked a Lead Connector appointment to an existing local booking for the same stay', [
+            'booking_id' => $booking->id,
+            'appointment_id' => $appointment['id'] ?? null,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * An appointment deleted in Lead Connector disappears from the list, so
+     * the pull never sees it as cancelled. Upcoming, unpaid bookings that came
+     * from a Lead Connector appointment no longer listed are cancelled (same
+     * rule as AppointmentDelete). Only called with a complete list.
+     */
+    private function cancelBookingsWithMissingAppointments(string $tenantId, array $appointments): int
+    {
+        $listed = collect($appointments)->pluck('id')->filter()->all();
+        $cancelled = 0;
+
+        EngageBooking::with('transactions')
+            ->where('engage_organization_location_id', $tenantId)
+            ->whereNotNull('ghl_appointment_id')
+            ->whereNotIn('ghl_appointment_id', $listed)
+            ->where('status', '!=', 'cancelled')
+            ->whereDate('check_out_date', '>=', now()->toDateString())
+            ->get()
+            ->each(function (EngageBooking $booking) use (&$cancelled) {
+                if ($this->cancelForCancelledAppointment($booking)) {
+                    $cancelled++;
+                }
+            });
+
+        return $cancelled;
     }
 
     /**
