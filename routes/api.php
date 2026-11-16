@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\V1\Superadmin\OrganizationController;
 use App\Http\Controllers\Api\V1\Superadmin\OrganizationDataController;
 use App\Http\Controllers\Api\V1\Superadmin\PricingPlanController;
 use App\Http\Controllers\Api\V1\Superadmin\UsageBillingController;
+use App\Http\Controllers\Api\V1\Superadmin\WebhookLogController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -482,6 +483,14 @@ Route::prefix('v1')->group(function () {
 
         // Custom Scripts: code snippets for the customer website and/or the
         // staff portal (head, body start, body end).
+        // Webhook Logs: every inbound Lead Connector webhook and outbound call, all organizations.
+        Route::get('/webhook-logs/filters', [WebhookLogController::class, 'filters'])
+            ->middleware('permission:webhook_logs.view');
+        Route::get('/webhook-logs', [WebhookLogController::class, 'index'])
+            ->middleware('permission:webhook_logs.view');
+        Route::get('/webhook-logs/{webhookLog}', [WebhookLogController::class, 'show'])
+            ->middleware('permission:webhook_logs.view');
+
         Route::get('/custom-scripts', [CustomScriptController::class, 'index'])
             ->middleware('permission:custom_scripts.view');
         Route::post('/custom-scripts', [CustomScriptController::class, 'store'])
