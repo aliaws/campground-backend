@@ -7,6 +7,7 @@ use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProductRental;
+use App\Models\WebhookLog;
 use App\Support\RecordSource;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -199,8 +200,17 @@ class GhlAppointmentSyncService
         }
 
         $ghlLocationId = EngageOrganizationLocation::find($tenantId)?->engage_location_id ?? $this->client->getLocationId();
-        $match = collect($this->fetchRentalAppointments($ghlLocationId))
-            ->first(fn ($a) => in_array($a['id'] ?? null, $ids, true) || in_array($a['serviceBookingId'] ?? null, $ids, true));
+        $match = $this->findInSearch($ghlLocationId, $ids);
+
+        // A brand-new appointment can take a few seconds to appear in the search.
+        if (! $match && $eventType === 'AppointmentCreate') {
+            foreach ((array) config('booking.appointment_webhook_retry_seconds', []) as $seconds) {
+                sleep(max(0, (int) $seconds));
+                if ($match = $this->findInSearch($ghlLocationId, $ids)) {
+                    break;
+                }
+            }
+        }
 
         if (! $match) {
             // Not a rental appointment, or no longer listed (deleted / cancelled).
@@ -210,7 +220,8 @@ class GhlAppointmentSyncService
             if ($booking && in_array($status, self::CANCELLED_STATUSES, true)) {
                 $this->cancelForCancelledAppointment($booking);
             } else {
-                Log::info("{$eventType}: appointment not in the rental appointment list", ['ids' => $ids]);
+                // The appointment sync imports it later and links it to this webhook (see importAppointment()).
+                Log::info("{$eventType}: appointment not in the rental appointment list yet", ['ids' => $ids]);
             }
 
             return;
@@ -218,6 +229,30 @@ class GhlAppointmentSyncService
 
         $outcome = $this->importAppointment($tenantId, $match, RecordSource::LEAD_CONNECTOR_WEBHOOK);
         Log::info("{$eventType} applied", ['appointment_id' => $match['id'] ?? null, 'outcome' => $outcome]);
+    }
+
+    private function findInSearch(string $ghlLocationId, array $ids): ?array
+    {
+        return collect($this->fetchRentalAppointments($ghlLocationId))
+            ->first(fn ($a) => in_array($a['id'] ?? null, $ids, true) || in_array($a['serviceBookingId'] ?? null, $ids, true));
+    }
+
+    /**
+     * The unlinked AppointmentCreate webhook log for this appointment, if one
+     * arrived in the last week (the webhook couldn't find it in the search).
+     */
+    private function pendingCreateWebhookLog(?string $appointmentId): ?WebhookLog
+    {
+        if (! $appointmentId) {
+            return null;
+        }
+
+        return WebhookLog::where('event_type', 'AppointmentCreate')
+            ->whereNull('loggable_type')
+            ->where('created_at', '>=', now()->subDays(7))
+            ->where('payload->appointment->id', $appointmentId)
+            ->oldest()
+            ->first();
     }
 
     /**
@@ -293,7 +328,15 @@ class GhlAppointmentSyncService
             return 'linked';
         }
 
-        $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $source);
+        // Made by an AppointmentCreate webhook that couldn't find the appointment
+        // yet: it still counts as created from that webhook.
+        $webhookLog = $source === RecordSource::LEAD_CONNECTOR_PULL ? $this->pendingCreateWebhookLog($appointmentId) : null;
+        if ($webhookLog) {
+            $source = RecordSource::LEAD_CONNECTOR_WEBHOOK;
+        }
+
+        $booking = $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $source);
+        $webhookLog?->linkTo($booking);
 
         return 'created';
     }
