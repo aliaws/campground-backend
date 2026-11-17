@@ -11,6 +11,7 @@ use App\Models\EngageUserVerification;
 use App\Models\User;
 use App\Support\ActionJwt;
 use App\Support\PublicStorageUrl;
+use App\Support\RecordSource;
 use App\Support\SessionJwt;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -67,7 +68,7 @@ class CustomerAccountService
         }
 
         $locationId = OrganizationLocationResolver::resolveDefaultLocationId();
-        $customer = $this->customerService->findOrCreate($data, $locationId, User::createdByLabel(null, $data['name'] ?? ''));
+        $customer = $this->customerService->findOrCreate($data, $locationId, User::createdByLabel(null, $data['name'] ?? ''), RecordSource::WEBSITE);
 
         try {
             $this->ghlService->syncContactToGhl($customer);

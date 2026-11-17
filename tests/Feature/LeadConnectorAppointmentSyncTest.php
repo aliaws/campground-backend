@@ -6,7 +6,9 @@ use App\Integrations\GHL\GhlClient;
 use App\Models\EngageBooking;
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProductRental;
+use App\Models\WebhookLog;
 use App\Services\GhlAppointmentSyncService;
+use App\Services\GhlService;
 use App\Services\RentalTransactionService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -102,7 +104,7 @@ class LeadConnectorAppointmentSyncTest extends TestCase
         $this->assertSame('sb-a1', $unpaid->ghl_booking_id);
         $this->assertSame('inv-a1', $unpaid->ghl_invoice_id);
         $this->assertSame(['pending'], $unpaid->transactions->pluck('status')->all());
-        $this->assertSame(EngageBooking::SOURCE_LEAD_CONNECTOR, $unpaid->source);
+        $this->assertSame(EngageBooking::SOURCE_LEAD_CONNECTOR_PULL, $unpaid->source);
         $this->assertTrue($unpaid->canVoidInvoice());
 
         $partial = EngageBooking::with('transactions')->where('ghl_appointment_id', 'a2')->firstOrFail();
@@ -172,6 +174,41 @@ class LeadConnectorAppointmentSyncTest extends TestCase
         $local->delete();
         $this->service()->handleWebhook($this->org->id, ['appointment' => ['id' => 'a1']], 'AppointmentCreate');
         $this->assertSame('sb-a1', EngageBooking::where('ghl_appointment_id', 'a1')->value('ghl_booking_id'));
+    }
+
+    public function test_create_webhook_marks_booking_as_from_webhook_and_links_the_log(): void
+    {
+        $this->appointments = [$this->appointment('a1', 'pending')];
+
+        $this->app->make(GhlService::class)->handleInboundWebhook(
+            ['type' => 'AppointmentCreate', 'locationId' => $this->org->engage_location_id, 'appointment' => ['id' => 'a1']],
+            'AppointmentCreate'
+        );
+
+        $booking = EngageBooking::where('ghl_appointment_id', 'a1')->firstOrFail();
+        $this->assertSame(EngageBooking::SOURCE_LEAD_CONNECTOR_WEBHOOK, $booking->source);
+
+        $log = WebhookLog::where('event_type', 'AppointmentCreate')->latest('created_at')->firstOrFail();
+        $this->assertSame('processed', $log->status);
+        $this->assertSame('booking', $log->loggable_type);
+        $this->assertSame($booking->id, $log->loggable_id);
+    }
+
+    public function test_repeat_invoice_paid_webhook_links_to_the_booking_without_changing_it(): void
+    {
+        $this->appointments = [$this->appointment('a1', 'completed')];
+        $this->service()->pullRentalAppointments($this->org->id);
+        $booking = EngageBooking::where('ghl_appointment_id', 'a1')->firstOrFail();
+        $booking->update(['ghl_invoice_status' => 'paid']);
+
+        $this->app->make(GhlService::class)->handleInboundWebhook(
+            ['type' => 'InvoicePaid', 'locationId' => $this->org->engage_location_id, '_id' => 'inv-a1', 'status' => 'paid'],
+            'InvoicePaid'
+        );
+
+        $log = WebhookLog::where('event_type', 'InvoicePaid')->latest('created_at')->firstOrFail();
+        $this->assertSame('booking', $log->loggable_type);
+        $this->assertSame($booking->id, $log->loggable_id);
     }
 
     public function test_unknown_contact_and_cancelled_appointment_are_not_imported(): void

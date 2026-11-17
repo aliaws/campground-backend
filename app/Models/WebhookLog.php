@@ -6,6 +6,7 @@ use App\Services\GhlLocationContext;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
  * Outbound/inbound Engage webhook audit log.
@@ -27,12 +28,28 @@ class WebhookLog extends Model
     /** Payload keys that hold a Lead Connector location id (altId is the location on invoice payloads). */
     private const LOCATION_KEYS = ['locationid', 'location_id', 'altid'];
 
+    /**
+     * Records a log can link to, by morph alias. Order = priority: when one
+     * webhook touches several records (a paid invoice updates the booking and
+     * its campsite transaction), the log keeps the one listed first.
+     */
+    public const LOGGABLE_TYPES = [
+        'booking' => EngageBooking::class,
+        'product_transaction' => EngageProductTransaction::class,
+        'campsite_transaction' => EngageRentalTransaction::class,
+        'customer' => EngageCustomer::class,
+        'campsite' => EngageProductRental::class,
+        'refund' => EngageRefund::class,
+    ];
+
     protected $fillable = [
         'source',
         'event_type',
         'payload',
         'status',
         'engage_organization_location_id',
+        'loggable_type',
+        'loggable_id',
     ];
 
     protected function casts(): array
@@ -68,6 +85,38 @@ class WebhookLog extends Model
     public function setEngageOrganizationLocationIdAttribute(?string $value): void
     {
         $this->attributes[self::LOCATION_COLUMN] = $value;
+    }
+
+    public function loggable(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    /**
+     * Link this log to a record. An existing link is only replaced by a record
+     * of a higher-priority type (see LOGGABLE_TYPES).
+     */
+    public function linkTo(Model $record): void
+    {
+        $alias = $record->getMorphClass();
+        $priority = array_keys(self::LOGGABLE_TYPES);
+
+        if (! in_array($alias, $priority, true) || ! $this->exists) {
+            return;
+        }
+
+        if ($this->loggable_type && $this->loggable_type !== $alias) {
+            $current = array_search($this->loggable_type, $priority, true);
+            if ($current !== false && $current <= array_search($alias, $priority, true)) {
+                return;
+            }
+        }
+
+        if ($this->loggable_type === $alias && $this->loggable_id) {
+            return; // keep the first record of the same type
+        }
+
+        $this->forceFill(['loggable_type' => $alias, 'loggable_id' => (string) $record->getKey()])->saveQuietly();
     }
 
     public function isOutbound(): bool

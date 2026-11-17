@@ -32,6 +32,7 @@ class CustomerResource extends JsonResource
             // account.
             'is_archived' => $this->trashed(),
             'created_by' => $this->created_by,
+            'source' => $this->source,
             'engage_organization_location_ids' => $this->when(
                 $this->relationLoaded('locationLinks'),
                 fn () => $this->locationLinks->pluck('engage_organization_location_id')->values()->all()

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\LinksToWebhookLog;
 use App\Services\OrganizationLocationResolver;
 use Database\Factories\EngageCustomerFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
@@ -15,11 +16,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class EngageCustomer extends Model
 {
     /** @use HasFactory<EngageCustomerFactory> */
-    use HasFactory, HasUlids, SoftDeletes;
+    use HasFactory, HasUlids, LinksToWebhookLog, SoftDeletes;
 
     protected $table = 'engage_customers';
 
     protected $fillable = [
+        'source',
         'name',
         'email',
         'phone',

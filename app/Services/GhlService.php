@@ -10,6 +10,8 @@ use App\Models\EngageProductTransaction;
 use App\Models\EngageRentalTransaction;
 use App\Models\User;
 use App\Models\WebhookLog;
+use App\Support\RecordSource;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 
@@ -65,7 +67,7 @@ class GhlService
                 // PUT does not accept locationId
                 $response = $this->client->put("contacts/{$ghlContactId}", $sharedFields);
 
-                $this->logOutbound('contact.updated', $sharedFields, $response);
+                $this->logOutbound('contact.updated', $sharedFields, $response, $customer);
 
                 $customer->update([
                     'ghl_sync_status' => 'synced',
@@ -79,7 +81,7 @@ class GhlService
             $createPayload = array_merge(['locationId' => $ghlLocationId], $sharedFields);
             $response = $this->client->post('contacts/', $createPayload);
 
-            $this->logOutbound('contact.created', $createPayload, $response);
+            $this->logOutbound('contact.created', $createPayload, $response, $customer);
 
             $ghlId = $response['contact']['id']
                 ?? $response['id']
@@ -128,7 +130,7 @@ class GhlService
 
             $customer->update(['ghl_sync_status' => 'error']);
 
-            $this->logOutbound('contact.sync_failed', $sharedFields, ['error' => $message]);
+            $this->logOutbound('contact.sync_failed', $sharedFields, ['error' => $message], $customer);
             throw $e;
         }
     }
@@ -252,6 +254,7 @@ class GhlService
                                 'ghl_sync_status' => 'synced',
                                 'ghl_last_synced_at' => now(),
                                 'created_by' => 'Lead Connector Sync',
+                                'source' => RecordSource::LEAD_CONNECTOR_PULL,
                             ]);
                             $customer->attachLocation($locationId, $contact['id']);
                             $results['created']++;
@@ -516,7 +519,7 @@ class GhlService
 
         try {
             $response = $this->client->post('opportunities/', $payload);
-            $this->logOutbound('opportunity.created', $payload, $response);
+            $this->logOutbound('opportunity.created', $payload, $response, $booking);
 
             $ghlId = $response['opportunity']['id'] ?? null;
             if ($ghlId) {
@@ -525,7 +528,7 @@ class GhlService
 
             return $ghlId;
         } catch (\Exception $e) {
-            $this->logOutbound('opportunity.created', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('opportunity.created', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -543,14 +546,14 @@ class GhlService
                 "opportunities/{$booking->ghl_opportunity_id}",
                 $payload
             );
-            $this->logOutbound('opportunity.stage_changed', $payload, $response);
+            $this->logOutbound('opportunity.stage_changed', $payload, $response, $booking);
         } catch (\Exception $e) {
-            $this->logOutbound('opportunity.stage_changed', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('opportunity.stage_changed', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
 
-    private function logOutbound(string $eventType, array $requestPayload, array $responsePayload): void
+    private function logOutbound(string $eventType, array $requestPayload, array $responsePayload, ?Model $record = null): void
     {
         WebhookLog::create([
             'source' => 'ghl',
@@ -560,6 +563,8 @@ class GhlService
                 'response' => $responsePayload,
             ],
             'status' => 'processed',
+            'loggable_type' => $record?->getMorphClass(),
+            'loggable_id' => $record ? (string) $record->getKey() : null,
         ]);
     }
 
@@ -572,6 +577,10 @@ class GhlService
             'status' => 'received',
         ]);
 
+        // Records the handler creates or changes link themselves to this log.
+        $webhookLogContext = app(WebhookLogContext::class);
+        $webhookLogContext->start($log);
+
         // Invoice webhooks carry the location as altId, contact/opportunity ones as locationId.
         $ghlLocationId = $this->webhookGhlLocationId($payload, $payload['invoice'] ?? $payload['appointment'] ?? [])
             ?? (is_string($payload['altId'] ?? null) && $payload['altId'] !== '' ? $payload['altId'] : null);
@@ -580,6 +589,7 @@ class GhlService
         // from a blocked/uninstalled organization's location are not handled.
         if (OrganizationLocationResolver::isInactiveGhlLocation($ghlLocationId)) {
             $log->update(['status' => 'ignored']);
+            $webhookLogContext->stop();
             Log::info('Lead Connector webhook from an inactive organization ignored', [
                 'event_type' => $eventType,
                 'ghl_location_id' => $ghlLocationId,
@@ -618,6 +628,7 @@ class GhlService
             ]);
         } finally {
             $locationContext->set($previousLocationId);
+            $webhookLogContext->stop();
         }
     }
 
@@ -669,13 +680,14 @@ class GhlService
         ];
 
         if ($link) {
-            EngageCustomer::where('id', $link->customer_id)->update($fields);
+            // Model update (not a query update) so the change links to this webhook's log.
+            EngageCustomer::find($link->customer_id)?->update($fields);
 
             return;
         }
 
         // Only on genuine creation — see bulkPullContacts()'s identical guard.
-        $customer = EngageCustomer::create($fields + ['created_by' => 'Lead Connector Sync']);
+        $customer = EngageCustomer::create($fields + ['created_by' => 'Lead Connector Sync', 'source' => RecordSource::LEAD_CONNECTOR_WEBHOOK]);
         $customer->attachLocation($locationId, $contact['id']);
     }
 
@@ -709,7 +721,7 @@ class GhlService
             return;
         }
 
-        EngageCustomer::where('id', $link->customer_id)->update([
+        EngageCustomer::find($link->customer_id)?->update([
             'name' => trim(($contact['firstName'] ?? '').' '.($contact['lastName'] ?? '')) ?: ($contact['name'] ?? 'Unknown'),
             'email' => $email,
             'phone' => $contact['phone'] ?? null,
@@ -845,6 +857,7 @@ class GhlService
         $booking = EngageBooking::where('ghl_invoice_id', $ghlInvoiceId)->first();
 
         if ($booking) {
+            app(WebhookLogContext::class)->link($booking);
             $this->markInvoiceStatus($booking, $status);
 
             return;
@@ -857,6 +870,7 @@ class GhlService
         $productTransaction = EngageProductTransaction::where('ghl_invoice_id', $ghlInvoiceId)->whereNull('booking_id')->first();
 
         if ($productTransaction) {
+            app(WebhookLogContext::class)->link($productTransaction);
             $this->markProductTransactionInvoiceStatus($productTransaction, $status);
         }
     }

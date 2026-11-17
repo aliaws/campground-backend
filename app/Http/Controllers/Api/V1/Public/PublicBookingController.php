@@ -14,6 +14,7 @@ use App\Services\CustomerService;
 use App\Services\GhlLocationContext;
 use App\Services\GhlService;
 use App\Services\RentalResolver;
+use App\Support\RecordSource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -127,7 +128,8 @@ class PublicBookingController extends Controller
         $customer = $this->customerService->findOrCreate(
             $request->only(['name', 'email', 'phone']),
             $locationId,
-            $createdBy
+            $createdBy,
+            RecordSource::WEBSITE
         );
 
         $this->customerAccountService->ensureCustomerAccount(
