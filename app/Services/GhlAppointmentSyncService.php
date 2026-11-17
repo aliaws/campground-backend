@@ -7,6 +7,7 @@ use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProductRental;
+use App\Support\RecordSource;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -191,6 +192,7 @@ class GhlAppointmentSyncService
                 return;
             }
 
+            app(WebhookLogContext::class)->link($booking);
             $this->cancelForCancelledAppointment($booking);
 
             return;
@@ -214,16 +216,19 @@ class GhlAppointmentSyncService
             return;
         }
 
-        $outcome = $this->importAppointment($tenantId, $match);
+        $outcome = $this->importAppointment($tenantId, $match, RecordSource::LEAD_CONNECTOR_WEBHOOK);
         Log::info("{$eventType} applied", ['appointment_id' => $match['id'] ?? null, 'outcome' => $outcome]);
     }
 
     /**
      * Create, update or cancel the local booking for one appointment.
      *
+     * $source is stored on a newly created booking: the webhook passes
+     * lead_connector_webhook, Pull Data / the scheduled sync the default.
+     *
      * @return string created|updated|cancelled|unchanged|skipped:<reason>
      */
-    public function importAppointment(string $tenantId, array $appointment): string
+    public function importAppointment(string $tenantId, array $appointment, string $source = RecordSource::LEAD_CONNECTOR_PULL): string
     {
         if (($appointment['appointmentMeta']['eventType'] ?? null) !== 'rental') {
             return 'skipped:not_rental';
@@ -238,6 +243,9 @@ class GhlAppointmentSyncService
         $booking = $this->findBookingByIds($tenantId, array_filter([$appointmentId, $ghlBookingId]), $invoiceIds);
 
         if ($booking) {
+            // No-op unless a webhook is being processed: links its log to this booking.
+            app(WebhookLogContext::class)->link($booking);
+
             if ($cancelled) {
                 return $this->cancelForCancelledAppointment($booking) ? 'cancelled' : 'unchanged';
             }
@@ -285,7 +293,7 @@ class GhlAppointmentSyncService
             return 'linked';
         }
 
-        $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds);
+        $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $source);
 
         return 'created';
     }
@@ -507,7 +515,7 @@ class GhlAppointmentSyncService
             ->exists();
     }
 
-    private function createBooking(string $tenantId, array $appointment, EngageProductRental $rental, EngageCustomer $customer, array $dates, array $invoiceIds): EngageBooking
+    private function createBooking(string $tenantId, array $appointment, EngageProductRental $rental, EngageCustomer $customer, array $dates, array $invoiceIds, string $source = RecordSource::LEAD_CONNECTOR_PULL): EngageBooking
     {
         $payment = $appointment['paymentMeta'] ?? [];
         $paymentStatus = $payment['bookingPaymentStatus'] ?? null;
@@ -515,7 +523,7 @@ class GhlAppointmentSyncService
         $amount = (float) ($payment['totalAmount'] ?? $payment['amount'] ?? 0);
         $createdAt = isset($appointment['dateAdded']) ? Carbon::parse($appointment['dateAdded']) : now();
 
-        return DB::transaction(function () use ($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $paid, $paymentStatus, $amount, $payment, $createdAt) {
+        return DB::transaction(function () use ($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $paid, $paymentStatus, $amount, $payment, $createdAt, $source) {
             $booking = new EngageBooking([
                 'customer_id' => $customer->id,
                 'product_id' => $rental->product_id,
@@ -540,7 +548,7 @@ class GhlAppointmentSyncService
                 'engage_organization_location_id' => $tenantId,
                 'notes' => 'Synced from Lead Connector — this booking was made directly in Lead Connector, not through this app.',
                 'created_by' => 'Lead Connector Sync',
-                'source' => EngageBooking::SOURCE_LEAD_CONNECTOR,
+                'source' => $source,
             ]);
             // When it was booked in Lead Connector, so the unpaid-invoice rules (auto-void after N days) measure its real age.
             $booking->created_at = $createdAt;

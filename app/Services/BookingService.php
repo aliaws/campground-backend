@@ -8,6 +8,7 @@ use App\Models\EngageCustomer;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageRentalTransaction;
+use App\Support\RecordSource;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -49,7 +50,7 @@ class BookingService
 
         // Where the booking was made (pos / website / lead_connector).
         if ($sources = $this->listFilter($filters['source'] ?? null)) {
-            $query->whereIn('source', $sources);
+            $query->whereIn('source', RecordSource::expandFilter($sources));
         }
 
         if (! empty($filters['customer_id'])) {

@@ -7,6 +7,7 @@ use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
 use App\Models\EngageProductTransaction;
 use App\Models\EngageRentalTransaction;
+use App\Support\RecordSource;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -25,7 +26,7 @@ class CustomerService
      *                              User::createdByLabel()) — never overwrites an existing
      *                              customer's original creator on a dedup match.
      */
-    public function findOrCreate(array $data, string $locationId, ?string $createdBy = null): EngageCustomer
+    public function findOrCreate(array $data, string $locationId, ?string $createdBy = null, string $source = RecordSource::POS): EngageCustomer
     {
         $customer = null;
 
@@ -132,7 +133,7 @@ class CustomerService
         }
 
         try {
-            $customer = EngageCustomer::create($data + ['created_by' => $createdBy]);
+            $customer = EngageCustomer::create($data + ['created_by' => $createdBy, 'source' => $source]);
         } catch (QueryException $e) {
             // Check-then-insert race (e.g. a concurrent booking/GHL-sync
             // creating the same email between the lookups above and this

@@ -3,9 +3,13 @@
 namespace App\Http\Controllers\Api\V1\Superadmin;
 
 use App\Http\Controllers\Controller;
+use App\Models\EngageBooking;
+use App\Models\EngageProductRental;
+use App\Models\EngageRentalTransaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +27,9 @@ class WebhookLogController extends Controller
     /** Organization filter value for rows with no organization. */
     private const NO_ORGANIZATION = 'none';
 
+    /** Linked-record filter value for rows not linked to any record. */
+    private const NO_RECORD = 'none';
+
     public function index(Request $request): JsonResponse
     {
         $filters = $request->validate([
@@ -30,6 +37,7 @@ class WebhookLogController extends Controller
             'event_types' => ['nullable', 'string'],
             'sources' => ['nullable', 'string'],
             'statuses' => ['nullable', 'string'],
+            'record_types' => ['nullable', 'string'],
             'direction' => ['nullable', Rule::in(['inbound', 'outbound'])],
             'search' => ['nullable', 'string', 'max:200'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
@@ -41,6 +49,7 @@ class WebhookLogController extends Controller
         ]);
 
         $query = WebhookLog::query()->with('organizationLocation:id,name,engage_location_id');
+        $this->withLoggable($query);
         $this->applyFilters($query, $filters);
         $this->applySort($query, $filters['sort_by'] ?? 'created_at', $filters['sort_dir'] ?? 'desc');
 
@@ -61,10 +70,12 @@ class WebhookLogController extends Controller
     public function show(WebhookLog $webhookLog): JsonResponse
     {
         $webhookLog->loadMissing('organizationLocation:id,name,engage_location_id');
+        $webhookLog->loadMorph('loggable', self::LOGGABLE_RELATIONS);
 
         return response()->json([
             'success' => true,
             'data' => $this->present($webhookLog) + [
+                'record_details' => $this->recordDetails($webhookLog),
                 'payload' => $webhookLog->payload,
                 'updated_at' => $webhookLog->updated_at?->toIso8601String(),
             ],
@@ -107,6 +118,13 @@ class WebhookLogController extends Controller
                 'event_types' => $count('event_type'),
                 'sources' => $count('source'),
                 'statuses' => $count('status'),
+                'record_types' => WebhookLog::query()
+                    ->select('loggable_type', DB::raw('count(*) as total'))
+                    ->groupBy('loggable_type')
+                    ->get()
+                    ->map(fn ($row) => ['value' => $row->loggable_type ?? self::NO_RECORD, 'count' => (int) $row->total])
+                    ->sortBy(fn ($row) => $row['value'] === self::NO_RECORD ? 'zz' : $row['value'])
+                    ->values(),
                 'organizations' => $organizations,
             ],
         ]);
@@ -133,6 +151,23 @@ class WebhookLogController extends Controller
             if ($values = $this->csv($filters[$param] ?? null)) {
                 $query->whereIn($column, $values);
             }
+        }
+
+        if ($recordTypes = $this->csv($filters['record_types'] ?? null)) {
+            $withNone = in_array(self::NO_RECORD, $recordTypes, true);
+            $types = array_values(array_intersect($recordTypes, array_keys(WebhookLog::LOGGABLE_TYPES)));
+
+            $query->where(function (Builder $q) use ($types, $withNone) {
+                if ($types) {
+                    $q->whereIn('loggable_type', $types);
+                }
+                if ($withNone) {
+                    $q->orWhereNull('loggable_type');
+                }
+                if (! $types && ! $withNone) {
+                    $q->whereRaw('1 = 0');
+                }
+            });
         }
 
         if (($filters['direction'] ?? null) === 'outbound') {
@@ -198,8 +233,130 @@ class WebhookLogController extends Controller
                 'engage_location_id' => $organization->engage_location_id,
             ] : null,
             'summary' => $this->summary($payload),
+            'record' => $this->presentRecord($log),
             'created_at' => $log->created_at?->toIso8601String(),
         ];
+    }
+
+    /** Relations loaded with each kind of linked record, for its label. */
+    private const LOGGABLE_RELATIONS = [
+        EngageBooking::class => ['customer:id,name', 'product:id,name'],
+        EngageRentalTransaction::class => ['product:id,name'],
+        EngageProductRental::class => ['product:id,name'],
+    ];
+
+    private function withLoggable(Builder $query): void
+    {
+        $query->with(['loggable' => fn (MorphTo $morph) => $morph->morphWith(self::LOGGABLE_RELATIONS)]);
+    }
+
+    /**
+     * The record this log is linked to, with the ids the page needs to open
+     * its popup. `missing` = linked record was deleted since.
+     */
+    private function presentRecord(WebhookLog $log): ?array
+    {
+        if (! $log->loggable_type) {
+            return null;
+        }
+
+        $record = $log->loggable;
+        $base = ['type' => $log->loggable_type, 'id' => $log->loggable_id];
+
+        if (! $record) {
+            return $base + ['label' => 'Deleted', 'missing' => true];
+        }
+
+        $short = fn (string $id) => '#'.strtoupper(substr($id, -8));
+
+        return $base + ['missing' => false] + match ($log->loggable_type) {
+            'booking' => [
+                'label' => trim($short($record->id).' · '.($record->customer?->name ?? '').' · '.($record->product?->name ?? ''), ' ·'),
+                'booking_id' => $record->id,
+                'customer_id' => $record->customer_id,
+                'product_id' => $record->product_id,
+            ],
+            'campsite_transaction' => [
+                'label' => trim($short($record->id).' · '.($record->product?->name ?? ''), ' ·'),
+                'booking_id' => $record->booking_id,
+                'customer_id' => $record->customer_id,
+                'product_id' => $record->product_id,
+            ],
+            'product_transaction' => [
+                'label' => $record->ghl_invoice_number ? 'Invoice '.$record->ghl_invoice_number : $short($record->id),
+                'customer_id' => $record->customer_id,
+            ],
+            'customer' => [
+                'label' => $record->name ?: ($record->email ?: $short($record->id)),
+                'customer_id' => $record->id,
+            ],
+            'campsite' => [
+                'label' => $record->product?->name ?: ($record->name ?: $short($record->id)),
+                'product_id' => $record->product_id,
+            ],
+            default => ['label' => $short((string) $record->getKey())],
+        };
+    }
+
+    /**
+     * Key facts about the linked record, as label/value rows for the log's
+     * popup (superadmin can't open the organization-scoped record pages).
+     *
+     * @return array<int, array{label: string, value: string}>
+     */
+    private function recordDetails(WebhookLog $log): array
+    {
+        $record = $log->loggable;
+        if (! $record) {
+            return [];
+        }
+
+        $date = fn ($value) => $value ? Carbon::parse($value)->toDateString() : null;
+        $money = fn ($value) => $value !== null ? number_format((float) $value, 2) : null;
+
+        $rows = match ($log->loggable_type) {
+            'booking' => [
+                'Customer' => $record->customer?->name,
+                'Campsite' => $record->product?->name,
+                'Stay' => trim(($date($record->check_in_date) ?? '').' → '.($date($record->check_out_date) ?? ''), ' →'),
+                'Status' => $record->status,
+                'Total' => $money($record->total_amount),
+                'Invoice status' => $record->ghl_invoice_status,
+                'Booked via' => $record->source,
+                'Created' => $record->created_at?->toDateTimeString(),
+            ],
+            'campsite_transaction' => [
+                'Campsite' => $record->product?->name,
+                'Amount' => $money($record->amount),
+                'Status' => $record->status,
+                'Booking' => $record->booking_id,
+            ],
+            'product_transaction' => [
+                'Invoice' => $record->ghl_invoice_number,
+                'Total' => $money($record->amount),
+                'Status' => $record->status,
+                'Created' => $record->created_at?->toDateTimeString(),
+            ],
+            'customer' => [
+                'Name' => $record->name,
+                'Email' => $record->email,
+                'Phone' => $record->phone,
+                'Came from' => $record->source,
+                'Created' => $record->created_at?->toDateTimeString(),
+            ],
+            'campsite' => [
+                'Campsite' => $record->product?->name,
+                'Variant' => $record->name,
+                'Lead Connector id' => $record->ghl_id,
+            ],
+            default => [],
+        };
+
+        return collect($rows)
+            ->filter(fn ($value) => $value !== null && $value !== '')
+            ->map(fn ($value, $label) => ['label' => $label, 'value' => (string) $value])
+            ->values()
+            ->all();
     }
 
     /**

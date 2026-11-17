@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\LinksToWebhookLog;
+use App\Support\RecordSource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
@@ -10,18 +12,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EngageBooking extends Model
 {
-    use HasUlids;
+    use HasUlids, LinksToWebhookLog;
 
     protected $table = 'engage_bookings';
 
     /** Where a booking was made — stored in `source`. */
-    public const SOURCE_POS = 'pos';
+    public const SOURCE_POS = RecordSource::POS;
 
-    public const SOURCE_WEBSITE = 'website';
+    public const SOURCE_WEBSITE = RecordSource::WEBSITE;
 
-    public const SOURCE_LEAD_CONNECTOR = 'lead_connector';
+    public const SOURCE_LEAD_CONNECTOR_WEBHOOK = RecordSource::LEAD_CONNECTOR_WEBHOOK;
 
-    public const SOURCES = [self::SOURCE_POS, self::SOURCE_WEBSITE, self::SOURCE_LEAD_CONNECTOR];
+    public const SOURCE_LEAD_CONNECTOR_PULL = RecordSource::LEAD_CONNECTOR_PULL;
+
+    public const SOURCES = RecordSource::ALL;
 
     protected $fillable = [
         'customer_id',

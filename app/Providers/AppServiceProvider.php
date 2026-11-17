@@ -5,9 +5,12 @@ namespace App\Providers;
 use App\Auth\JwtGuard;
 use App\Integrations\GHL\GhlClient;
 use App\Integrations\GHL\GhlWebhookHandler;
+use App\Models\WebhookLog;
 use App\Services\GhlLocationContext;
 use App\Services\GhlService;
+use App\Services\WebhookLogContext;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
@@ -18,6 +21,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(GhlLocationContext::class);
+        $this->app->singleton(WebhookLogContext::class);
 
         $this->app->singleton(GhlClient::class, function ($app) {
             return new GhlClient($app->make(GhlLocationContext::class));
@@ -30,6 +34,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Short, stable type names for polymorphic links (webhook_logs.loggable_type).
+        Relation::morphMap(WebhookLog::LOGGABLE_TYPES);
+
         Auth::extend('jwt', function ($app, string $name, array $config) {
             return new JwtGuard(
                 Auth::createUserProvider($config['provider']),

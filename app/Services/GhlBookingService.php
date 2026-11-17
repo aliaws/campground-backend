@@ -11,6 +11,7 @@ use App\Models\EngageProductRental;
 use App\Models\EngageProductTransaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 /**
@@ -103,7 +104,7 @@ class GhlBookingService
                 'calendars/bookings/processing-fees-and-taxes',
                 $feesPayload,
             );
-            $this->logOutbound('booking.processing-fees', $feesPayload, $feesResponse);
+            $this->logOutbound('booking.processing-fees', $feesPayload, $feesResponse, $booking);
 
             $createPayload = $this->buildCreatePayload(
                 $booking,
@@ -121,7 +122,7 @@ class GhlBookingService
                 'calendars/bookings/create',
                 $createPayload,
             );
-            $this->logOutbound('booking.created', $createPayload, $createResponse);
+            $this->logOutbound('booking.created', $createPayload, $createResponse, $booking);
 
             $bookingId = $this->extractBookingId($createResponse);
             $invoiceId = $this->extractInvoiceId($createResponse);
@@ -147,7 +148,7 @@ class GhlBookingService
 
             return $bookingId;
         } catch (\Exception $e) {
-            $this->logOutbound('booking.created', $feesPayload, ['error' => $e->getMessage()]);
+            $this->logOutbound('booking.created', $feesPayload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -175,7 +176,7 @@ class GhlBookingService
         ];
 
         $response = $this->client->postToBackend('calendars/bookings/rental/validate', $payload);
-        $this->logOutbound('booking.validate', $payload, $response);
+        $this->logOutbound('booking.validate', $payload, $response, $rental);
 
         return (bool) ($response['isAvailable'] ?? false);
     }
@@ -230,12 +231,12 @@ class GhlBookingService
 
         try {
             $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
-            $this->logOutbound('invoice.text2pay', $payload, $response);
+            $this->logOutbound('invoice.text2pay', $payload, $response, $booking);
 
             $invoice = $response['invoice'] ?? [];
             $this->persistInvoiceMetadata($booking, $invoice, $response['invoiceUrl'] ?? null);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.text2pay', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.text2pay', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -323,7 +324,7 @@ class GhlBookingService
         }
 
         $response = $this->client->post('invoices/text2pay', $payload, [], '2021-07-28');
-        $this->logOutbound('product-sale.invoice-created', $payload, $response);
+        $this->logOutbound('product-sale.invoice-created', $payload, $response, $transaction);
 
         $invoice = $response['invoice'] ?? [];
         $invoiceId = $invoice['_id'] ?? null;
@@ -351,7 +352,7 @@ class GhlBookingService
         ];
 
         $response = $this->client->post("invoices/{$invoiceId}/record-payment", $payload);
-        $this->logOutbound('product-sale.invoice-payment-recorded', $payload, $response);
+        $this->logOutbound('product-sale.invoice-payment-recorded', $payload, $response, $transaction);
 
         $invoice = $response['invoice'] ?? null;
         if (is_array($invoice)) {
@@ -411,10 +412,10 @@ class GhlBookingService
                 [],
                 '2021-07-28',
             );
-            $this->logOutbound('invoice.sent', $payload, $response);
+            $this->logOutbound('invoice.sent', $payload, $response, $booking);
             $this->syncInvoiceMetadataFromResponse($booking, $response);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.sent', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.sent', $payload, ['error' => $e->getMessage()], $booking);
         }
     }
 
@@ -466,10 +467,10 @@ class GhlBookingService
                 [],
                 self::INVOICE_API_VERSION,
             );
-            $this->logOutbound('invoice.resent', $payload, $response);
+            $this->logOutbound('invoice.resent', $payload, $response, $booking);
             $this->syncInvoiceMetadataFromResponse($booking, $response);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.resent', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.resent', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -501,11 +502,11 @@ class GhlBookingService
                 "invoices/{$booking->ghl_invoice_id}/record-payment",
                 $payload,
             );
-            $this->logOutbound('invoice.payment-recorded', $payload, $response);
+            $this->logOutbound('invoice.payment-recorded', $payload, $response, $booking);
 
             $this->syncInvoiceMetadataFromResponse($booking, $response);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.payment-recorded', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.payment-recorded', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -556,9 +557,9 @@ class GhlBookingService
                 GhlClient::BOOKING_API_VERSION,
             );
 
-            $this->logOutbound('booking.updated', $payload, $response);
+            $this->logOutbound('booking.updated', $payload, $response, $booking);
         } catch (\Exception $e) {
-            $this->logOutbound('booking.updated', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('booking.updated', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -576,9 +577,9 @@ class GhlBookingService
                 GhlClient::BOOKING_API_VERSION,
             );
 
-            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], $response);
+            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], $response, $booking);
         } catch (\Exception $e) {
-            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], ['error' => $e->getMessage()]);
+            $this->logOutbound('booking.deleted', ['bookingId' => $booking->ghl_booking_id], ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -610,14 +611,14 @@ class GhlBookingService
                 [],
                 self::INVOICE_API_VERSION,
             );
-            $this->logOutbound('invoice.voided', $payload, $response);
+            $this->logOutbound('invoice.voided', $payload, $response, $booking);
 
             $booking->update([
                 'ghl_invoice_status' => 'void',
                 'ghl_invoice_url' => null,
             ]);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.voided', $payload, ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.voided', $payload, ['error' => $e->getMessage()], $booking);
             throw $e;
         }
     }
@@ -844,7 +845,7 @@ class GhlBookingService
                 'altType' => 'location',
             ]);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.fetched', ['invoiceId' => $booking->ghl_invoice_id], ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.fetched', ['invoiceId' => $booking->ghl_invoice_id], ['error' => $e->getMessage()], $booking);
 
             return null;
         }
@@ -888,7 +889,7 @@ class GhlBookingService
             ]);
             $this->persistInvoiceMetadata($booking, $invoice);
         } catch (\Exception $e) {
-            $this->logOutbound('invoice.fetched', ['invoiceId' => $invoiceId], ['error' => $e->getMessage()]);
+            $this->logOutbound('invoice.fetched', ['invoiceId' => $invoiceId], ['error' => $e->getMessage()], $booking);
         }
     }
 
@@ -917,7 +918,7 @@ class GhlBookingService
         ], fn ($value) => $value !== null));
     }
 
-    private function logOutbound(string $eventType, array $requestPayload, array $responsePayload): void
+    private function logOutbound(string $eventType, array $requestPayload, array $responsePayload, ?Model $record = null): void
     {
         WebhookLog::create([
             'source' => 'ghl',
@@ -927,6 +928,8 @@ class GhlBookingService
                 'response' => $responsePayload,
             ],
             'status' => 'processed',
+            'loggable_type' => $record?->getMorphClass(),
+            'loggable_id' => $record ? (string) $record->getKey() : null,
         ]);
     }
 
