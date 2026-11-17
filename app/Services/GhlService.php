@@ -854,11 +854,15 @@ class GhlService
             return;
         }
 
-        $booking = EngageBooking::where('ghl_invoice_id', $ghlInvoiceId)->first();
+        // One Lead Connector order with several campsites is one invoice and
+        // one local booking per campsite: update every booking on the invoice.
+        $bookings = EngageBooking::where('ghl_invoice_id', $ghlInvoiceId)->orderBy('created_at')->get();
 
-        if ($booking) {
-            app(WebhookLogContext::class)->link($booking);
-            $this->markInvoiceStatus($booking, $status);
+        if ($bookings->isNotEmpty()) {
+            foreach ($bookings as $booking) {
+                app(WebhookLogContext::class)->link($booking);
+                $this->markInvoiceStatus($booking, $status);
+            }
 
             return;
         }

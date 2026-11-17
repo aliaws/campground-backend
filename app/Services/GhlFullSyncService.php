@@ -425,6 +425,15 @@ class GhlFullSyncService
         $wroteRental = false;
         $wroteProduct = false;
 
+        // Several campsites on one invoice = one Lead Connector order with an
+        // appointment (and local booking) per campsite. Bookings come from the
+        // rental_appointments phase, one per appointment; here only the
+        // bookings already on this invoice are marked paid.
+        if (count(collect($rentalLines)->pluck('rental.id')->unique()) > 1) {
+            $wroteRental = $this->markMultiCampsiteInvoicePaid($tenantId, $ghlInvoiceId, $invoice, $paidAt);
+            $rentalLines = [];
+        }
+
         if (! empty($rentalLines)) {
             $primary = $rentalLines[0]['rental'];
             $rentalAmount = empty($productLines) ? $amount : $this->sumLineAmounts($rentalLines);
@@ -722,6 +731,33 @@ class GhlFullSyncService
 
             return $booking;
         });
+    }
+
+    /**
+     * Paid invoice covering several campsites: each local booking on it (and
+     * its own campsite transaction) is marked paid. Creates nothing.
+     */
+    private function markMultiCampsiteInvoicePaid(string $tenantId, string $ghlInvoiceId, array $invoice, $paidAt): bool
+    {
+        $bookings = EngageBooking::where('engage_organization_location_id', $tenantId)
+            ->where('ghl_invoice_id', $ghlInvoiceId)
+            ->get();
+
+        foreach ($bookings as $booking) {
+            $booking->update(['ghl_invoice_status' => 'paid']);
+            EngageRentalTransaction::where('booking_id', $booking->id)->get()->each(fn (EngageRentalTransaction $t) => $t->update([
+                'ghl_invoice_id' => $ghlInvoiceId,
+                'status' => 'paid',
+                'paid_at' => $t->paid_at ?? $paidAt,
+                'raw_payload' => $invoice,
+            ]));
+        }
+
+        if ($bookings->isEmpty()) {
+            Log::info('Multi-campsite Lead Connector invoice has no local bookings yet; the appointment phase creates them', ['ghl_invoice_id' => $ghlInvoiceId]);
+        }
+
+        return $bookings->isNotEmpty();
     }
 
     private function sumLineAmounts(array $lines): float

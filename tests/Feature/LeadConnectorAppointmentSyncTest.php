@@ -6,6 +6,7 @@ use App\Integrations\GHL\GhlClient;
 use App\Models\EngageBooking;
 use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProductRental;
+use App\Models\EngageRentalTransaction;
 use App\Models\WebhookLog;
 use App\Services\GhlAppointmentSyncService;
 use App\Services\GhlFullSyncService;
@@ -276,6 +277,128 @@ class LeadConnectorAppointmentSyncTest extends TestCase
 
         $this->assertContains($this->org->id, $ids);
         $this->assertNotContains($blocked->id, $ids);
+    }
+
+    /** Three campsites booked in one Lead Connector order: one serviceBookingId, one invoice. */
+    private function multiCampsiteOrder(string $paymentStatus = 'pending'): array
+    {
+        $rentals = [$this->rental];
+        foreach (['Site 8', 'Site 9'] as $name) {
+            $productId = $this->makeProduct($this->org, ['product_type' => 'SERVICE', 'name' => $name]);
+            $rentals[] = EngageProductRental::create([
+                'product_id' => $productId,
+                'name' => $name,
+                'ghl_id' => 'cal-'.Str::random(8),
+                'ghl_product_id' => 'prod-'.Str::random(8),
+                'service_id' => 'svc',
+                'is_active' => true,
+            ]);
+        }
+        $this->rental->update(['ghl_product_id' => 'prod-'.Str::random(8)]);
+
+        $stays = [['2026-12-01', '2026-12-03', 38], ['2026-12-05', '2026-12-06', 58], ['2026-12-10', '2026-12-12', 52]];
+        $this->appointments = [];
+        foreach ($rentals as $i => $rental) {
+            [$in, $out, $amount] = $stays[$i];
+            $this->appointments[] = $this->appointment('m'.$i, $paymentStatus, [
+                'serviceBookingId' => 'sb-order',
+                'calendarId' => $rental->ghl_id,
+                'startTime' => $in.'T17:00:00.000Z',
+                'endTime' => $out.'T17:00:00.000Z',
+                'paymentMeta' => ['invoiceIds' => ['inv-order'], 'totalAmount' => $amount, 'amount' => $amount],
+            ]);
+        }
+
+        return $rentals;
+    }
+
+    public function test_pull_creates_one_booking_per_campsite_of_a_multi_campsite_order(): void
+    {
+        $rentals = $this->multiCampsiteOrder();
+
+        $first = $this->service()->pullRentalAppointments($this->org->id);
+        $second = $this->service()->pullRentalAppointments($this->org->id);
+
+        $this->assertSame(3, $first['created']);
+        $this->assertSame(0, $second['created'] + $second['updated']);
+
+        $bookings = EngageBooking::with('transactions')->where('ghl_booking_id', 'sb-order')->orderBy('check_in_date')->get();
+        $this->assertCount(3, $bookings);
+        $this->assertSame(['m0', 'm1', 'm2'], $bookings->pluck('ghl_appointment_id')->all());
+        $this->assertSame(collect($rentals)->pluck('id')->all(), $bookings->pluck('product_rental_id')->all());
+        $this->assertSame(['2026-12-01', '2026-12-05', '2026-12-10'], $bookings->map(fn ($b) => $b->check_in_date->toDateString())->all());
+        $this->assertSame([38.0, 58.0, 52.0], $bookings->map(fn ($b) => (float) $b->total_amount)->all());
+        $this->assertSame([1, 1, 1], $bookings->map(fn ($b) => $b->transactions->count())->all());
+        $this->assertSame(['inv-order'], $bookings->pluck('ghl_invoice_id')->unique()->values()->all());
+    }
+
+    public function test_webhooks_of_a_multi_campsite_order_each_create_and_link_their_own_booking(): void
+    {
+        $this->multiCampsiteOrder();
+        $ghl = $this->app->make(GhlService::class);
+
+        foreach (['m0', 'm1', 'm2'] as $id) {
+            $ghl->handleInboundWebhook(['type' => 'AppointmentCreate', 'locationId' => $this->org->engage_location_id, 'appointment' => ['id' => $id]], 'AppointmentCreate');
+        }
+
+        $bookings = EngageBooking::where('ghl_booking_id', 'sb-order')->get()->keyBy('ghl_appointment_id');
+        $this->assertCount(3, $bookings);
+        $this->assertSame([EngageBooking::SOURCE_LEAD_CONNECTOR_WEBHOOK], $bookings->pluck('source')->unique()->values()->all());
+
+        foreach (WebhookLog::where('event_type', 'AppointmentCreate')->get() as $log) {
+            $this->assertSame($bookings[$log->payload['appointment']['id']]->id, $log->loggable_id);
+        }
+
+        // Paying the shared invoice marks all three paid.
+        $ghl->handleInboundWebhook(['type' => 'InvoicePaid', 'locationId' => $this->org->engage_location_id, '_id' => 'inv-order', 'status' => 'paid'], 'InvoicePaid');
+        foreach (EngageBooking::with('transactions')->where('ghl_booking_id', 'sb-order')->get() as $booking) {
+            $this->assertTrue($booking->isPaid(), $booking->ghl_appointment_id.' should be paid');
+        }
+    }
+
+    public function test_our_own_booking_is_linked_only_to_the_appointment_on_its_campsite(): void
+    {
+        $rentals = $this->multiCampsiteOrder();
+        // Saved by our booking flow: Lead Connector booking/invoice id known, appointment id not.
+        $own = $this->websiteBooking(false, [
+            'product_id' => $rentals[1]->product_id,
+            'product_rental_id' => $rentals[1]->id,
+            'check_in_date' => '2026-12-05',
+            'check_out_date' => '2026-12-06',
+            'ghl_booking_id' => 'sb-order',
+            'ghl_invoice_id' => 'inv-order',
+        ]);
+        $own->forceFill(['updated_at' => now()->subHour()])->saveQuietly();
+
+        $this->service()->pullRentalAppointments($this->org->id);
+
+        $this->assertSame('m1', $own->fresh()->ghl_appointment_id);
+        $this->assertSame(3, EngageBooking::where('ghl_booking_id', 'sb-order')->count());
+    }
+
+    public function test_paid_invoice_pull_marks_each_campsite_booking_paid_without_creating_one(): void
+    {
+        $rentals = $this->multiCampsiteOrder();
+        $this->service()->pullRentalAppointments($this->org->id);
+
+        $invoice = [
+            '_id' => 'inv-order',
+            'status' => 'paid',
+            'total' => 148,
+            'contactDetails' => ['id' => 'contact-1'],
+            'invoiceItems' => collect($rentals)->map(fn ($r) => ['productId' => $r->ghl_product_id, 'name' => $r->name, 'amount' => 50, 'qty' => 1])->all(),
+        ];
+        $sync = $this->app->make(GhlFullSyncService::class);
+        $method = new \ReflectionMethod($sync, 'upsertPaidInvoice');
+        $result = $method->invoke($sync, $this->org->id, $invoice, []);
+
+        $this->assertTrue($result['rental']);
+        $bookings = EngageBooking::with('transactions')->where('ghl_booking_id', 'sb-order')->get();
+        $this->assertCount(3, $bookings);
+        $this->assertSame(3, EngageRentalTransaction::where('ghl_invoice_id', 'inv-order')->count());
+        foreach ($bookings as $booking) {
+            $this->assertTrue($booking->isPaid());
+        }
     }
 
     public function test_unknown_contact_and_cancelled_appointment_are_not_imported(): void
