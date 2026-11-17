@@ -184,8 +184,10 @@ class GhlAppointmentSyncService
             return;
         }
 
+        $calendarId = is_string($appointment['calendarId'] ?? null) ? $appointment['calendarId'] : null;
+
         if ($eventType === 'AppointmentDelete') {
-            $booking = $this->findBookingByIds($tenantId, $ids);
+            $booking = $this->findBookingForAppointment($tenantId, $ids, $appointment['serviceBookingId'] ?? null, [], $calendarId);
 
             if (! $booking) {
                 Log::info('AppointmentDelete for an appointment with no local booking', ['ids' => $ids]);
@@ -214,7 +216,7 @@ class GhlAppointmentSyncService
 
         if (! $match) {
             // Not a rental appointment, or no longer listed (deleted / cancelled).
-            $booking = $this->findBookingByIds($tenantId, $ids);
+            $booking = $this->findBookingForAppointment($tenantId, $ids, $appointment['serviceBookingId'] ?? null, [], $calendarId);
             $status = $appointment['appointmentStatus'] ?? $appointment['status'] ?? null;
 
             if ($booking && in_array($status, self::CANCELLED_STATUSES, true)) {
@@ -231,15 +233,23 @@ class GhlAppointmentSyncService
         Log::info("{$eventType} applied", ['appointment_id' => $match['id'] ?? null, 'outcome' => $outcome]);
     }
 
+    /**
+     * The appointment with one of these ids. Matched by appointment id first:
+     * the campsites of one Lead Connector order share a serviceBookingId.
+     */
     private function findInSearch(string $ghlLocationId, array $ids): ?array
     {
-        return collect($this->fetchRentalAppointments($ghlLocationId))
-            ->first(fn ($a) => in_array($a['id'] ?? null, $ids, true) || in_array($a['serviceBookingId'] ?? null, $ids, true));
+        $appointments = collect($this->fetchRentalAppointments($ghlLocationId));
+
+        return $appointments->first(fn ($a) => in_array($a['id'] ?? null, $ids, true))
+            ?? $appointments->first(fn ($a) => in_array($a['serviceBookingId'] ?? null, $ids, true));
     }
 
     /**
-     * The unlinked AppointmentCreate webhook log for this appointment, if one
-     * arrived in the last week (the webhook couldn't find it in the search).
+     * The AppointmentCreate webhook log for this appointment from the last
+     * week that didn't get its own booking: not linked, or linked to a
+     * booking of another appointment (before multi-campsite orders were
+     * handled, a second campsite was matched to the first one's booking).
      */
     private function pendingCreateWebhookLog(?string $appointmentId): ?WebhookLog
     {
@@ -248,11 +258,18 @@ class GhlAppointmentSyncService
         }
 
         return WebhookLog::where('event_type', 'AppointmentCreate')
-            ->whereNull('loggable_type')
             ->where('created_at', '>=', now()->subDays(7))
             ->where('payload->appointment->id', $appointmentId)
             ->oldest()
-            ->first();
+            ->get()
+            ->first(function (WebhookLog $log) use ($appointmentId) {
+                if (! $log->loggable_type) {
+                    return true;
+                }
+
+                return $log->loggable_type === 'booking'
+                    && EngageBooking::whereKey($log->loggable_id)->value('ghl_appointment_id') !== $appointmentId;
+            });
     }
 
     /**
@@ -275,7 +292,7 @@ class GhlAppointmentSyncService
         $cancelled = ! empty($appointment['deleted'])
             || in_array($appointment['appointmentStatus'] ?? null, self::CANCELLED_STATUSES, true);
 
-        $booking = $this->findBookingByIds($tenantId, array_filter([$appointmentId, $ghlBookingId]), $invoiceIds);
+        $booking = $this->findBookingForAppointment($tenantId, array_filter([$appointmentId]), $ghlBookingId, $invoiceIds, $appointment['calendarId'] ?? null);
 
         if ($booking) {
             // No-op unless a webhook is being processed: links its log to this booking.
@@ -336,7 +353,7 @@ class GhlAppointmentSyncService
         }
 
         $booking = $this->createBooking($tenantId, $appointment, $rental, $customer, $dates, $invoiceIds, $source);
-        $webhookLog?->linkTo($booking);
+        $webhookLog?->forceFill(['loggable_type' => $booking->getMorphClass(), 'loggable_id' => $booking->id])->saveQuietly();
 
         return 'created';
     }
@@ -400,26 +417,63 @@ class GhlAppointmentSyncService
         return true;
     }
 
-    private function findBookingByIds(string $tenantId, array $appointmentIds, array $invoiceIds = []): ?EngageBooking
+    /**
+     * The local booking of one appointment. One Lead Connector order with
+     * several campsites is one serviceBookingId and one invoice but a separate
+     * appointment (and local booking) per campsite, so:
+     *   1. a booking already linked to this appointment id;
+     *   2. otherwise a booking not linked to any appointment yet (made by our
+     *      own booking flow, which stores the booking/invoice id but not the
+     *      appointment id) with the same booking or invoice id, and on the
+     *      same campsite when the appointment's calendar is known.
+     */
+    private function findBookingForAppointment(string $tenantId, array $appointmentIds, ?string $serviceBookingId, array $invoiceIds = [], ?string $calendarId = null): ?EngageBooking
     {
-        $appointmentIds = array_values($appointmentIds);
+        $appointmentIds = array_values(array_filter($appointmentIds, fn ($id) => is_string($id) && $id !== ''));
 
-        if (empty($appointmentIds) && empty($invoiceIds)) {
+        if ($appointmentIds) {
+            $booking = EngageBooking::where('engage_organization_location_id', $tenantId)
+                ->whereIn('ghl_appointment_id', $appointmentIds)
+                ->first();
+
+            if ($booking) {
+                return $booking;
+            }
+        }
+
+        $bookingIds = array_values(array_filter([$serviceBookingId], fn ($id) => is_string($id) && $id !== ''));
+        if (empty($bookingIds) && empty($invoiceIds)) {
             return null;
         }
 
-        return EngageBooking::where('engage_organization_location_id', $tenantId)
-            ->where(function ($q) use ($appointmentIds, $invoiceIds) {
-                if (! empty($appointmentIds)) {
-                    $q->whereIn('ghl_booking_id', $appointmentIds)->orWhereIn('ghl_appointment_id', $appointmentIds);
+        $query = EngageBooking::where('engage_organization_location_id', $tenantId)
+            ->whereNull('ghl_appointment_id')
+            ->where(function ($q) use ($bookingIds, $invoiceIds) {
+                if ($bookingIds) {
+                    $q->whereIn('ghl_booking_id', $bookingIds);
                 }
-                if (! empty($invoiceIds)) {
+                if ($invoiceIds) {
                     $q->orWhereIn('ghl_invoice_id', $invoiceIds);
                 }
-            })
-            // A booking matched by its Lead Connector booking id wins over one matched only by invoice.
-            ->orderByRaw('CASE WHEN ghl_booking_id IS NULL THEN 1 ELSE 0 END')
-            ->first();
+            });
+
+        if ($calendarId) {
+            $rentals = EngageProductRental::where('ghl_id', $calendarId)
+                ->whereHas('product', fn ($q) => $q->where('engage_organization_location_id', $tenantId))
+                ->get(['id', 'product_id']);
+
+            if ($rentals->isEmpty()) {
+                return null;
+            }
+
+            $query->where(function ($q) use ($rentals) {
+                $q->whereIn('product_rental_id', $rentals->pluck('id'))
+                    ->orWhere(fn ($q2) => $q2->whereNull('product_rental_id')->whereIn('product_id', $rentals->pluck('product_id')));
+            });
+        }
+
+        // A booking matched by its Lead Connector booking id wins over one matched only by invoice.
+        return $query->orderByRaw('CASE WHEN ghl_booking_id IS NULL THEN 1 ELSE 0 END')->first();
     }
 
     /** Link the appointment and follow date / quantity changes made in Lead Connector. */
