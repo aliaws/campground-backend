@@ -8,6 +8,7 @@ use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProductRental;
 use App\Models\WebhookLog;
 use App\Services\GhlAppointmentSyncService;
+use App\Services\GhlFullSyncService;
 use App\Services\GhlService;
 use App\Services\RentalTransactionService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -36,6 +37,11 @@ class LeadConnectorAppointmentSyncTest extends TestCase
     /** @var array<int, array> */
     private array $appointments = [];
 
+    private int $searchCalls = 0;
+
+    /** The first N searches return nothing (a new appointment not listed yet). */
+    private int $hiddenForCalls = 0;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -55,7 +61,12 @@ class LeadConnectorAppointmentSyncTest extends TestCase
         $client = Mockery::mock(GhlClient::class);
         $client->shouldReceive('getTimezone')->andReturn('America/New_York');
         $client->shouldReceive('getLocationId')->andReturn($this->org->engage_location_id);
-        $client->shouldReceive('postToBackend')->andReturnUsing(fn () => ['count' => count($this->appointments), 'appointments' => $this->appointments]);
+        $client->shouldReceive('postToBackend')->andReturnUsing(function () {
+            $this->searchCalls++;
+            $list = $this->searchCalls <= $this->hiddenForCalls ? [] : $this->appointments;
+
+            return ['count' => count($list), 'appointments' => $list];
+        });
         $this->app->instance(GhlClient::class, $client);
     }
 
@@ -209,6 +220,62 @@ class LeadConnectorAppointmentSyncTest extends TestCase
         $log = WebhookLog::where('event_type', 'InvoicePaid')->latest('created_at')->firstOrFail();
         $this->assertSame('booking', $log->loggable_type);
         $this->assertSame($booking->id, $log->loggable_id);
+    }
+
+    public function test_create_webhook_retries_until_the_new_appointment_is_listed(): void
+    {
+        config(['booking.appointment_webhook_retry_seconds' => [0, 0]]);
+        $this->appointments = [$this->appointment('a1', 'pending')];
+        $this->hiddenForCalls = 2;
+
+        $this->app->make(GhlService::class)->handleInboundWebhook(
+            ['type' => 'AppointmentCreate', 'locationId' => $this->org->engage_location_id, 'appointment' => ['id' => 'a1']],
+            'AppointmentCreate'
+        );
+
+        $this->assertSame(3, $this->searchCalls);
+        $this->assertSame(EngageBooking::SOURCE_LEAD_CONNECTOR_WEBHOOK, EngageBooking::where('ghl_appointment_id', 'a1')->value('source'));
+    }
+
+    public function test_sync_import_of_an_appointment_the_webhook_missed_counts_as_webhook(): void
+    {
+        config(['booking.appointment_webhook_retry_seconds' => []]);
+        $this->appointments = [$this->appointment('a1', 'pending')];
+        $this->hiddenForCalls = 1;
+
+        $this->app->make(GhlService::class)->handleInboundWebhook(
+            ['type' => 'AppointmentCreate', 'locationId' => $this->org->engage_location_id, 'appointment' => ['id' => 'a1']],
+            'AppointmentCreate'
+        );
+        $this->assertSame(0, EngageBooking::where('ghl_appointment_id', 'a1')->count());
+
+        $this->service()->pullRentalAppointments($this->org->id);
+
+        $booking = EngageBooking::where('ghl_appointment_id', 'a1')->firstOrFail();
+        $this->assertSame(EngageBooking::SOURCE_LEAD_CONNECTOR_WEBHOOK, $booking->source);
+        $log = WebhookLog::where('event_type', 'AppointmentCreate')->latest('created_at')->firstOrFail();
+        $this->assertSame($booking->id, $log->loggable_id);
+    }
+
+    public function test_blocked_organizations_are_not_synced(): void
+    {
+        $blocked = $this->makeOrganization('Blocked');
+        DB::table('engage_organization_locations')->where('id', $blocked->id)->update(['status' => 'blocked']);
+        foreach ([$this->org, $blocked] as $org) {
+            DB::table('engage_tokens')->insert([
+                'id' => (string) Str::ulid(),
+                'engage_organization_location_id' => $org->id,
+                'token_type' => 'location',
+                'access_token' => 'token',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $ids = GhlFullSyncService::locationIdsWithEngageSettings();
+
+        $this->assertContains($this->org->id, $ids);
+        $this->assertNotContains($blocked->id, $ids);
     }
 
     public function test_unknown_contact_and_cancelled_appointment_are_not_imported(): void

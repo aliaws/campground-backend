@@ -23,4 +23,13 @@ return [
     | for a single run with the command's --no-invoice-hours option.
     */
     'auto_cancel_without_invoice_after_hours' => (int) env('BOOKING_AUTO_CANCEL_WITHOUT_INVOICE_AFTER_HOURS', 24),
+
+    /*
+    | An AppointmentCreate webhook arrives about a second after the booking is
+    | made in Lead Connector, and Lead Connector's appointment search may not
+    | list it yet. The webhook looks it up again after each of these waits
+    | (seconds). If it is still missing, the 5-minute appointment sync imports
+    | it and still marks it as created from the webhook.
+    */
+    'appointment_webhook_retry_seconds' => [2, 4],
 ];

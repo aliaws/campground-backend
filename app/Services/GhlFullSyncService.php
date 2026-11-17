@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Integrations\GHL\GhlClient;
 use App\Models\EngageBooking;
 use App\Models\EngageCustomer;
+use App\Models\EngageOrganizationLocation;
 use App\Models\EngageProduct;
 use App\Models\EngageProductRental;
 use App\Models\EngageProductTransaction;
@@ -995,8 +996,12 @@ class GhlFullSyncService
      */
     public static function locationIdsWithEngageSettings(): array
     {
+        // Only active organizations: a blocked one would be synced with the
+        // active organization's credentials (GhlClient falls back to it) and
+        // get a second copy of the active organization's bookings.
         return EngageToken::whereNotNull('engage_organization_location_id')
             ->whereNotNull('access_token')
+            ->whereIn('engage_organization_location_id', EngageOrganizationLocation::active()->select('id'))
             ->pluck('engage_organization_location_id')
             ->unique()
             ->values()
