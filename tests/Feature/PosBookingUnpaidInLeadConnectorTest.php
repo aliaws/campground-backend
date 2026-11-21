@@ -85,7 +85,105 @@ class PosBookingUnpaidInLeadConnectorTest extends TestCase
         $this->ghl->shouldReceive('recordInvoicePayment')->andReturnUsing(function (EngageBooking $b, float $amount, string $method) {
             $this->paymentsRecorded[] = $method;
         });
+        $this->ghl->shouldReceive('voidInvoiceById')->andReturnUsing(function (EngageBooking $b, string $id) {
+            if ($this->voidFails) {
+                throw new \RuntimeException('void refused');
+            }
+            $this->voided[] = $id;
+        });
+        $this->ghl->shouldReceive('sendInvoicePaymentEmail')->andReturnUsing(function (EngageBooking $b) {
+            $this->emailsSent[] = $b->ghl_invoice_id;
+        });
         $this->app->instance(GhlBookingService::class, $this->ghl);
+    }
+
+    /** @var array<int, string> */
+    private array $voided = [];
+
+    /** @var array<int, string> */
+    private array $emailsSent = [];
+
+    private bool $voidFails = false;
+
+    /** A booking made before this change: local only, maybe with a pay link. */
+    private function oldUnpaidBooking(string $status, string $paymentMethod, ?string $payLinkInvoice = null): EngageBooking
+    {
+        $booking = EngageBooking::create([
+            'engage_organization_location_id' => $this->org->id,
+            'customer_id' => $this->customerId,
+            'product_id' => $this->productId,
+            'product_rental_id' => EngageProductRental::where('product_id', $this->productId)->value('id'),
+            'check_in_date' => '2027-04-01',
+            'check_out_date' => '2027-04-03',
+            'quantity' => 1,
+            'base_amount' => 76,
+            'discount_amount' => 0,
+            'total_amount' => 76,
+            'status' => $status,
+            'source' => EngageBooking::SOURCE_WEBSITE,
+            'ghl_invoice_id' => $payLinkInvoice,
+            'ghl_invoice_url' => $payLinkInvoice ? 'https://pay.example.com/l/xyz' : null,
+            'ghl_invoice_status' => $payLinkInvoice ? 'sent' : null,
+        ]);
+        $this->app->make(RentalTransactionService::class)->createFromBooking($booking, $paymentMethod);
+
+        return $booking->fresh('transactions');
+    }
+
+    public function test_create_pending_replaces_the_pay_link_and_emails_the_new_invoice(): void
+    {
+        $booking = $this->oldUnpaidBooking('requested', 'card', 'inv-old');
+        $this->assertTrue($booking->canCreatePendingInLeadConnector());
+
+        [$result, $voidFailed] = $this->app->make(BookingService::class)->createPendingInLeadConnector($booking);
+
+        $this->assertNull($voidFailed);
+        $this->assertSame([true], $this->createCalls);
+        $this->assertSame(['inv-old'], $this->voided);
+        $this->assertSame([$result->ghl_invoice_id], $this->emailsSent);
+        $this->assertNotSame('inv-old', $result->ghl_invoice_id);
+        $this->assertNull($result->ghl_invoice_url);
+        $this->assertSame('pending', $result->status);
+        $this->assertNotNull($result->ghl_booking_id);
+        $this->assertSame($result->ghl_invoice_id, $result->transactions->first()->ghl_invoice_id);
+        $this->assertFalse($result->load('transactions')->canCreatePendingInLeadConnector());
+    }
+
+    public function test_create_pending_for_an_old_cash_booking_sends_no_email(): void
+    {
+        $booking = $this->oldUnpaidBooking('pending', 'cash');
+
+        [$result] = $this->app->make(BookingService::class)->createPendingInLeadConnector($booking);
+
+        $this->assertSame([], $this->voided);
+        $this->assertSame([], $this->emailsSent);
+        $this->assertSame('pending', $result->status);
+        $this->assertNotNull($result->ghl_booking_id);
+    }
+
+    public function test_create_pending_reports_an_old_invoice_it_could_not_void(): void
+    {
+        $this->voidFails = true;
+        $booking = $this->oldUnpaidBooking('requested', 'card', 'inv-old');
+
+        [$result, $voidFailed] = $this->app->make(BookingService::class)->createPendingInLeadConnector($booking);
+
+        $this->assertSame('inv-old', $voidFailed);
+        $this->assertSame([], $this->emailsSent, 'no second invoice emailed while the old link still works');
+        $this->assertNotNull($result->ghl_booking_id);
+    }
+
+    public function test_create_pending_is_refused_for_cancelled_or_paid_bookings(): void
+    {
+        $cancelled = $this->oldUnpaidBooking('cancelled', 'cash');
+        $this->assertFalse($cancelled->canCreatePendingInLeadConnector());
+
+        $paid = $this->oldUnpaidBooking('pending', 'cash');
+        $paid->transactions()->update(['status' => 'paid', 'paid_at' => now()]);
+        $this->assertFalse($paid->fresh('transactions')->canCreatePendingInLeadConnector());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->app->make(BookingService::class)->createPendingInLeadConnector($cancelled);
     }
 
     private function createPosBooking(string $paymentMethod): EngageBooking

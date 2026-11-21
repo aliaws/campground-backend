@@ -437,6 +437,90 @@ class BookingService
     }
 
     /**
+     * Staff "Create Pending Booking": puts an unpaid booking that isn't in Lead
+     * Connector yet (see EngageBooking::canCreatePendingInLeadConnector()) there
+     * as a booked, payment-Pending booking, so the site shows as taken.
+     *
+     * Lead Connector's booking brings its own invoice, which becomes the
+     * booking's invoice. If the booking already had a pay link (online/website),
+     * that old invoice is voided so it can't be paid twice, and the new invoice
+     * is emailed instead. Cash bookings get no email. If the old invoice can't
+     * be voided, the booking is still created and the old invoice id is
+     * returned so staff can void it in Lead Connector.
+     *
+     * @return array{0: EngageBooking, 1: ?string} the booking and, when voiding failed, the old invoice id
+     */
+    public function createPendingInLeadConnector(EngageBooking $booking): array
+    {
+        $booking->loadMissing(['transactions', 'customer', 'productRental']);
+
+        if (! $booking->canCreatePendingInLeadConnector()) {
+            throw new \InvalidArgumentException('Only an unpaid, not cancelled booking that is not in Lead Connector yet can be created there as Pending.');
+        }
+
+        $rental = $booking->productRental;
+        if (! $rental) {
+            throw new \InvalidArgumentException('This booking has no campsite linked to Lead Connector.');
+        }
+
+        $this->assertFreeInLeadConnector(
+            $rental,
+            $this->gateway->fetchRentalDetail($rental),
+            $booking->check_in_date->format('Y-m-d'),
+            $booking->check_out_date->format('Y-m-d'),
+            max((int) $booking->quantity, 1),
+        );
+
+        $oldInvoiceId = $booking->ghl_invoice_id;
+        $hadPayLink = (bool) $booking->ghl_invoice_url;
+        $isCash = $booking->transactions()->latest()->value('payment_method') === 'cash';
+
+        // Cash: no email. Otherwise email the new invoice, but only once the
+        // old pay link is voided (below), so the customer never has two.
+        $created = $this->createInLeadConnectorOnce(
+            $booking,
+            fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, skipPaymentEmail: true),
+        );
+
+        if (! $created) {
+            throw new \InvalidArgumentException('This booking is already being created in Lead Connector. Refresh in a moment.');
+        }
+
+        $booking = $booking->fresh();
+        if (! $booking->ghl_booking_id) {
+            throw new \RuntimeException('Lead Connector did not return a booking.');
+        }
+
+        $updates = ['status' => 'pending'];
+        if ($hadPayLink && $booking->ghl_invoice_id !== $oldInvoiceId) {
+            // The old pay link belongs to the invoice being replaced.
+            $updates['ghl_invoice_url'] = null;
+        }
+        $booking->update($updates);
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
+
+        $voidFailedFor = null;
+        if ($oldInvoiceId && $oldInvoiceId !== $booking->ghl_invoice_id) {
+            try {
+                $this->ghlBookingService->voidInvoiceById($booking, $oldInvoiceId);
+            } catch (\Exception $e) {
+                $voidFailedFor = $oldInvoiceId;
+                Log::error('Could not void the old invoice after creating the booking in Lead Connector', [
+                    'booking_id' => $booking->id,
+                    'old_invoice_id' => $oldInvoiceId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if (! $isCash && $voidFailedFor === null) {
+            $this->ghlBookingService->sendInvoicePaymentEmail($booking);
+        }
+
+        return [$booking->fresh()->load(['customer', 'product', 'transactions']), $voidFailedFor];
+    }
+
+    /**
      * Staff fix for a paid booking that never reached Lead Connector (see
      * EngageBooking::isPaidMissingInLeadConnector()): creates the calendar
      * booking for the dates already paid for. The new invoice Lead Connector

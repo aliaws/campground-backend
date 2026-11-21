@@ -226,6 +226,10 @@ return [
             'group' => 'bookings', 'label' => 'Cancel a booking that has no invoice',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
+        'booking.create_pending_in_lead_connector' => [
+            'group' => 'bookings', 'label' => 'Create an unpaid booking in Lead Connector as Pending',
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
         'booking.fix_lead_connector' => [
             'group' => 'bookings', 'label' => 'Create a paid booking that is missing in Lead Connector',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',

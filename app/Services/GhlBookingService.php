@@ -605,6 +605,29 @@ class GhlBookingService
      * Void an unpaid GHL invoice so Text2Pay/payment links stop accepting payment.
      * POST /invoices/{id}/void
      */
+    /**
+     * Voids an invoice the booking no longer points at (the pay link it had
+     * before its Lead Connector booking brought its own invoice), so the old
+     * link can't be paid. Throws on failure.
+     */
+    public function voidInvoiceById(EngageBooking $booking, string $invoiceId): void
+    {
+        $locationId = $this->client->getLocationId();
+        if (! $locationId) {
+            throw new \RuntimeException('GHL location not configured. Please authorize via OAuth.');
+        }
+
+        $payload = ['altId' => $locationId, 'altType' => 'location'];
+
+        try {
+            $response = $this->client->post("invoices/{$invoiceId}/void", $payload, [], self::INVOICE_API_VERSION);
+            $this->logOutbound('invoice.voided', $payload + ['invoiceId' => $invoiceId], $response, $booking);
+        } catch (\Exception $e) {
+            $this->logOutbound('invoice.voided', $payload + ['invoiceId' => $invoiceId], ['error' => $e->getMessage()], $booking);
+            throw $e;
+        }
+    }
+
     public function voidInvoice(EngageBooking $booking): void
     {
         if (! $booking->ghl_invoice_id || $booking->ghl_invoice_status === 'paid') {

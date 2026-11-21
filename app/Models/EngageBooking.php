@@ -146,6 +146,20 @@ class EngageBooking extends Model
     }
 
     /**
+     * Unpaid, not cancelled, and not in Lead Connector yet: staff can create
+     * it there as a Pending (unpaid) booking. Covers old cash bookings with no
+     * invoice and online/website bookings that only have a pay link so far.
+     * Needs `transactions` loaded (isPaid()).
+     */
+    public function canCreatePendingInLeadConnector(): bool
+    {
+        return in_array($this->status, ['pending', 'requested'], true)
+            && empty($this->ghl_booking_id)
+            && ! in_array($this->ghl_invoice_status, ['paid', 'partially_paid'], true)
+            && ! $this->isPaid();
+    }
+
+    /**
      * SQL counterpart of hasOpenUnpaidInvoice() — narrows a query to bookings
      * that could have their invoice voided. Only a pre-filter for batch work:
      * each row is still checked by canVoidInvoice() before anything happens.

@@ -261,6 +261,9 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:booking.invoice.create');
             Route::post('/bookings/{booking}/cancel-uninvoiced', [BookingController::class, 'cancelUninvoiced'])
                 ->middleware('permission:booking.cancel_uninvoiced');
+            // An unpaid booking not in Lead Connector yet: create it there as Pending.
+            Route::post('/bookings/{booking}/create-pending-in-lead-connector', [BookingController::class, 'createPendingInLeadConnector'])
+                ->middleware('permission:booking.create_pending_in_lead_connector');
             // A paid booking that never reached Lead Connector: create it
             // there, as booked or on other dates / another campsite.
             Route::post('/bookings/{booking}/create-in-lead-connector', [BookingController::class, 'createInLeadConnector'])

@@ -55,6 +55,7 @@ class BookingResource extends JsonResource
             'can_void_invoice' => $this->whenLoaded('transactions', fn () => $this->canVoidInvoice()),
             // No Lead Connector booking or invoice yet: staff can create and send the invoice, or cancel.
             'awaiting_invoice' => $this->whenLoaded('transactions', fn () => $this->isAwaitingInvoice()),
+            'can_create_pending_in_lead_connector' => $this->whenLoaded('transactions', fn () => $this->canCreatePendingInLeadConnector()),
             // Paid, but no calendar booking in Lead Connector: staff create it,
             // move it, or cancel and refund. covered_by is set when the same
             // stay exists in Lead Connector as another booking (paid twice).

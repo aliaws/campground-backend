@@ -259,6 +259,31 @@ class BookingController extends Controller
         );
     }
 
+    /** Creates an unpaid booking in Lead Connector as Pending (see BookingService::createPendingInLeadConnector()). */
+    public function createPendingInLeadConnector(Request $request, EngageBooking $booking): JsonResponse
+    {
+        $voidFailedFor = null;
+        $response = $this->invoiceAction(
+            $request,
+            $booking,
+            function (EngageBooking $b) use (&$voidFailedFor) {
+                [$b, $voidFailedFor] = $this->bookingService->createPendingInLeadConnector($b);
+
+                return $b;
+            },
+            'Booking created in Lead Connector as Pending.',
+            'Failed to create the booking in Lead Connector',
+        );
+
+        if ($voidFailedFor && $response->getStatusCode() === 200) {
+            $data = $response->getData(true);
+            $data['message'] = "Booking created in Lead Connector as Pending, but its old invoice ({$voidFailedFor}) could not be voided. Void it in Lead Connector so it can't be paid, then use Send again to email the new invoice.";
+            $response->setData($data);
+        }
+
+        return $response;
+    }
+
     /** Creates the missing Lead Connector booking for a paid booking (see BookingService::createMissingInLeadConnector()). */
     public function createInLeadConnector(Request $request, EngageBooking $booking): JsonResponse
     {
