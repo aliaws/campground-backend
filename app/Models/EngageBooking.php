@@ -279,8 +279,20 @@ class EngageBooking extends Model
      */
     public function ghlInvoiceViewUrl(): ?string
     {
-        return self::invoiceViewUrlFor($this->ghl_invoice_id, $this->ghl_invoice_url);
+        // A POS booking created in Lead Connector has that booking's own
+        // invoice, which comes with no pay link; take the domain from any
+        // other pay link of the organization (looked up once per request).
+        $payLink = $this->ghl_invoice_url;
+        if (! $payLink && $this->ghl_invoice_id && $this->engage_organization_location_id) {
+            $payLink = self::$organizationPayLinks[$this->engage_organization_location_id]
+                ??= (self::payLinkForOrganization($this->engage_organization_location_id) ?? '');
+        }
+
+        return self::invoiceViewUrlFor($this->ghl_invoice_id, $payLink ?: null);
     }
+
+    /** @var array<string, string> Organization id => pay link ('' = none), per request. */
+    private static array $organizationPayLinks = [];
 
     /**
      * The public invoice view page for any invoice id, given a pay link

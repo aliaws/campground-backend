@@ -12,6 +12,7 @@ use App\Models\EngageProductTransaction;
 use App\Models\WebhookLog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -394,10 +395,26 @@ class GhlBookingService
             return;
         }
 
+        // liveMode must match how the invoice was created (see resendInvoice());
+        // fall back to the previous fixed value if the invoice can't be read.
+        $liveMode = true;
+        try {
+            $invoice = $this->client->get("invoices/{$booking->ghl_invoice_id}", [
+                'altId' => $locationId,
+                'altType' => 'location',
+            ], self::INVOICE_API_VERSION);
+            $liveMode = (bool) ($invoice['liveMode'] ?? true);
+        } catch (\Exception $e) {
+            Log::warning('Could not read invoice before sending it; sending with liveMode true', [
+                'booking_id' => $booking->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         $payload = [
             'altId' => $locationId,
             'altType' => 'location',
-            'liveMode' => true,
+            'liveMode' => $liveMode,
             'action' => 'email',
             'userId' => $userId,
             'sentTo' => [

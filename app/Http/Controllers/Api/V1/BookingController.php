@@ -117,17 +117,18 @@ class BookingController extends Controller
 
     public function store(StoreBookingRequest $request): JsonResponse
     {
-        $paymentMethod = $request->validated('payment_method');
-        $autoConfirm = $paymentMethod !== 'card';
+        $paymentMethod = $request->validated('payment_method') ?? 'card';
 
         try {
+            // POS bookings (cash or card) are created in Lead Connector straight
+            // away, unpaid — see BookingService::create().
             $booking = $this->bookingService->create(
                 $request->validated() + [
                     'engage_organization_location_id' => $request->user()->resolveOrganizationLocationId(),
                     'created_by' => User::createdByLabel($request->user(), ''),
                     'source' => EngageBooking::SOURCE_POS,
                 ],
-                autoConfirm: $autoConfirm,
+                autoConfirm: true,
             );
         } catch (\InvalidArgumentException $e) {
             return response()->json([
@@ -137,33 +138,12 @@ class BookingController extends Controller
             ], 422);
         }
 
-        $ghlSyncFailed = false;
+        $this->rentalTransactionService->createFromBooking($booking, $paymentMethod);
+        $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
 
-        if ($autoConfirm) {
-            // The autoConfirm=false ('card'/online) branch already creates its own
-            // transaction inside BookingService::create() — creating one here too
-            // would double it.
-            $transaction = $this->rentalTransactionService->createFromBooking($booking, $paymentMethod ?? 'card');
-            $this->rentalTransactionService->syncGhlInvoiceIdFromBooking($booking);
-
-            if ($paymentMethod === 'cash') {
-                // Always created local-only (see BookingService::create()'s
-                // $deferGhl) — ghl_booking_id being null here isn't a failure,
-                // it's expected until staff record the payment from the
-                // Bookings list (BookingService::payCash()).
-            } elseif (! $booking->ghl_booking_id) {
-                // createBooking() swallows GHL failures (logged, not thrown) so the
-                // local row always gets created — but if the real GHL calendar
-                // booking never happened (e.g. GHL rejected the slot), don't also
-                // lie and mark it 'confirmed'.
-                $ghlSyncFailed = true;
-            }
-        } elseif (! $booking->ghl_invoice_url) {
-            // Online/'card' path: createText2PayInvoice() also swallows its own
-            // failures — if it didn't produce a payment link, the staff payment
-            // page would otherwise silently show nothing.
-            $ghlSyncFailed = true;
-        }
+        // createBooking() failures are logged, not thrown, so the local row is
+        // always kept; it is then flagged "not in Lead Connector" with a retry.
+        $ghlSyncFailed = ! $booking->ghl_booking_id;
 
         $booking->load(['customer.customerAccount', 'product.rentals', 'productRental', 'transactions']);
 
@@ -171,10 +151,10 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => $ghlSyncFailed
-                ? 'Booking saved, but syncing it to Lead Connector failed (e.g. the slot may no longer be available there) — check the booking and retry via Confirm if needed.'
+                ? 'Booking saved, but creating it in Lead Connector failed. Use "Create & Send Invoice" on the booking to retry.'
                 : ($paymentMethod === 'cash'
-                    ? 'Booking saved locally. It will sync to Lead Connector once you record the cash payment from the Bookings list.'
-                    : 'Booking created.'),
+                    ? 'Booking created in Lead Connector as unpaid. Record the cash payment from the Bookings list when it is collected.'
+                    : 'Booking created in Lead Connector as unpaid and the invoice was emailed to the customer.'),
         ], 201);
     }
 

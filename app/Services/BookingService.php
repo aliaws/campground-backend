@@ -242,10 +242,12 @@ class BookingService
      * always stores product_id = base listing + product_rental_id = variant,
      * plus a snapshot of the GHL booking times taken at creation.
      *
-     * @param  bool  $autoConfirm  When true (staff-created, default), the booking is
-     *                             immediately synced to GHL — except 'cash' payments, which are always created
-     *                             local-only (see $deferGhl below). When false (customer-submitted), it's created as
-     *                             a 'requested' record with a Text2Pay invoice — see confirm() for what turns it real.
+     * @param  bool  $autoConfirm  When true (staff/POS-created, default), the booking is
+     *                             created in Lead Connector straight away, unpaid, for every payment method, so the
+     *                             site shows as taken there with payment Pending: cash gets no email (paid later via
+     *                             payCash()), card/online gets Lead Connector's invoice emailed. When false
+     *                             (customer-submitted on the website), it's created as a 'requested' record with a
+     *                             Text2Pay invoice — the calendar booking follows once paid (autoConfirmAfterPayment()).
      */
     public function create(array $data, bool $autoConfirm = true): EngageBooking
     {
@@ -267,6 +269,13 @@ class BookingService
             );
         }
 
+        // createBooking() sends overrideAvailability:true, so ask Lead Connector
+        // first — it may hold bookings we haven't pulled yet. Website bookings
+        // are only created in Lead Connector after payment (unchanged).
+        if ($autoConfirm) {
+            $this->assertFreeInLeadConnector($rental, $detail, $data['check_in_date'], $data['check_out_date'], $quantity);
+        }
+
         $booking = EngageBooking::create(array_merge($data, [
             'product_id' => $product->id,
             'product_rental_id' => $rental->id,
@@ -281,16 +290,18 @@ class BookingService
             'status' => $autoConfirm ? 'pending' : 'requested',
         ]));
 
-        // 'cash' bookings are always created local-only — GHL only learns about
-        // them once the cash payment is actually recorded (see payCash()), never
-        // at creation time.
-        $deferGhl = $autoConfirm && ($data['payment_method'] ?? null) === 'cash';
+        if ($autoConfirm) {
+            // POS: created in Lead Connector now, unpaid (its payment status
+            // stays Pending until the invoice is paid). Cash: no email, the
+            // payment is recorded on this invoice when collected (payCash()).
+            // Card/online: Lead Connector emails its invoice to the customer.
+            $isCash = ($data['payment_method'] ?? null) === 'cash';
 
-        if ($deferGhl) {
-            // Intentionally left unsynced.
-        } elseif ($autoConfirm) {
             try {
-                $this->ghlBookingService->createBooking($booking);
+                $this->createInLeadConnectorOnce(
+                    $booking,
+                    fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, skipPaymentEmail: $isCash),
+                );
             } catch (\Exception $e) {
                 Log::error('Lead Connector booking creation failed', [
                     'booking_id' => $booking->id,
@@ -370,8 +381,9 @@ class BookingService
 
     /**
      * Staff "Create & Send": for an unpaid booking that has nothing in Lead
-     * Connector yet (see EngageBooking::isAwaitingInvoice()). Creates the
-     * pay-link invoice, which Lead Connector emails to the customer, and
+     * Connector yet (see EngageBooking::isAwaitingInvoice()). POS bookings get
+     * their Lead Connector booking created (unpaid, invoice emailed); website
+     * bookings get the pay-link invoice, which Lead Connector emails, and
      * from then on the booking is an ordinary online-payment booking:
      * `requested`, one unpaid card transaction, confirmed once it is paid.
      *
@@ -391,9 +403,27 @@ class BookingService
             throw new \InvalidArgumentException('This customer has no email address to send the invoice to.');
         }
 
-        $this->ghlBookingService->createText2PayInvoice($booking);
-
-        $booking->update(['status' => 'requested']);
+        if ($booking->source === EngageBooking::SOURCE_WEBSITE) {
+            // Website bookings keep their flow: a pay link, calendar booking after payment.
+            $this->ghlBookingService->createText2PayInvoice($booking);
+            $booking->update(['status' => 'requested']);
+        } else {
+            // POS: create the Lead Connector booking now, unpaid, and email its invoice.
+            $rental = $booking->productRental;
+            if ($rental) {
+                $this->assertFreeInLeadConnector(
+                    $rental,
+                    $this->gateway->fetchRentalDetail($rental),
+                    $booking->check_in_date->format('Y-m-d'),
+                    $booking->check_out_date->format('Y-m-d'),
+                    max((int) $booking->quantity, 1),
+                );
+            }
+            if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b))) {
+                throw new \InvalidArgumentException('This booking is already being created in Lead Connector. Refresh in a moment.');
+            }
+            $booking = $booking->fresh();
+        }
 
         $transaction = $booking->transactions()->latest()->first();
         if ($transaction) {
@@ -479,6 +509,32 @@ class BookingService
      * Checked locally and in Lead Connector first; if creating the booking
      * in Lead Connector still fails, the booking goes back to what it was.
      */
+    /**
+     * Refuses a POS booking when Lead Connector says the site is taken for
+     * these dates. If Lead Connector can't be asked (outage), the booking
+     * goes ahead on our own availability check; creating it there will then
+     * fail and it is flagged "not in Lead Connector".
+     */
+    private function assertFreeInLeadConnector(EngageProductRental $rental, GhlServiceDetail $detail, string $checkIn, string $checkOut, int $quantity): void
+    {
+        try {
+            $free = $this->ghlBookingService->isRentalAvailable(
+                $rental, $checkIn, $checkOut, $quantity, $detail->bookingStartTime(), $detail->bookingEndTime(),
+            );
+        } catch (\Exception $e) {
+            Log::warning('Lead Connector availability check failed; using local availability only', [
+                'product_rental_id' => $rental->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        if (! $free) {
+            throw new \InvalidArgumentException('This campsite is already booked in Lead Connector for the selected dates.');
+        }
+    }
+
     public function moveAndCreateInLeadConnector(EngageBooking $booking, string $campsiteId, string $checkIn, string $checkOut): EngageBooking
     {
         $booking->loadMissing(['transactions', 'product', 'productRental']);
@@ -728,6 +784,8 @@ class BookingService
             return $booking;
         }
 
+        $alreadyInLeadConnector = (bool) $booking->ghl_booking_id;
+
         // Guard against duplicate real GHL calendar bookings: this runs from
         // the InvoicePaid webhook (which Lead Connector sends twice), live
         // invoice-status reconciliation (the confirmation page polls it),
@@ -758,6 +816,21 @@ class BookingService
 
         if ($booking->status !== 'confirmed') {
             $booking->update(['status' => 'confirmed']);
+
+            // An unpaid POS booking was already created in Lead Connector
+            // ("booked", payment Pending); now that it's paid, mark it
+            // confirmed there too. A booking created just above by
+            // createBooking() is left as Lead Connector made it, as before.
+            if ($alreadyInLeadConnector) {
+                try {
+                    $this->ghlBookingService->updateBookingStatus($booking, 'confirmed');
+                } catch (\Exception $e) {
+                    Log::error('Lead Connector booking status update after payment failed', [
+                        'booking_id' => $booking->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         return $booking->fresh()->load(['customer', 'product', 'transactions']);
@@ -765,8 +838,10 @@ class BookingService
 
     /**
      * Marks a cash reservation as paid, triggered from the Bookings list's Pay
-     * action. Every cash booking is created local-only (see $deferGhl in
-     * create()), so this also syncs it to GHL for the first time when possible.
+     * action. A POS cash booking is already in Lead Connector, unpaid (see
+     * create()); this records the cash payment on its invoice. A booking that
+     * never reached Lead Connector (older bookings, or a failed sync) is
+     * created there first when possible.
      * Payment-status update itself triggers autoConfirmAfterPayment(); we still
      * call it explicitly when the transaction was already paid so a stuck
      * Paid + pending/requested row can self-heal on a second Pay click.
