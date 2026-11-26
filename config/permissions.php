@@ -115,19 +115,19 @@ return [
         // by this. Reached via a standalone /superadmin/engage-settings
         // form, not a per-organization drill-down tab.
         'engage.identifiers.view' => [
-            'group' => 'engage', 'label' => 'View the platform Engage identifiers',
+            'group' => 'engage', 'label' => 'View the platform Lead Connector identifiers',
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.identifiers.update' => [
-            'group' => 'engage', 'label' => 'Update the platform Engage identifiers',
+            'group' => 'engage', 'label' => 'Update the platform Lead Connector identifiers',
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'engage.tokens.view' => [
-            'group' => 'engage', 'label' => 'View Engage tokens',
+            'group' => 'engage', 'label' => 'View Lead Connector tokens',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'engage.tokens.update' => [
-            'group' => 'engage', 'label' => 'Save Engage tokens',
+            'group' => 'engage', 'label' => 'Save Lead Connector tokens',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         // Widened to include staff (2026-08-14) — the Refresh Token page
@@ -135,7 +135,7 @@ return [
         // platform-wide app above) is now owner/admin/staff, not just
         // owner/admin.
         'engage.refresh_token' => [
-            'group' => 'engage', 'label' => 'Refresh the Engage access token',
+            'group' => 'engage', 'label' => 'Refresh the Lead Connector access token',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'engage.data_sync' => [

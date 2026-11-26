@@ -61,7 +61,7 @@ class SettingsController extends Controller
         if (! $setting || ! $setting->client_id || ! $setting->client_secret) {
             return response()->json([
                 'success' => false,
-                'message' => 'Engage identifiers have not been configured yet. Contact your platform administrator.',
+                'message' => 'Lead Connector identifiers have not been configured yet. Contact your platform administrator.',
             ], 422);
         }
 
@@ -101,7 +101,7 @@ class SettingsController extends Controller
         $setting = $this->globalEngageSetting();
 
         if (! $setting) {
-            Log::error('Lead Connector OAuth callback: Engage identifiers not configured');
+            Log::error('Lead Connector OAuth callback: Lead Connector identifiers not configured');
 
             return $this->callbackRedirect('error=settings_not_found');
         }
@@ -276,7 +276,7 @@ class SettingsController extends Controller
         if (! $setting) {
             return response()->json([
                 'success' => false,
-                'message' => 'Engage identifiers have not been configured yet. Contact your platform administrator.',
+                'message' => 'Lead Connector identifiers have not been configured yet. Contact your platform administrator.',
             ], 422);
         }
 

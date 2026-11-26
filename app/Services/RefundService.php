@@ -167,7 +167,7 @@ class RefundService
             ], self::TRANSACTIONS_API_VERSION);
         } catch (\RuntimeException $e) {
             if (str_contains($e->getMessage(), 'not authorized for this scope')) {
-                throw new \InvalidArgumentException('Lead Connector does not allow reading payments yet. Reconnect Lead Connector (Engage Settings > Authorize) to grant payments access, or confirm the refund by hand.');
+                throw new \InvalidArgumentException('Lead Connector does not allow reading payments yet. Reconnect Lead Connector (Lead Connector Settings > Authorize) to grant payments access, or confirm the refund by hand.');
             }
 
             throw $e;
