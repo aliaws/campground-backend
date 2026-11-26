@@ -36,6 +36,9 @@ class CmsPage extends Model
     /** Public "Schedule Demo" page: heading, rich text, an embed (a page URL or a provider's iframe + script code) and a list of videos (links or uploads). */
     public const SLUG_SCHEDULE_DEMO = 'schedule-demo';
 
+    /** Public "Cancellation Policy" page: one rich-text body, like Terms of Service. Added by migration 2026_11_26_000005. */
+    public const SLUG_CANCELLATION_POLICY = 'cancellation-policy';
+
     /** The fixed slugs this table holds — not a general-purpose page builder. */
     public const SLUGS = [
         self::SLUG_TERMS_OF_SERVICE,
@@ -50,6 +53,7 @@ class CmsPage extends Model
         self::SLUG_SHOP,
         self::SLUG_PORTAL_BRANDING,
         self::SLUG_SCHEDULE_DEMO,
+        self::SLUG_CANCELLATION_POLICY,
     ];
 
     /** Pages whose content can reference uploaded videos / thumbnails — see Superadmin\CmsPageController::uploadMedia(). */
