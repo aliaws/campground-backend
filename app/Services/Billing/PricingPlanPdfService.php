@@ -142,8 +142,8 @@ class PricingPlanPdfService
         $title = $content['site_title'] ?? [];
 
         return [
-            'primary_text' => $title['primary_text'] ?? 'Camp',
-            'secondary_text' => $title['secondary_text'] ?? 'Manager',
+            'primary_text' => $title['primary_text'] ?? 'Campground',
+            'secondary_text' => $title['secondary_text'] ?? 'POS',
             'primary_color' => $this->color($title['primary_color'] ?? null, '#16301f'),
             'secondary_color' => $this->color($title['secondary_color'] ?? null, '#f26522'),
             'tagline' => $content['tagline'] ?? 'Reservations · Sites · Payments',
