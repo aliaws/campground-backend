@@ -53,3 +53,4 @@ campground_live.sql
 # Local PR drafts (not for remote)
 /PR_*.md
 /.pr-drafts/
+/public/.well-known/
