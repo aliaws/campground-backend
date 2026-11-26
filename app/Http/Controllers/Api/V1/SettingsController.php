@@ -151,7 +151,7 @@ class SettingsController extends Controller
             // (status 'active', or even 'blocked') isn't a new
             // registration — it's an existing org's GHL connection being
             // re-authorized (e.g. an already-logged-in admin clicking
-            // Authorize from /admin/engages/tokens, which goes through the
+            // Authorize from /admin/leadconnector/tokens, which goes through the
             // marketplace-install URL and so, unlike getAuthorizeUrl(),
             // never carries `state`). Sending an already-set-up org through
             // the registration-complete redirect would either 404 or
@@ -313,15 +313,11 @@ class SettingsController extends Controller
 
     private function callbackRedirect(string $query): RedirectResponse
     {
-        // /settings/engage/tokens was the pre-RBAC-redesign route — that
-        // whole app/settings/** tree was deleted outright when the real
-        // Engage Tokens page moved to /admin/engages/tokens (see CLAUDE.md's
-        // 2026-08-13 RBAC changelog entry), but this redirect target was
-        // never updated to match, so a real, successful token
-        // refresh/reconnect landed on a 404 every time.
+        // The Lead Connector Tokens page (was /admin/engages/tokens until
+        // 2026-11-27; the old address still redirects there).
         $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
 
-        return redirect("{$frontendUrl}/admin/engages/tokens?{$query}");
+        return redirect("{$frontendUrl}/admin/leadconnector/tokens?{$query}");
     }
 
     private function registrationCallbackRedirect(string $query): RedirectResponse
