@@ -135,6 +135,8 @@ class GhlProductSyncService
 
         $this->syncCategoriesFromGhl($product, $productData);
 
+        $this->syncImageFromGhl($product, $productData);
+
         $this->pullDefaultPriceFromGhl($product, $query);
 
         return $product->fresh()->load(['categories']);
@@ -678,6 +680,36 @@ class GhlProductSyncService
         $this->syncCategoriesFromGhl($product, $ghlProduct);
 
         return true;
+    }
+
+    /**
+     * Takes the product photo from Lead Connector when it was changed there.
+     * Before this, a pull only set the photo when it first created the local
+     * product, so a photo replaced in Lead Connector never reached the app.
+     *
+     * Left alone when Lead Connector has no photo, when it is the one we
+     * already show, when it is the one we uploaded there ourselves
+     * (ghl_image_url), and when the local photo is a staff upload that has
+     * not been sent to Lead Connector yet (it would otherwise be replaced by
+     * the older Lead Connector photo).
+     */
+    private function syncImageFromGhl(EngageProduct $product, array $productData): void
+    {
+        $ghlImage = $productData['image'] ?? null;
+        if (! is_string($ghlImage) || trim($ghlImage) === '') {
+            return;
+        }
+
+        $current = $product->image;
+        if ($ghlImage === $current || $ghlImage === $product->ghl_image_url) {
+            return;
+        }
+
+        if ($current && PublicStorageUrl::isOwnStoragePath($current) && ! $product->ghl_image_url) {
+            return;
+        }
+
+        $product->update(['image' => $ghlImage, 'ghl_image_url' => $ghlImage]);
     }
 
     private function uploadImageToGhl(EngageProduct $product): ?string
