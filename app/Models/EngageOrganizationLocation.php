@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 
 class EngageOrganizationLocation extends Model
@@ -128,6 +129,12 @@ class EngageOrganizationLocation extends Model
     }
 
     /** Inverse of EngageProduct::organizationLocation(). */
+    /** Settings page values (brand, appearance, receipts, support). */
+    public function settings(): HasOne
+    {
+        return $this->hasOne(OrganizationSetting::class, 'engage_organization_location_id');
+    }
+
     public function products(): HasMany
     {
         return $this->hasMany(EngageProduct::class, 'engage_organization_location_id');

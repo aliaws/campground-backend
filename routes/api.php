@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FeatureController;
 use App\Http\Controllers\Api\V1\MenuItemController;
 use App\Http\Controllers\Api\V1\OrganizationProfileController;
+use App\Http\Controllers\Api\V1\OrganizationSettingsController;
 use App\Http\Controllers\Api\V1\PermissionController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductTransactionController;
@@ -169,6 +170,11 @@ Route::prefix('v1')->group(function () {
     // org.active rejects every request here once the actor's active
     // organization has been blocked (see EnsureOrganizationNotBlocked).
     Route::middleware(['auth:api', 'role:owner,admin,staff', 'org.active'])->group(function () {
+        // Own campground settings (brand, appearance, receipts, support). Every
+        // staff role reads them because the portal shows the brand.
+        Route::get('/organization/settings', [OrganizationSettingsController::class, 'show'])
+            ->middleware('permission:organization.settings.view');
+
         // Products (unified - campsites + inventory) — read + POS sell
         Route::get('/products', [ProductController::class, 'index']);
         // Must precede /products/{product} — otherwise implicit route-model
@@ -288,6 +294,12 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:organization.profile.view');
             Route::put('/organization/profile', [OrganizationProfileController::class, 'update'])
                 ->middleware('permission:organization.profile.update');
+            Route::put('/organization/settings', [OrganizationSettingsController::class, 'update'])
+                ->middleware('permission:organization.settings.update');
+            Route::post('/organization/settings/image', [OrganizationSettingsController::class, 'uploadImage'])
+                ->middleware('permission:organization.settings.update');
+            Route::delete('/organization/settings/image', [OrganizationSettingsController::class, 'deleteImage'])
+                ->middleware('permission:organization.settings.update');
 
             Route::post('/products', [ProductController::class, 'store']);
             Route::put('/products/{product}', [ProductController::class, 'update']);

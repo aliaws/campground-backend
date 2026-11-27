@@ -41,6 +41,7 @@ class FileStorageMeasurer
         'site_map_icons' => 'Site map icons',
         'profile_images' => 'Profile pictures',
         'organization_content' => 'Organization content',
+        'branding_images' => 'Branding (logos, favicon)',
         'cms_media' => 'Site pages (CMS)',
         'icon_library' => 'Amenity & feature icons',
     ];
@@ -224,6 +225,17 @@ class FileStorageMeasurer
                 foreach ($rows as $row) {
                     foreach ($this->urlsIn($this->decode($row->business_information)) as $url) {
                         $this->addOrg($url, $row->id, 'organization_content');
+                    }
+                }
+            });
+
+        // Settings page brand images (logos, favicon).
+        DB::table('organization_settings')
+            ->select(['engage_organization_location_id', 'logo_light_url', 'logo_dark_url', 'favicon_url'])
+            ->orderBy('id')->chunk(500, function ($rows) {
+                foreach ($rows as $row) {
+                    foreach (['logo_light_url', 'logo_dark_url', 'favicon_url'] as $column) {
+                        $this->addOrg($row->{$column}, $row->engage_organization_location_id, 'branding_images');
                     }
                 }
             });

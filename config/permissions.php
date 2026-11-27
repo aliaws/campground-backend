@@ -104,6 +104,16 @@ return [
             'group' => 'organization', 'label' => "Update your own organization's business profile",
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
+        // Own campground settings (brand, appearance, receipts, support).
+        // Staff can read them because the portal shows the brand.
+        'organization.settings.view' => [
+            'group' => 'organization', 'label' => "View your own organization's settings",
+            'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
+        ],
+        'organization.settings.update' => [
+            'group' => 'organization', 'label' => "Update your own organization's settings",
+            'roles' => ['owner', 'admin'], 'decider' => 'role+org',
+        ],
 
         // Engage / GHL settings. Client ID/Secret/API Version/Base
         // URL/Redirect URI/Timezone/Scopes ("Engage Identifiers") are
