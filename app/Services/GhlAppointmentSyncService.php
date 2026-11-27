@@ -643,7 +643,7 @@ class GhlAppointmentSyncService
                     default => null,
                 },
                 'engage_organization_location_id' => $tenantId,
-                'notes' => 'Synced from Lead Connector — this booking was made directly in Lead Connector, not through this app.',
+                'notes' => 'Synced from Lead Connector — this reservation was made directly in Lead Connector, not through this app.',
                 'created_by' => 'Lead Connector Sync',
                 'source' => $source,
             ]);

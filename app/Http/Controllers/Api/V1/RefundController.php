@@ -66,7 +66,7 @@ class RefundController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['success' => false, 'data' => null, 'message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Could not cancel the booking in Lead Connector, nothing was recorded: '.$e->getMessage()], 422);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Could not cancel the reservation in Lead Connector, nothing was recorded: '.$e->getMessage()], 422);
         }
 
         return response()->json([

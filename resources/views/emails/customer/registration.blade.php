@@ -26,7 +26,7 @@
                             <h1 style="margin:0 0 16px; font-size:22px; line-height:1.3; color:#111827;">Let's finish setting up your account</h1>
                             <p style="margin:0 0 20px; font-size:15px; color:#4b5563;">Hi {{ $customerName }},</p>
                             <p style="margin:0 0 24px; font-size:15px; color:#4b5563;">
-                                Thanks for signing up! You're one step away from a customer account where you can browse and manage bookings, view invoices, and keep track of your stays &mdash; verify your email to get started.
+                                Thanks for signing up! You're one step away from a customer account where you can browse and manage reservations, view invoices, and keep track of your stays &mdash; verify your email to get started.
                             </p>
 
                             <!-- Code box -->

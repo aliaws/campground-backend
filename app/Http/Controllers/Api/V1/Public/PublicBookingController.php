@@ -93,7 +93,7 @@ class PublicBookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => $quote,
-            'message' => 'Booking quote calculated.',
+            'message' => 'Reservation quote calculated.',
         ]);
     }
 
@@ -167,7 +167,7 @@ class PublicBookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => new CustomerBookingResource($booking),
-            'message' => 'Your booking request has been received. Our team will contact you shortly to confirm and arrange payment.',
+            'message' => 'Your reservation request has been received. Our team will contact you shortly to confirm and arrange payment.',
         ], 201);
     }
 
@@ -181,7 +181,7 @@ class PublicBookingController extends Controller
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Booking not found.',
+                'message' => 'Reservation not found.',
             ], 404);
         }
 
@@ -202,7 +202,7 @@ class PublicBookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => new CustomerBookingResource($booking),
-            'message' => 'Booking retrieved.',
+            'message' => 'Reservation retrieved.',
         ]);
     }
 }

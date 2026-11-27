@@ -368,7 +368,7 @@ class CustomerService
                 $this->ghlBookingService->cancelBooking($booking);
             } catch (\Exception $e) {
                 throw new \RuntimeException(
-                    'Failed to delete an upcoming booking from Lead Connector — customer was not deleted. '.$e->getMessage()
+                    'Failed to delete an upcoming reservation from Lead Connector — customer was not deleted. '.$e->getMessage()
                 );
             }
         }

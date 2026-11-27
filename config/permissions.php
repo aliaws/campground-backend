@@ -81,7 +81,7 @@ return [
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'organization.bookings.view' => [
-            'group' => 'organization', 'label' => "View an organization's bookings",
+            'group' => 'organization', 'label' => "View an organization's reservations",
             'roles' => ['superadmin'], 'decider' => 'role+platform',
         ],
         'organization.product_transactions.view' => [
@@ -183,55 +183,55 @@ return [
 
         // Bookings
         'booking.view' => [
-            'group' => 'bookings', 'label' => 'View bookings',
+            'group' => 'bookings', 'label' => 'View reservations',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.create' => [
-            'group' => 'bookings', 'label' => 'Create a booking',
+            'group' => 'bookings', 'label' => 'Create a reservation',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.update_status' => [
-            'group' => 'bookings', 'label' => "Update a booking's status",
+            'group' => 'bookings', 'label' => "Update a reservation's status",
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.check_in_out' => [
-            'group' => 'bookings', 'label' => 'Record booking check-in/out',
+            'group' => 'bookings', 'label' => 'Record reservation check-in/out',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.confirm' => [
-            'group' => 'bookings', 'label' => 'Confirm a booking',
+            'group' => 'bookings', 'label' => 'Confirm a reservation',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.pay_cash' => [
-            'group' => 'bookings', 'label' => 'Record a cash payment on a booking',
+            'group' => 'bookings', 'label' => 'Record a cash payment on a reservation',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.invoice.view' => [
-            'group' => 'bookings', 'label' => 'View a booking invoice',
+            'group' => 'bookings', 'label' => 'View a reservation invoice',
             'roles' => ['owner', 'admin', 'staff'], 'decider' => 'role+org',
         ],
         'booking.invoice.resend' => [
-            'group' => 'bookings', 'label' => 'Send an unpaid booking invoice again',
+            'group' => 'bookings', 'label' => 'Send an unpaid reservation invoice again',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'booking.invoice.void' => [
-            'group' => 'bookings', 'label' => 'Void an unpaid booking invoice (cancels the booking)',
+            'group' => 'bookings', 'label' => 'Void an unpaid reservation invoice (cancels the reservation)',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'booking.invoice.create' => [
-            'group' => 'bookings', 'label' => 'Create and send the invoice for a booking that has none',
+            'group' => 'bookings', 'label' => 'Create and send the invoice for a reservation that has none',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'booking.cancel_uninvoiced' => [
-            'group' => 'bookings', 'label' => 'Cancel a booking that has no invoice',
+            'group' => 'bookings', 'label' => 'Cancel a reservation that has no invoice',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'booking.create_pending_in_lead_connector' => [
-            'group' => 'bookings', 'label' => 'Create an unpaid booking in Lead Connector as Pending',
+            'group' => 'bookings', 'label' => 'Create an unpaid reservation in Lead Connector as Pending',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
         'booking.fix_lead_connector' => [
-            'group' => 'bookings', 'label' => 'Create a paid booking that is missing in Lead Connector',
+            'group' => 'bookings', 'label' => 'Create a paid reservation that is missing in Lead Connector',
             'roles' => ['owner', 'admin'], 'decider' => 'role+org',
         ],
 

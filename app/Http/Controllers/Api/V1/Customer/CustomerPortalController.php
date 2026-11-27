@@ -77,7 +77,7 @@ class CustomerPortalController extends Controller
         return response()->json([
             'success' => true,
             'data' => CustomerPortalBookingResource::collection($bookings),
-            'message' => 'Bookings retrieved.',
+            'message' => 'Reservations retrieved.',
         ]);
     }
 
@@ -98,7 +98,7 @@ class CustomerPortalController extends Controller
         return response()->json([
             'success' => true,
             'data' => new CustomerPortalBookingResource($booking),
-            'message' => 'Booking retrieved.',
+            'message' => 'Reservation retrieved.',
         ]);
     }
 
@@ -114,7 +114,7 @@ class CustomerPortalController extends Controller
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'This booking is already cancelled.',
+                'message' => 'This reservation is already cancelled.',
             ], 422);
         }
 
@@ -122,7 +122,7 @@ class CustomerPortalController extends Controller
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Paid bookings cannot be cancelled online. Please contact staff.',
+                'message' => 'Paid reservations cannot be cancelled online. Please contact staff.',
             ], 422);
         }
 
@@ -141,7 +141,7 @@ class CustomerPortalController extends Controller
         return response()->json([
             'success' => true,
             'data' => new CustomerPortalBookingResource($booking),
-            'message' => 'Booking cancelled.',
+            'message' => 'Reservation cancelled.',
         ]);
     }
 
@@ -156,7 +156,7 @@ class CustomerPortalController extends Controller
         return response()->json([
             'success' => true,
             'data' => $invoice,
-            'message' => $invoice ? 'Invoice retrieved.' : 'No invoice available for this booking yet.',
+            'message' => $invoice ? 'Invoice retrieved.' : 'No invoice available for this reservation yet.',
         ]);
     }
 

@@ -78,14 +78,14 @@ final class UsageMetrics
                 'source' => 'engage_customers_locations joined to engage_customers where deleted_at is null.',
             ],
             self::BOOKINGS => [
-                'label' => 'Bookings',
-                'unit' => 'booking',
-                'unit_plural' => 'bookings',
+                'label' => 'Reservations',
+                'unit' => 'reservation',
+                'unit_plural' => 'reservations',
                 'default_billing_unit' => '100',
                 'aggregation' => self::AGGREGATE_LATEST,
                 'decimals' => 0,
                 'estimated' => false,
-                'help' => 'All bookings stored for the organization, any status. Latest count in the month.',
+                'help' => 'All reservations stored for the organization, any status. Latest count in the month.',
                 'source' => 'engage_bookings.engage_organization_location_id.',
             ],
             self::PRODUCTS => [

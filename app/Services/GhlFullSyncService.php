@@ -719,7 +719,7 @@ class GhlFullSyncService
                 'ghl_invoice_number' => $invoice['invoiceNumber'] ?? null,
                 'ghl_invoice_status' => 'paid',
                 'engage_organization_location_id' => $tenantId,
-                'notes' => 'Synced from Lead Connector via Pull Data — this booking was made directly through Lead Connector, not through this app.',
+                'notes' => 'Synced from Lead Connector via Pull Data — this reservation was made directly through Lead Connector, not through this app.',
                 'created_by' => 'Lead Connector Sync',
                 'source' => EngageBooking::SOURCE_LEAD_CONNECTOR_PULL,
             ]);
@@ -842,7 +842,7 @@ class GhlFullSyncService
                     'location_id' => $locationId,
                 ]);
 
-                return ['index' => $index, 'error' => 'Call succeeded but returned 0 rental appointments — either no rental bookings exist yet in GHL, or this undocumented backend endpoint\'s behavior has changed.'];
+                return ['index' => $index, 'error' => 'Call succeeded but returned 0 rental appointments — either no rental reservations exist yet in GHL, or this undocumented backend endpoint\'s behavior has changed.'];
             }
 
             return ['index' => $index, 'error' => null];

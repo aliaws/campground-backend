@@ -254,7 +254,7 @@ class BookingService
         $resolved = $this->resolver->resolve($data['product_id'], $data['engage_organization_location_id']);
 
         if (! $resolved) {
-            throw new \InvalidArgumentException('Product must be a bookable service for bookings.');
+            throw new \InvalidArgumentException('Product must be a bookable service for reservations.');
         }
 
         [$product, $rental] = $resolved;
@@ -333,11 +333,11 @@ class BookingService
     public function confirm(EngageBooking $booking): EngageBooking
     {
         if ($booking->status !== 'requested') {
-            throw new \InvalidArgumentException('Only requested bookings can be confirmed this way.');
+            throw new \InvalidArgumentException('Only requested reservations can be confirmed this way.');
         }
 
         if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b))) {
-            throw new \InvalidArgumentException('This booking is being created in Lead Connector right now. Refresh in a moment.');
+            throw new \InvalidArgumentException('This reservation is being created in Lead Connector right now. Refresh in a moment.');
         }
         $booking->update(['status' => 'confirmed']);
         $this->rentalTransactionService->createFromBooking($booking);
@@ -365,11 +365,11 @@ class BookingService
     public function retryInvoice(EngageBooking $booking): EngageBooking
     {
         if ($booking->status !== 'requested') {
-            throw new \InvalidArgumentException('Only a requested booking can have its invoice retried.');
+            throw new \InvalidArgumentException('Only a requested reservation can have its invoice retried.');
         }
 
         if ($booking->ghl_invoice_id || $booking->ghl_invoice_url) {
-            throw new \InvalidArgumentException('This booking already has an invoice.');
+            throw new \InvalidArgumentException('This reservation already has an invoice.');
         }
 
         $this->ghlBookingService->createText2PayInvoice($booking);
@@ -396,7 +396,7 @@ class BookingService
         $booking->loadMissing(['transactions', 'customer']);
 
         if (! $booking->isAwaitingInvoice()) {
-            throw new \InvalidArgumentException('Only an unpaid booking that has no invoice yet can have one created.');
+            throw new \InvalidArgumentException('Only an unpaid reservation that has no invoice yet can have one created.');
         }
 
         if (! $booking->customer?->email) {
@@ -420,7 +420,7 @@ class BookingService
                 );
             }
             if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b))) {
-                throw new \InvalidArgumentException('This booking is already being created in Lead Connector. Refresh in a moment.');
+                throw new \InvalidArgumentException('This reservation is already being created in Lead Connector. Refresh in a moment.');
             }
             $booking = $booking->fresh();
         }
@@ -455,12 +455,12 @@ class BookingService
         $booking->loadMissing(['transactions', 'customer', 'productRental']);
 
         if (! $booking->canCreatePendingInLeadConnector()) {
-            throw new \InvalidArgumentException('Only an unpaid, not cancelled booking that is not in Lead Connector yet can be created there as Pending.');
+            throw new \InvalidArgumentException('Only an unpaid, not cancelled reservation that is not in Lead Connector yet can be created there as Pending.');
         }
 
         $rental = $booking->productRental;
         if (! $rental) {
-            throw new \InvalidArgumentException('This booking has no campsite linked to Lead Connector.');
+            throw new \InvalidArgumentException('This reservation has no campsite linked to Lead Connector.');
         }
 
         $this->assertFreeInLeadConnector(
@@ -483,12 +483,12 @@ class BookingService
         );
 
         if (! $created) {
-            throw new \InvalidArgumentException('This booking is already being created in Lead Connector. Refresh in a moment.');
+            throw new \InvalidArgumentException('This reservation is already being created in Lead Connector. Refresh in a moment.');
         }
 
         $booking = $booking->fresh();
         if (! $booking->ghl_booking_id) {
-            throw new \RuntimeException('Lead Connector did not return a booking.');
+            throw new \RuntimeException('Lead Connector did not return a reservation.');
         }
 
         $updates = ['status' => 'pending'];
@@ -548,7 +548,7 @@ class BookingService
         }
 
         if (! $this->createInLeadConnectorOnce($booking, fn (EngageBooking $b) => $this->ghlBookingService->createBooking($b, recordPaymentAs: 'card'))) {
-            throw new \InvalidArgumentException('This booking is being created in Lead Connector right now. Refresh in a moment.');
+            throw new \InvalidArgumentException('This reservation is being created in Lead Connector right now. Refresh in a moment.');
         }
 
         return $this->finishLeadConnectorFix($booking);
@@ -694,12 +694,12 @@ class BookingService
     private function assertFixableInLeadConnector(EngageBooking $booking): void
     {
         if (! $booking->isPaidMissingInLeadConnector()) {
-            throw new \InvalidArgumentException('Only a paid booking that is missing in Lead Connector can be fixed this way.');
+            throw new \InvalidArgumentException('Only a paid reservation that is missing in Lead Connector can be fixed this way.');
         }
 
         if ($covering = $booking->coveringLeadConnectorBooking()) {
             throw new \InvalidArgumentException(
-                'This stay is already booked in Lead Connector as another booking (#'.strtoupper(substr($covering->id, -8)).'). The customer probably paid twice: cancel and refund this one instead.'
+                'This stay is already booked in Lead Connector as another reservation (#'.strtoupper(substr($covering->id, -8)).'). The customer probably paid twice: cancel and refund this one instead.'
             );
         }
     }
@@ -726,7 +726,7 @@ class BookingService
         $booking->loadMissing('transactions');
 
         if (! $booking->isAwaitingInvoice()) {
-            throw new \InvalidArgumentException('Only an unpaid booking that has no invoice yet can be cancelled this way.');
+            throw new \InvalidArgumentException('Only an unpaid reservation that has no invoice yet can be cancelled this way.');
         }
 
         $booking->update(['status' => 'cancelled']);
@@ -743,7 +743,7 @@ class BookingService
         $booking->loadMissing(['transactions', 'customer']);
 
         if (! $booking->canResendInvoice()) {
-            throw new \InvalidArgumentException('Only an unpaid booking with an open invoice can have its invoice sent again.');
+            throw new \InvalidArgumentException('Only an unpaid reservation with an open invoice can have its invoice sent again.');
         }
 
         if (! $booking->customer?->email) {
@@ -772,7 +772,7 @@ class BookingService
         $booking->loadMissing('transactions');
 
         if (! $booking->hasOpenUnpaidInvoice()) {
-            throw new \InvalidArgumentException('Only an unpaid booking with an open invoice can be voided.');
+            throw new \InvalidArgumentException('Only an unpaid reservation with an open invoice can be voided.');
         }
 
         if (! $booking->canVoidInvoice()) {
@@ -962,7 +962,7 @@ class BookingService
     public function updateStatus(EngageBooking $booking, string $status): EngageBooking
     {
         if ($booking->status === 'requested' && $status === 'confirmed') {
-            throw new \InvalidArgumentException('Use the confirm action to confirm a requested booking.');
+            throw new \InvalidArgumentException('Use the confirm action to confirm a requested reservation.');
         }
 
         $booking->update(['status' => $status]);
@@ -986,7 +986,7 @@ class BookingService
     public function updateCheckInOut(EngageBooking $booking, array $data): EngageBooking
     {
         if ($booking->status !== 'confirmed') {
-            throw new \InvalidArgumentException('Check-in/out can only be updated for confirmed bookings.');
+            throw new \InvalidArgumentException('Check-in/out can only be updated for confirmed reservations.');
         }
 
         if (! $booking->isPaid()) {

@@ -198,7 +198,7 @@ class PricingBillingApiTest extends TestCase
         $header = $lines[0];
         $data = array_combine($header, $lines[1]);
         $this->assertSame($org->name, $data['Organization']);
-        $this->assertSame('300', $data['Bookings usage (bookings)']);
+        $this->assertSame('300', $data['Reservations usage (reservations)']);
         $this->assertSame('10.00', $data['Estimated total']);
     }
 

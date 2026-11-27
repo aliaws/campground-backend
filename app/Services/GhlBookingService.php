@@ -203,7 +203,7 @@ class GhlBookingService
         $payload = [
             'altId' => $locationId,
             'altType' => 'location',
-            'name' => "Booking — {$product->name}",
+            'name' => "Reservation — {$product->name}",
             'currency' => 'USD',
             'items' => [[
                 'name' => $product->name,
@@ -450,7 +450,7 @@ class GhlBookingService
     public function resendInvoice(EngageBooking $booking): void
     {
         if (! $booking->ghl_invoice_id) {
-            throw new \InvalidArgumentException('This booking has no invoice to send.');
+            throw new \InvalidArgumentException('This reservation has no invoice to send.');
         }
 
         $locationId = $this->client->getLocationId();

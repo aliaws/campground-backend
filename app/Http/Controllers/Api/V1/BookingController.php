@@ -64,7 +64,7 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => $this->paginatedData($bookings, BookingResource::class),
-            'message' => 'Bookings retrieved.',
+            'message' => 'Reservations retrieved.',
         ]);
     }
 
@@ -111,7 +111,7 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => $quote,
-            'message' => 'Booking quote calculated.',
+            'message' => 'Reservation quote calculated.',
         ]);
     }
 
@@ -151,17 +151,17 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => $ghlSyncFailed
-                ? 'Booking saved, but creating it in Lead Connector failed. Use "Create & Send Invoice" on the booking to retry.'
+                ? 'Reservation saved, but creating it in Lead Connector failed. Use "Create & Send Invoice" on the reservation to retry.'
                 : ($paymentMethod === 'cash'
-                    ? 'Booking created in Lead Connector as unpaid. Record the cash payment from the Bookings list when it is collected.'
-                    : 'Booking created in Lead Connector as unpaid and the invoice was emailed to the customer.'),
+                    ? 'Reservation created in Lead Connector as unpaid. Record the cash payment from the Reservations list when it is collected.'
+                    : 'Reservation created in Lead Connector as unpaid and the invoice was emailed to the customer.'),
         ], 201);
     }
 
     public function show(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         // Self-heals when GHL's InvoicePaid webhook never reaches us (e.g. no
@@ -173,7 +173,7 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => new BookingResource($booking),
-            'message' => 'Booking retrieved.',
+            'message' => 'Reservation retrieved.',
         ]);
     }
 
@@ -187,7 +187,7 @@ class BookingController extends Controller
     public function retryInvoice(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         try {
@@ -230,7 +230,7 @@ class BookingController extends Controller
             $request,
             $booking,
             fn (EngageBooking $b) => $this->bookingService->voidInvoice($b),
-            'Invoice voided and booking cancelled.',
+            'Invoice voided and reservation cancelled.',
             'Failed to void the invoice',
         );
     }
@@ -254,8 +254,8 @@ class BookingController extends Controller
             $request,
             $booking,
             fn (EngageBooking $b) => $this->bookingService->cancelWithoutInvoice($b),
-            'Booking cancelled.',
-            'Failed to cancel the booking',
+            'Reservation cancelled.',
+            'Failed to cancel the reservation',
         );
     }
 
@@ -271,13 +271,13 @@ class BookingController extends Controller
 
                 return $b;
             },
-            'Booking created in Lead Connector as Pending.',
-            'Failed to create the booking in Lead Connector',
+            'Reservation created in Lead Connector as Pending.',
+            'Failed to create the reservation in Lead Connector',
         );
 
         if ($voidFailedFor && $response->getStatusCode() === 200) {
             $data = $response->getData(true);
-            $data['message'] = "Booking created in Lead Connector as Pending, but its old invoice ({$voidFailedFor}) could not be voided. Void it in Lead Connector so it can't be paid, then use Send again to email the new invoice.";
+            $data['message'] = "Reservation created in Lead Connector as Pending, but its old invoice ({$voidFailedFor}) could not be voided. Void it in Lead Connector so it can't be paid, then use Send again to email the new invoice.";
             $response->setData($data);
         }
 
@@ -291,8 +291,8 @@ class BookingController extends Controller
             $request,
             $booking,
             fn (EngageBooking $b) => $this->bookingService->createMissingInLeadConnector($b),
-            'Booking created in Lead Connector.',
-            'Failed to create the booking in Lead Connector',
+            'Reservation created in Lead Connector.',
+            'Failed to create the reservation in Lead Connector',
         );
     }
 
@@ -309,8 +309,8 @@ class BookingController extends Controller
             $request,
             $booking,
             fn (EngageBooking $b) => $this->bookingService->moveAndCreateInLeadConnector($b, $data['campsite_id'], $data['check_in_date'], $data['check_out_date']),
-            'Booking moved and created in Lead Connector.',
-            'Failed to create the booking in Lead Connector',
+            'Reservation moved and created in Lead Connector.',
+            'Failed to create the reservation in Lead Connector',
         );
     }
 
@@ -323,7 +323,7 @@ class BookingController extends Controller
     private function invoiceAction(Request $request, EngageBooking $booking, callable $action, string $success, string $failure): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         try {
@@ -347,7 +347,7 @@ class BookingController extends Controller
     public function payCash(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         $booking = $this->bookingService->payCash($booking);
@@ -357,15 +357,15 @@ class BookingController extends Controller
             'success' => true,
             'data' => new BookingResource($booking),
             'message' => $booking->ghl_booking_id
-                ? 'Payment recorded and booking confirmed.'
-                : 'Payment recorded, but the Lead Connector calendar booking still failed to sync — check availability in Lead Connector and try again.',
+                ? 'Payment recorded and reservation confirmed.'
+                : 'Payment recorded, but the reservation still failed to sync — check availability in Lead Connector and try again.',
         ]);
     }
 
     public function updateStatus(UpdateBookingStatusRequest $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         try {
@@ -386,14 +386,14 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => new BookingResource($booking),
-            'message' => 'Booking status updated.',
+            'message' => 'Reservation status updated.',
         ]);
     }
 
     public function updateCheckInOut(UpdateBookingCheckInOutRequest $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         try {
@@ -421,7 +421,7 @@ class BookingController extends Controller
     public function invoice(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         $invoice = $this->ghlBookingService->fetchInvoiceDetail($booking);
@@ -429,7 +429,7 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => $invoice,
-            'message' => $invoice ? 'Invoice retrieved.' : 'No invoice available for this booking yet.',
+            'message' => $invoice ? 'Invoice retrieved.' : 'No invoice available for this reservation yet.',
         ]);
     }
 
@@ -437,7 +437,7 @@ class BookingController extends Controller
     public function confirm(Request $request, EngageBooking $booking): JsonResponse
     {
         if ($booking->engage_organization_location_id !== $request->user()->resolveOrganizationLocationId()) {
-            return response()->json(['success' => false, 'data' => null, 'message' => 'Booking not found.'], 404);
+            return response()->json(['success' => false, 'data' => null, 'message' => 'Reservation not found.'], 404);
         }
 
         try {
@@ -452,7 +452,7 @@ class BookingController extends Controller
             return response()->json([
                 'success' => false,
                 'data' => null,
-                'message' => 'Failed to confirm booking: '.$e->getMessage(),
+                'message' => 'Failed to confirm reservation: '.$e->getMessage(),
             ], 422);
         }
 
@@ -461,7 +461,7 @@ class BookingController extends Controller
         return response()->json([
             'success' => true,
             'data' => new BookingResource($booking),
-            'message' => 'Booking confirmed and payment link sent.',
+            'message' => 'Reservation confirmed and payment link sent.',
         ]);
     }
 }

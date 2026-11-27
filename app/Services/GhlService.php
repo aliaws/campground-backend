@@ -513,7 +513,7 @@ class GhlService
 
         $payload = [
             'contactId' => $ghlContactId,
-            'name' => "Booking - {$booking->product->name} ({$booking->check_in_date} to {$booking->check_out_date})",
+            'name' => "Reservation - {$booking->product->name} ({$booking->check_in_date} to {$booking->check_out_date})",
             'status' => 'new',
         ];
 
