@@ -300,6 +300,10 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:organization.settings.update');
             Route::delete('/organization/settings/image', [OrganizationSettingsController::class, 'deleteImage'])
                 ->middleware('permission:organization.settings.update');
+            Route::get('/organization/settings/lead-connector', [OrganizationSettingsController::class, 'leadConnectorPreview'])
+                ->middleware('permission:organization.settings.update');
+            Route::post('/organization/settings/lead-connector', [OrganizationSettingsController::class, 'applyLeadConnector'])
+                ->middleware('permission:organization.settings.update');
 
             Route::post('/products', [ProductController::class, 'store']);
             Route::put('/products/{product}', [ProductController::class, 'update']);

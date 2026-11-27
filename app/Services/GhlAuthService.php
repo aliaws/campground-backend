@@ -19,6 +19,7 @@ class GhlAuthService
     private const REQUEST_TIMEOUT = 30;
 
     private const DEFAULT_SCOPES = [
+        'locations.readonly',
         'contacts.readonly',
         'contacts.write',
         'products.readonly',

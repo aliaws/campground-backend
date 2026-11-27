@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Organization\UpdateOrganizationSettingsRequest;
 use App\Http\Resources\OrganizationSettingResource;
+use App\Models\EngageOrganizationLocation;
 use App\Models\OrganizationSetting;
+use App\Services\LeadConnectorLocationSyncService;
 use App\Support\PublicStorageUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -73,6 +75,48 @@ class OrganizationSettingsController extends Controller
         }
 
         return $this->respond($settings, 'Image removed.');
+    }
+
+    /** Lead Connector's location values next to the current ones (nothing saved). */
+    public function leadConnectorPreview(Request $request, LeadConnectorLocationSyncService $sync): JsonResponse
+    {
+        try {
+            $fields = $sync->preview($this->organization($request));
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'data' => null, 'message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['success' => true, 'data' => ['fields' => $fields], 'message' => null]);
+    }
+
+    /** Copies the chosen fields from Lead Connector (re-read on the server). */
+    public function applyLeadConnector(Request $request, LeadConnectorLocationSyncService $sync): JsonResponse
+    {
+        $request->validate([
+            'fields' => ['required', 'array', 'min:1'],
+            'fields.*' => ['string', Rule::in(LeadConnectorLocationSyncService::FIELDS)],
+        ]);
+
+        try {
+            $applied = $sync->apply($this->organization($request), $request->input('fields'));
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'data' => null, 'message' => $e->getMessage()], 422);
+        }
+
+        $settings = $this->settings($request);
+
+        return response()->json([
+            'success' => true,
+            'data' => ['applied' => $applied, 'settings' => new OrganizationSettingResource($settings)],
+            'message' => $applied === []
+                ? 'Nothing was updated: Lead Connector has no value for the chosen fields.'
+                : 'Updated from Lead Connector: '.implode(', ', $applied).'.',
+        ]);
+    }
+
+    private function organization(Request $request): EngageOrganizationLocation
+    {
+        return EngageOrganizationLocation::query()->findOrFail($request->user()->resolveOrganizationLocationId());
     }
 
     private function settings(Request $request): OrganizationSetting
